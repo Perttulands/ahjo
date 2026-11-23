@@ -6,8 +6,8 @@ use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{
-    App, AppContext, Context, IntoElement, ParentElement, TestAppContext, VisualTestContext,
-    Window, div, point, px,
+    App, AppContext, Context, InteractiveElement, IntoElement, ParentElement, TestAppContext,
+    VisualTestContext, Window, div, point, px,
 };
 use serde_json::{Value, json};
 use std::{
@@ -16,13 +16,20 @@ use std::{
 };
 
 static OPENED: Mutex<Vec<Ask>> = Mutex::new(Vec::new());
-/// Answers as Files does: a beside ask opens a view beside the page that
-/// asked, which that page must draw.
+/// Answers as Files does: a beside ask opens the file in the window's
+/// panel, beside the page that asked.
 struct ToyFiles(Host);
 struct Opened;
 impl gpui::Render for Opened {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().child("Opened file")
+        div()
+            .debug_selector(|| "opened-file".into())
+            .child("Opened file")
+    }
+}
+impl ahjo_app_kit::panel::PanelView for Opened {
+    fn head(&mut self, _: &mut Window, _: &mut Context<Self>) -> gpui::AnyElement {
+        div().child("Opened file").into_any_element()
     }
 }
 impl gpui::Render for ToyFiles {
@@ -34,10 +41,11 @@ impl Page for ToyFiles {
     const ID: &'static str = "toy-files";
     const TITLE: &'static str = "Files";
     const ANSWERS: &'static [Answers] = &[Answers::OpenPath];
-    fn answer(&mut self, ask: Ask, from: &'static str, _: &mut Window, cx: &mut Context<Self>) {
+    fn answer(&mut self, ask: Ask, _: &'static str, _: &mut Window, cx: &mut Context<Self>) {
         if ask.beside() {
             let view = cx.new(|_| Opened);
-            self.0.show_beside(from, view.into(), cx);
+            self.0
+                .show_panel(ahjo_app_kit::panel::Panel::new("file", view), cx);
         }
         OPENED.lock().unwrap().push(ask);
     }
@@ -251,7 +259,7 @@ fn evidence_links_and_attempt_images(cx: &mut TestAppContext) {
     click(cx, &file_selector);
     until(cx, "file ask", |_| !OPENED.lock().unwrap().is_empty());
     until(cx, "the file shown beside the run", |cx| {
-        cx.debug_bounds("missions-beside").is_some()
+        cx.debug_bounds("opened-file").is_some() && cx.debug_bounds("panel-right").is_some()
     });
     assert_eq!(
         OPENED.lock().unwrap().last().unwrap(),

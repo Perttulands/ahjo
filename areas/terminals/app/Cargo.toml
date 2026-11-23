@@ -42,7 +42,7 @@ ahjo-terminals = { path = "../node" }
 ahjo-files = { path = "../../files/node" }
 ahjo-files-app = { path = "../../files/app" }
 ahjo-issue-app = { path = "../../issue/app" }
-ahjo-testkit = { path = "../../../kit/testkit" }
+ahjo-testkit = { path = "../../../kit/testkit", features = ["app"] }
 ahjo-node-kit = { path = "../../../kit/node-kit" }
 ahjo-term = { path = "../../../engine/term" }
 tokio = { version = "1", features = ["full"] }

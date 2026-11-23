@@ -14,7 +14,7 @@ pub enum Ask {
         target: Option<SessionTarget>,
     },
     /// Open a path on a node in the file viewer: as its own page, or
-    /// `beside` the page that asked.
+    /// `beside` the page that asked, in the panel.
     OpenPath {
         node: NodeId,
         path: String,
@@ -72,12 +72,15 @@ impl Ask {
         }
     }
 
-    /// Whether it is answered beside the page that asked (see
-    /// [`crate::Host::show_beside`]), leaving that page shown.
+    /// Whether it is answered in the panel beside the page that asked
+    /// ([`crate::Host::show_panel`]), leaving that page shown. Send always
+    /// is: one writes to a session while reading what one sends.
     pub fn beside(&self) -> bool {
         matches!(
             self,
-            Ask::OpenPath { beside: true, .. } | Ask::Reveal { beside: true, .. }
+            Ask::Send { .. }
+                | Ask::OpenPath { beside: true, .. }
+                | Ask::Reveal { beside: true, .. }
         )
     }
 
@@ -136,5 +139,10 @@ mod tests {
         };
         assert!(reveal(true).beside());
         assert!(!reveal(false).beside());
+        let send = Ask::Send {
+            reference: "x".into(),
+            target: None,
+        };
+        assert!(send.beside(), "Send opens beside whatever asks it");
     }
 }

@@ -1,7 +1,8 @@
 //! Pages plug into the shell through `Page` and `Host` alone: two toy
 //! pages, made here, each reach the node, the status line, menus, layers,
-//! chords and each other through their Host (asks, a view beside the
-//! asker, a read model, a lent view keeping its page's channel on), against a fake node
+//! chords and each other through their Host (asks, an answer in the panel
+//! beside the asker, a read model, a page's content in the panel keeping its
+//! channel on), against a fake node
 //! this test starts. A third,
 //! whose area every node turned off, has no tab; a fourth never has one.
 
@@ -53,6 +54,8 @@ struct Alpha {
     settings: Option<serde_json::Value>,
     /// How many times it heard a setting change.
     changed: usize,
+    /// The page's keyboard: a click on it takes the keys.
+    focus: gpui::FocusHandle,
 }
 
 impl Alpha {
@@ -78,6 +81,7 @@ impl Alpha {
                 dismissed: false,
                 settings: None,
                 changed: 0,
+                focus: cx.focus_handle(),
             }
         })
     }
@@ -89,6 +93,9 @@ impl Page for Alpha {
     const KINDS: ahjo_core::frame::Kinds = &[TOY..=TOY];
     const CHANNELS: &'static [u8] = &[TOY];
     const ANSWERS: &'static [Answers] = &[Answers::Reveal("toy")];
+    fn focus(&self, _: &gpui::App) -> Option<gpui::FocusHandle> {
+        Some(self.focus.clone())
+    }
     const SETTINGS: &'static [Setting] = &[
         Setting::toggle("loud", "Loud", false),
         Setting::number("size", "Size", 1., (1., 3., 1.)),
@@ -150,11 +157,51 @@ impl Page for Alpha {
     }
 }
 
-struct Note;
+/// Content of the window's panel: a note, which may hold an unsaved
+/// edit that keeps the panel open.
+struct Note {
+    name: &'static str,
+    focus: gpui::FocusHandle,
+    unsaved: bool,
+    asked: usize,
+}
+
+impl Note {
+    fn new(name: &'static str, cx: &mut Context<Self>) -> Self {
+        Self {
+            name,
+            focus: cx.focus_handle(),
+            unsaved: false,
+            asked: 0,
+        }
+    }
+}
 
 impl Render for Note {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().child("A note")
+        let name = self.name;
+        div()
+            .debug_selector(move || name.into())
+            .track_focus(&self.focus)
+            .size_full()
+            .child("A note")
+    }
+}
+
+impl ahjo_app_kit::panel::PanelView for Note {
+    fn head(&mut self, _: &mut Window, _: &mut Context<Self>) -> gpui::AnyElement {
+        let name = self.name;
+        div()
+            .debug_selector(move || format!("{name}-head"))
+            .child(name)
+            .into_any_element()
+    }
+    fn may_close(&mut self, _: &mut Window, _: &mut Context<Self>) -> bool {
+        self.asked += 1;
+        !self.unsaved
+    }
+    fn focus(&self, _: &gpui::App) -> Option<gpui::FocusHandle> {
+        Some(self.focus.clone())
     }
 }
 
@@ -162,9 +209,10 @@ impl Render for Alpha {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (menu_host, layer_host) = (self.host.clone(), self.host.clone());
         let open_host = self.host.clone();
-        let beside = self.host.beside(cx);
         let (me, me2) = (self.me.clone(), self.me.clone());
         div()
+            .debug_selector(|| "toy-a-page".into())
+            .track_focus(&self.focus)
             .size_full()
             .flex()
             .gap(px(10.))
@@ -196,12 +244,13 @@ impl Render for Alpha {
                     .on_click(cx.listener(move |_, _, _, cx| {
                         let me = me2.clone();
                         let layer =
-                            Layer::new("note", cx.new(|_| Note)).on_dismiss(move |_, cx| {
-                                let _ = me.update(cx, |p, cx| {
-                                    p.dismissed = true;
-                                    cx.notify();
+                            Layer::new("note", cx.new(|cx| Note::new("toy-layer-note", cx)))
+                                .on_dismiss(move |_, cx| {
+                                    let _ = me.update(cx, |p, cx| {
+                                        p.dismissed = true;
+                                        cx.notify();
+                                    });
                                 });
-                            });
                         layer_host.layer(layer, cx);
                     })),
             )
@@ -221,13 +270,6 @@ impl Render for Alpha {
                         open_host.ask(ask, cx).expect("Beta answers it");
                     }),
             )
-            .children(beside.map(|view| {
-                div()
-                    .debug_selector(|| "toy-beside".into())
-                    .w(px(120.))
-                    .h(px(30.))
-                    .child(view)
-            }))
     }
 }
 
@@ -270,8 +312,8 @@ impl Page for Beta {
         cx.notify();
     }
 
-    /// Opens the path, or the item, beside the page that asked when it
-    /// asks so, and on itself otherwise.
+    /// Opens the path, or the item, in the panel beside the page that
+    /// asked when it asks so, and on itself otherwise.
     fn answer(&mut self, ask: Ask, from: &'static str, _: &mut Window, cx: &mut Context<Self>) {
         let beside = ask.beside();
         let opened = match ask {
@@ -281,7 +323,9 @@ impl Page for Beta {
         };
         self.opened = Some((opened, from));
         if beside {
-            self.host.show_beside(from, cx.new(|_| Note).into(), cx);
+            let note = cx.new(|cx| Note::new("toy-beside", cx));
+            self.host
+                .show_panel(ahjo_app_kit::panel::Panel::new("note", note), cx);
         }
     }
 }
@@ -665,7 +709,7 @@ fn toy_channel(heard: &Mutex<Vec<Vec<u8>>>, on: bool) -> usize {
 }
 
 #[gpui::test]
-fn a_view_lent_beside_a_page_keeps_its_pages_channel_on(cx: &mut TestAppContext) {
+fn a_pages_content_in_the_panel_keeps_its_channel_on(cx: &mut TestAppContext) {
     let heard = Arc::new(Mutex::new(vec![]));
     let node = fake_node(heard.clone());
     let settings = settings_path("lent");
@@ -682,29 +726,32 @@ fn a_view_lent_beside_a_page_keeps_its_pages_channel_on(cx: &mut TestAppContext)
         toy_channel(&heard, false) == 1
     });
 
-    // Alpha lends a view beside Beta while Beta shows: Alpha's channel
+    // Alpha shows a note in the panel while Beta shows: Alpha's channel
     // comes on and brings its frames.
     let a = alpha();
     let before = a.read_with(cx, |a, _| a.heard.len());
     let alpha_host = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy-a", &[]));
-    cx.update(|_, cx| alpha_host.show_beside("toy-b", cx.new(|_| Note).into(), cx));
+    cx.update(|_, cx| {
+        let note = cx.new(|cx| Note::new("alpha-note", cx));
+        alpha_host.show_panel(ahjo_app_kit::panel::Panel::new("note", note), cx);
+    });
     until(cx, "the lent view's channel and frame", |cx| {
         toy_channel(&heard, true) == 2 && a.read_with(cx, |a, _| a.heard.len()) > before
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy-b"));
-    assert!(cx.update(|_, cx| alpha_host.beside_of("toy-b", cx).is_some()));
+    assert!(cx.update(|_, cx| alpha_host.panel_shows("note", cx)));
 
     // Across page switches it stays, and its channel is never turned off.
     click(cx, "tab-toy-a");
     click(cx, "tab-toy-b");
-    assert!(cx.update(|_, cx| alpha_host.beside_of("toy-b", cx).is_some()));
+    assert!(cx.update(|_, cx| alpha_host.panel_shows("note", cx)));
     assert_eq!(toy_channel(&heard, false), 1);
     assert_eq!(toy_channel(&heard, true), 2);
 
-    // Closed while Beta shows: gone, and the channel goes off.
-    cx.update(|_, cx| alpha_host.close_beside("toy-b", cx));
+    // Taken out while Beta shows: gone, and the channel goes off.
+    cx.update(|_, cx| alpha_host.close_panel("note", cx));
     until(cx, "the channel off", |_| toy_channel(&heard, false) == 2);
-    assert!(cx.update(|_, cx| alpha_host.beside_of("toy-b", cx).is_none()));
+    assert!(!cx.update(|_, cx| alpha_host.panel_shows("note", cx)));
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
@@ -746,8 +793,7 @@ fn a_section_lent_for_the_other_pages_gives_way_on_its_own(cx: &mut TestAppConte
 }
 
 #[gpui::test]
-fn a_panel_lent_for_its_own_page_stands_only_there_until_taken_back(cx: &mut TestAppContext) {
-    use ahjo_app_kit::hub::{Edge, SideOn};
+fn content_for_its_own_page_stands_only_there_until_taken_out(cx: &mut TestAppContext) {
     let node = fake_node(Arc::new(Mutex::new(vec![])));
     let settings = settings_path("own-panel");
     cx.executor().allow_parking();
@@ -758,13 +804,11 @@ fn a_panel_lent_for_its_own_page_stands_only_there_until_taken_back(cx: &mut Tes
     });
     let alpha = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy-a", &[]));
     cx.update(|_, cx| {
-        alpha.lend_panel(
-            cx.new(|_| Section("panel-a")).into(),
-            SideOn::OwnPage,
-            Edge::Right,
+        let note = cx.new(|cx| Note::new("panel-a", cx));
+        alpha.show_panel(
+            ahjo_app_kit::panel::Panel::new("card", note).on_its_page(),
             cx,
         );
-        alpha.set_panel_open(true, cx);
     });
     cx.run_until_parked();
     let drawn = |cx: &mut VisualTestContext, name| cx.debug_bounds(name).is_some();
@@ -773,9 +817,9 @@ fn a_panel_lent_for_its_own_page_stands_only_there_until_taken_back(cx: &mut Tes
     assert!(!drawn(cx, "panel-a"), "not on Beta");
     click(cx, "tab-toy-a");
     assert!(drawn(cx, "panel-a"), "back on Alpha");
-    cx.update(|_, cx| alpha.take_panel(cx));
+    cx.update(|_, cx| alpha.close_panel("card", cx));
     cx.run_until_parked();
-    assert!(!drawn(cx, "panel-a"), "taken back");
+    assert!(!drawn(cx, "panel-a"), "taken out");
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
@@ -926,7 +970,7 @@ fn a_reveal_marked_beside_is_answered_beside_the_asker(cx: &mut TestAppContext) 
     };
     let b = BETA.with(|b| b.borrow().clone()).expect("Beta was made");
 
-    // Beside: Alpha stays shown and draws what Beta handed it.
+    // Beside: Alpha stays shown, Beta's answer in the panel beside it.
     cx.update(|_, cx| alpha_host.ask(item(true), cx))
         .expect("Beta answers items");
     cx.run_until_parked();
@@ -935,7 +979,8 @@ fn a_reveal_marked_beside_is_answered_beside_the_asker(cx: &mut TestAppContext) 
         b.read_with(cx, |b, _| b.opened.clone()),
         Some(("ahjo-7".into(), "toy-a"))
     );
-    assert!(cx.update(|_, cx| alpha_host.beside(cx)).is_some());
+    let beta_host = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy-b", &[]));
+    assert!(cx.update(|_, cx| beta_host.panel_shows("note", cx)));
     assert!(
         cx.debug_bounds("toy-beside").is_some(),
         "drawn beside Alpha"
@@ -946,5 +991,128 @@ fn a_reveal_marked_beside_is_answered_beside_the_asker(cx: &mut TestAppContext) 
         .expect("Beta answers items");
     cx.run_until_parked();
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy-b"));
+    let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
+}
+
+#[gpui::test]
+fn the_panel_shows_one_content_beside_the_page_and_never_keeps_the_keys(cx: &mut TestAppContext) {
+    use ahjo_app_kit::panel::Panel;
+    let node = fake_node(Arc::new(Mutex::new(vec![])));
+    let settings = settings_path("one-panel");
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let path = settings.clone();
+    let (shell, cx) = cx.add_window_view(move |window, cx| {
+        ahjo_app_shell::start(PAGES, Some(node), Some(path), window, cx)
+    });
+    cx.run_until_parked();
+    let alpha_host = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy-a", &[]));
+    let width = |cx: &mut VisualTestContext, name: &'static str| {
+        cx.debug_bounds(name).map(|b| f32::from(b.size.width))
+    };
+    let whole = width(cx, "toy-a-page").expect("Alpha drawn");
+    let panel_width = cx.update(|_, cx| alpha_host.panel_width(cx));
+    let settled = |cx: &mut VisualTestContext, open: bool| {
+        until(cx, "the panel to settle", |cx| {
+            let page = width(cx, "toy-a-page").unwrap_or_default();
+            match open {
+                true => {
+                    cx.debug_bounds("panel-right").is_some()
+                        && (whole - page - panel_width).abs() < 1.
+                }
+                false => cx.debug_bounds("panel-right").is_none() && (whole - page).abs() < 1.,
+            }
+        });
+    };
+    let focused = |cx: &mut VisualTestContext, note: &Entity<Note>| {
+        cx.update(|window, cx| note.read(cx).focus.is_focused(window))
+    };
+
+    // A content opens the panel: the page squeezes to make room for it,
+    // under the one header.
+    let first = cx.new(|cx| Note::new("note-1", cx));
+    cx.update(|window, cx| {
+        alpha_host.show_panel(Panel::new("first", first.clone()), cx);
+        let focus = first.read(cx).focus.clone();
+        window.focus(&focus, cx);
+    });
+    settled(cx, true);
+    assert!(
+        cx.debug_bounds("note-1-head").is_some(),
+        "its head in the header"
+    );
+    assert!(cx.debug_bounds("panel-close").is_some());
+    assert!(
+        cx.debug_bounds("panel-back").is_none(),
+        "nothing to go back to"
+    );
+
+    // A second opens over it: one content shows, Back goes back to the first
+    // and the keyboard with it.
+    let second = cx.new(|cx| Note::new("note-2", cx));
+    cx.update(|window, cx| {
+        alpha_host.show_panel(Panel::new("second", second.clone()), cx);
+        let focus = second.read(cx).focus.clone();
+        window.focus(&focus, cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("note-2").is_some() && cx.debug_bounds("note-1").is_none());
+    click(cx, "panel-back");
+    assert!(cx.debug_bounds("note-1").is_some() && cx.debug_bounds("note-2").is_none());
+    assert!(focused(cx, &first), "the keyboard goes back with it");
+    assert!(cx.debug_bounds("panel-back").is_none());
+
+    // Escape with the keyboard in it puts it away: the page gets its room
+    // and the keyboard back.
+    cx.simulate_keystrokes("escape");
+    settled(cx, false);
+    assert!(cx.update(|window, cx| alpha().read(cx).focus.is_focused(window)));
+
+    // Ctrl+B brings back what it showed, the keyboard in it, and puts it
+    // away again.
+    cx.simulate_keystrokes("ctrl-b");
+    settled(cx, true);
+    assert!(cx.debug_bounds("note-1").is_some());
+    assert!(focused(cx, &first));
+    cx.simulate_keystrokes("ctrl-b");
+    settled(cx, false);
+    cx.simulate_keystrokes("ctrl-b");
+    settled(cx, true);
+
+    // A click on the page takes the keyboard and leaves the panel open;
+    // Escape is then the page's.
+    let page = cx.debug_bounds("toy-a-page").expect("Alpha drawn");
+    cx.simulate_click(
+        page.bottom_left() + point(px(20.), px(-20.)),
+        Modifiers::none(),
+    );
+    cx.run_until_parked();
+    assert!(!focused(cx, &first));
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("note-1").is_some(), "still open");
+
+    // What holds unsaved work keeps the panel when asked to close.
+    first.update(cx, |n, _| n.unsaved = true);
+    let asked = first.read_with(cx, |n, _| n.asked);
+    click(cx, "panel-close");
+    assert!(
+        cx.debug_bounds("note-1").is_some(),
+        "kept for its unsaved work"
+    );
+    assert_eq!(first.read_with(cx, |n, _| n.asked), asked + 1);
+    first.update(cx, |n, _| n.unsaved = false);
+    click(cx, "panel-close");
+    settled(cx, false);
+
+    // Its page taking it out: the panel closes, nothing left in it.
+    cx.update(|_, cx| alpha_host.close_panel("first", cx));
+    cx.update(|_, cx| alpha_host.close_panel("second", cx));
+    cx.simulate_keystrokes("ctrl-b");
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("panel-right").is_none(),
+        "nothing to bring back"
+    );
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }

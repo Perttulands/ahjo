@@ -37,23 +37,9 @@ pub struct Kept {
     pub text: Option<u8>,
     /// What the side of the page shows, or that it is hidden.
     pub side: Side,
-    /// The edge of the window the Files panel stands at: "left", or the
-    /// right as anything else reads.
-    #[serde(skip_serializing_if = "String::is_empty")]
-    pub panel: String,
     /// The files open in tabs, in their order, to open again.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub tabs: Vec<String>,
-}
-
-impl Kept {
-    /// The edge the Files panel stands at.
-    pub fn panel_edge(&self) -> ahjo_app_kit::hub::Edge {
-        match self.panel.as_str() {
-            "left" => ahjo_app_kit::hub::Edge::Left,
-            _ => ahjo_app_kit::hub::Edge::Right,
-        }
-    }
 }
 
 /// What the side of the page shows beside the open files: the folders, or

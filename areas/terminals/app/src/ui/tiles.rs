@@ -4,7 +4,7 @@
 
 use super::page::{Act, Geo, MenuItem, PEEK_SLOT, Terminals};
 use super::place;
-use super::surface::{NameAt, Surface};
+use super::surface::NameAt;
 use crate::remote::SharedScreen;
 use crate::remotes::PaneAt;
 use crate::store::layout::{self, Axis, Side as Edge, Split};
@@ -32,7 +32,6 @@ use gpui::{
 use std::ops::Range;
 use std::sync::Arc;
 
-mod beside;
 mod drag;
 pub(super) mod pictures;
 
@@ -222,7 +221,7 @@ pub(super) struct Source {
 }
 
 impl Terminals {
-    pub fn render_terminals(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub fn render_terminals(&mut self, cx: &mut Context<Self>) -> AnyElement {
         self.tidy_histories();
         let mut row = div()
             .size_full()
@@ -230,11 +229,8 @@ impl Terminals {
             .flex_row()
             .capture_any_mouse_down(cx.listener(|s, _, _, _| s.acted = true))
             .capture_key_down(cx.listener(|s, _, _, _| s.acted = true));
-        // What another page opened beside the terminals (an issue a link
-        // named, a diagram) lies over the windows from the rail's edge: the
-        // windows keep their layout and size under it, so no session that
-        // other clients share is reflowed for a glance at a picture.
-        let beside = self.render_beside(window, cx);
+        // What opens beside the windows (a file, an item, Send) stands in
+        // the window's panel, and the windows make room for it.
         row = row.child(
             div()
                 .flex_1()
@@ -243,23 +239,9 @@ impl Terminals {
                 .relative()
                 .flex()
                 .flex_col()
-                .child(self.render_grid(cx))
-                .children(beside),
+                .child(self.render_grid(cx)),
         );
-        // Send stands at the right, and the windows make room for it.
-        let send = self.send_room(window, cx);
-        if send > 0. {
-            row = row.child(div().flex_none().w(px(send)).h_full());
-        }
-        row.relative()
-            .children(self.render_beside_drag(cx))
-            .into_any_element()
-    }
-
-    /// The width the windows' row has, beside the side panel, the Files
-    /// panel and Send.
-    pub(super) fn workspace_room(&self, window: &Window, cx: &gpui::App) -> f32 {
-        window.viewport_size().width / px(1.) - self.host.side_room(cx) - self.send_room(window, cx)
+        row.relative().into_any_element()
     }
 
     fn render_grid(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1459,13 +1441,11 @@ impl Terminals {
         let entity = cx.entity();
         let geo = self.geo.clone();
         // Peek takes what is typed while it is on top; a window while
-        // nothing but Send, which lies beside the windows, is open over
-        // the page.
+        // nothing is open over the page.
         let (focus, take_input) = if i == PEEK_SLOT {
             (self.peek_focus.clone(), self.peek_on_top())
         } else {
-            let beside_only = (self.surfaces.iter()).all(|s| matches!(s, Surface::Send));
-            (self.term_focus.clone(), focused && beside_only)
+            (self.term_focus.clone(), focused && self.surfaces.is_empty())
         };
         let font = self.font_of(i);
         // Peek zoomed draws at its own size, never resizing the session:

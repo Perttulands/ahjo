@@ -24,6 +24,9 @@ use gpui::{
 /// least needed words. The Files panel is often about 420 wide,
 /// where the name needs the room the zoom steps would take.
 const HEAD_NARROW: [f32; 3] = [640., 520., 440.];
+/// In the panel the head stands between the panel's Back and Close: their
+/// room counts toward the widths above, as when the head held them.
+const PANEL_HEAD_AROUND: f32 = 120.;
 /// JetBrains Mono's advance, as a share of its size: how many letters of a
 /// name fit a width.
 const ADVANCE: f32 = 0.6;
@@ -922,9 +925,9 @@ impl FilesPage {
         }
     }
 
-    /// The list column: its head holds the find (or a new file's or
-    /// folder's name) and New; under it the lines, where a rename is made.
-    fn list_column(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+    /// The list's head: the find (or a new file's or folder's name) and
+    /// New. In the panel it stands in the panel's header.
+    fn list_head(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let in_head = self.naming.is_some() && self.rename_place().is_none();
         let field = match in_head {
             true => self.name_field(cx),
@@ -936,8 +939,12 @@ impl FilesPage {
                 )
                 .child(self.query.clone()),
         };
-        let mut head = pane::list_head(t, Some(field.into_any_element()))
-            .child(measure(self.list_room.clone()));
+        let mut head = if self.is_panel {
+            panel_row().child(div().flex_1().min_w_0().child(field))
+        } else {
+            pane::list_head(t, Some(field.into_any_element()))
+        }
+        .child(measure(self.list_room.clone()));
         if let Some(naming) = self.naming.as_ref().filter(|_| in_head) {
             head = head.child(
                 pane::act(t, "files-name-apply", naming.verb())
@@ -958,7 +965,17 @@ impl FilesPage {
                     })),
             );
         }
-        head = head.children(self.panel_acts(t, cx));
+        head
+    }
+
+    /// The list column: its head ([`Self::list_head`]); under it the
+    /// lines, where a rename is made.
+    fn list_column(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+        let head = if self.is_panel {
+            div()
+        } else {
+            self.list_head(t, cx)
+        };
         let n = lines(self).len();
         let body = uniform_list(
             "files-list",
@@ -1008,20 +1025,16 @@ impl FilesPage {
     }
 
     /// The viewer's head: the file's folder dim and its name, Send, then
-    /// what can be done with it now.
+    /// what can be done with it now. In the panel it stands in the panel's
+    /// header.
     fn viewer_head(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
-        let mut head = pane::head(t)
-            .h(px(size::CONTROL + size::HEAD_GAP))
-            .relative()
-            .child(measure(self.head_room.clone()));
-        if self.is_panel {
-            head = head.child(
-                pane::act(t, "files-back", "Back")
-                    .debug_selector(|| "files-back".into())
-                    .tooltip(kit::tip("To the list, the file picked in it"))
-                    .on_click(cx.listener(|p, _, _, cx| p.back_to_list(cx))),
-            );
+        let mut head = if self.is_panel {
+            panel_row()
+        } else {
+            pane::head(t).h(px(size::CONTROL + size::HEAD_GAP))
         }
+        .relative()
+        .child(measure(self.head_room.clone()));
         if !self.is_panel {
             head = head.children(self.head_lead(t, cx));
         }
@@ -1032,6 +1045,11 @@ impl FilesPage {
         // the percentage, then the zoom steps; the name gives way in the
         // middle, keeping its extension.
         let narrow = self.head_room.get().map_or(0, |w| {
+            let w = if self.is_panel {
+                w + PANEL_HEAD_AROUND
+            } else {
+                w
+            };
             HEAD_NARROW.iter().filter(|&&at| w < at).count() as u8
         });
         let room = self.name_room.get().map(letters);
@@ -1157,18 +1175,7 @@ impl FilesPage {
                     cx.listener(|p, e: &gpui::ClickEvent, _, cx| p.file_menu(e.position(), cx)),
                 ),
         );
-        head.children(self.panel_acts(t, cx))
-    }
-
-    /// In the panel: Close, which puts it away.
-    fn panel_acts(&self, t: &Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        self.is_panel.then(|| {
-            pane::act(t, "files-close-panel", "Close")
-                .debug_selector(|| "files-close-panel".into())
-                .tooltip(kit::tip("Esc, Alt+E"))
-                .on_click(cx.listener(|p, _, _, cx| p.close_panel(cx)))
-                .into_any_element()
-        })
+        head
     }
 
     /// A decision the page waits on, on a line under the viewer's head.
@@ -1415,7 +1422,11 @@ impl FilesPage {
     }
 
     fn viewer(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
-        let mut head = self.viewer_head(t, cx);
+        let mut head = if self.is_panel {
+            div()
+        } else {
+            self.viewer_head(t, cx)
+        };
         if self.reading() {
             // Over the centred text the head keeps its words in line with it.
             head = head.px(px(size::PAD));
@@ -1425,7 +1436,7 @@ impl FilesPage {
             .flex()
             .flex_col()
             .children(self.closing_line(t, cx))
-            .children(self.decision(t, cx))
+            .children(self.decision(t, cx).filter(|_| !self.is_panel))
             .children(self.infile_bar(t, cx))
             .child(
                 div()
@@ -1455,6 +1466,45 @@ impl FilesPage {
                     .min_h_0()
                     .debug_selector(|| "files-viewer".into()),
             )
+    }
+}
+
+/// A head's row in the panel's header.
+fn panel_row() -> Div {
+    div()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .flex()
+        .items_center()
+        .gap(px(size::HEAD_GAP))
+}
+
+impl ahjo_app_kit::panel::PanelView for FilesPage {
+    fn head(&mut self, _: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let t = theme(cx).clone();
+        if self.opened.is_some() {
+            self.viewer_head(&t, cx).into_any_element()
+        } else {
+            self.list_head(&t, cx).into_any_element()
+        }
+    }
+    fn can_go_back(&self, _: &gpui::App) -> bool {
+        self.opened.is_some()
+    }
+    fn go_back(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.back_to_list(cx);
+    }
+    fn may_close(&mut self, _: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.drafts.is_empty() {
+            return true;
+        }
+        self.confirm_close_panel = true;
+        cx.notify();
+        false
+    }
+    fn focus(&self, _: &gpui::App) -> Option<gpui::FocusHandle> {
+        Some(self.focus.clone())
     }
 }
 
@@ -1510,12 +1560,22 @@ impl Render for FilesPage {
         }
         if self.is_panel {
             // In the panel it is one column: the list, or the file
-            // opened from it.
-            return root.flex().child(if self.opened.is_some() {
-                self.viewer(&t, cx)
-            } else {
-                self.list_column(&t, cx)
-            });
+            // opened from it, under what the page waits on.
+            return root
+                .flex()
+                .flex_col()
+                .children(self.decision(&t, cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .child(if self.opened.is_some() {
+                            self.viewer(&t, cx)
+                        } else {
+                            self.list_column(&t, cx)
+                        }),
+                );
         }
         let page = match self.side {
             Side::Hidden => self.reader_page(&t, cx),

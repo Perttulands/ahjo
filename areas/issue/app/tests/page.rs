@@ -36,26 +36,24 @@ fn terminals(host: Host, window: &mut Window, cx: &mut gpui::App) -> Mounted {
         Terminals::new(host, window, cx)
     })
 }
-struct Toy {
-    host: Host,
-}
+/// A page beside which the item opens in the panel.
+struct Toy;
 impl Page for Toy {
     const ID: &'static str = "toy";
     const TITLE: &'static str = "Toy";
 }
 impl Render for Toy {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("toy-page")
             .debug_selector(|| "toy-page".into())
             .size_full()
             .flex()
             .child("Toy page")
-            .children(self.host.beside(cx))
     }
 }
 fn toy(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
-    mount(host, window, cx, |host, _, _| Toy { host })
+    mount(host, window, cx, |_, _, _| Toy)
 }
 struct Fixture {
     store: String,
@@ -188,7 +186,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
     until(cx, "parent card", |cx| {
         cx.debug_bounds("issue-card-title-Parent title").is_some()
     });
-    click(cx, "w-back");
+    click(cx, "panel-back");
     until(cx, "back to selected item", |cx| {
         cx.debug_bounds("issue-card-title-Read the fixture")
             .is_some()
@@ -329,7 +327,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
     until(cx, "fixture in the panel", |cx| {
         cx.debug_bounds("issue-panel-row-fixture-1").is_some()
     });
-    assert!(cx.debug_bounds("terminals-beside").is_some());
+    assert!(cx.debug_bounds("panel-right").is_some());
     click(cx, "issue-panel-row-fixture-1");
     until(cx, "item in the panel", |cx| {
         cx.debug_bounds("issue-card-title-Read the fixture")

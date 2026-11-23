@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use ahjo_app_kit::ask::SessionTarget;
 use ahjo_app_kit::link::client::LinkState;
+use ahjo_app_kit::panel::{Panel, PanelView};
 use ahjo_app_kit::{Answers, Ask, Host, Mounted, Page, mount};
 use ahjo_app_shell::Shell;
 use ahjo_core::NodeId;
@@ -59,10 +60,10 @@ impl Page for Toy {
         Answers::OpenPath,
     ];
 
-    fn answer(&mut self, ask: Ask, from: &'static str, _: &mut Window, cx: &mut Context<Self>) {
+    fn answer(&mut self, ask: Ask, _: &'static str, _: &mut Window, cx: &mut Context<Self>) {
         if ask.beside() {
-            self.host
-                .show_beside(from, cx.new(|cx| Note(cx.focus_handle())).into(), cx);
+            let note = cx.new(|cx| Note(cx.focus_handle()));
+            self.host.show_panel(Panel::new("note", note), cx);
         }
         ITEM_ASK.with(|slot| *slot.borrow_mut() = Some(ask));
     }
@@ -88,25 +89,6 @@ impl Render for Toy {
                                 target: None,
                             };
                             host.ask(ask, cx).expect("the Sessions page answers it");
-                        }
-                    }),
-            )
-            .child(
-                div()
-                    .id("toy-send-over")
-                    .debug_selector(|| "toy-send-over".into())
-                    .w(px(80.))
-                    .h(px(30.))
-                    .child("Send here")
-                    .on_click({
-                        let host = host.clone();
-                        move |_, _, cx| {
-                            let ask = Ask::Send {
-                                reference: REFERENCE.into(),
-                                target: None,
-                            };
-                            host.ask_over(ask, cx)
-                                .expect("the Sessions page answers it");
                         }
                     }),
             )
@@ -343,6 +325,12 @@ fn until(
     let _waiting = waiting(what);
     let deadline = Instant::now() + ahjo_testkit::timeout(Duration::from_secs(15));
     loop {
+        // A frame, as a platform delivers one: what slides moves on.
+        cx.update(|window, cx| {
+            if window.simulate_next_frame(cx) > 0 {
+                window.refresh();
+            }
+        });
         cx.run_until_parked();
         if ok(cx) {
             return;
@@ -353,9 +341,7 @@ fn until(
 }
 
 fn click(cx: &mut VisualTestContext, selector: String) {
-    let selector: &'static str = Box::leak(selector.into_boxed_str());
-    let at = cx.debug_bounds(selector).expect(selector).center();
-    cx.simulate_click(at, Modifiers::none());
+    ahjo_testkit::app::click(cx, &selector);
 }
 
 /// What the page's first window shows.
@@ -462,12 +448,13 @@ fn a_page_hands_a_reference_into_a_session_through_send(cx: &mut TestAppContext)
         shell.read_with(cx, |s, _| s.shown_page()) == Some("toy")
     });
     click(cx, "toy-send".into());
-    // The ask brings the Sessions page forward with Send aimed at the
-    // session of the window that last had focus, named in the drawer.
-    until(cx, "the Send drawer", |cx| {
-        cx.debug_bounds("send-go").is_some()
+    // Send opens in the panel beside the page that asked, which stays
+    // shown (sending an item keeps the operator on Work), aimed at the
+    // session of the window that last had focus, named at its top.
+    until(cx, "Send in the panel", |cx| {
+        cx.debug_bounds("send-go").is_some() && cx.debug_bounds("panel-right").is_some()
     });
-    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
     let page = PAGE.with(|p| p.borrow().clone()).expect("the page");
     let aimed = page.read_with(cx, |p, _| p.send_targets.first().cloned());
     assert_eq!(aimed.map(|k| k.name), Some("alpha".to_string()));
@@ -476,38 +463,31 @@ fn a_page_hands_a_reference_into_a_session_through_send(cx: &mut TestAppContext)
         "named at the top"
     );
     click(cx, "send-go".into());
+    until(cx, "the panel closed once sent", |cx| {
+        cx.debug_bounds("send-go").is_none() && cx.debug_bounds("panel-right").is_none()
+    });
+    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
+    click(cx, "tab-sessions-0".into());
     until(cx, "the reference's output in the session", |cx| {
         shown(cx).contains("sent-42")
     });
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
+/// Send left open in the panel stays there as the pages change: it is the
+/// window's, not the page's that asked.
 #[gpui::test]
-fn send_asked_over_a_page_leaves_that_page_shown(cx: &mut TestAppContext) {
-    let Some(running) = start("terminals-page-send-over") else {
+fn send_left_open_stays_beside_every_page(cx: &mut TestAppContext) {
+    let Some(running) = start("terminals-page-send-stays") else {
         return;
     };
-    let (shell, cx, settings) = open_with_alpha(&running, "over", cx);
+    let (shell, cx, settings) = open_with_alpha(&running, "stays", cx);
     click(cx, "tab-toy".into());
     until(cx, "the toy page to show", |cx| {
         shell.read_with(cx, |s, _| s.shown_page()) == Some("toy")
     });
-    click(cx, "toy-send-over".into());
-    // Send opens over the page that asked, which stays shown (Work's
-    // Send, DESIGN.md: sending an item keeps the operator on Work).
-    until(cx, "the Send drawer", |cx| {
-        cx.debug_bounds("send-go").is_some()
-    });
-    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
-    click(cx, "send-go".into());
-    until(cx, "the drawer to close once sent", |cx| {
-        cx.debug_bounds("send-go").is_none()
-    });
-    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("toy"));
-    // Left open over the page, it is the Sessions page's own drawer
-    // there too.
-    click(cx, "toy-send-over".into());
-    until(cx, "the Send drawer again", |cx| {
+    click(cx, "toy-send".into());
+    until(cx, "Send in the panel", |cx| {
         cx.debug_bounds("send-go").is_some()
     });
     click(cx, "tab-sessions-0".into());
@@ -546,11 +526,25 @@ fn an_ask_that_names_a_session_aims_send_at_it_not_at_the_focused_one(cx: &mut T
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
+/// What another page shows in the window's panel.
 struct Note(gpui::FocusHandle);
 
 impl Render for Note {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().track_focus(&self.0).child("beside")
+        div()
+            .debug_selector(|| "toy-note".into())
+            .track_focus(&self.0)
+            .size_full()
+            .child("beside")
+    }
+}
+
+impl PanelView for Note {
+    fn head(&mut self, _: &mut Window, _: &mut Context<Self>) -> gpui::AnyElement {
+        div().child("Note").into_any_element()
+    }
+    fn focus(&self, _: &gpui::App) -> Option<gpui::FocusHandle> {
+        Some(self.0.clone())
     }
 }
 
@@ -574,33 +568,29 @@ fn other_pages_read_the_sessions_and_open_views_beside_them(cx: &mut TestAppCont
         listed.contains(&format!("{}/alpha", running.node)),
         "{listed:?}"
     );
-    assert!(cx.debug_bounds("terminals-beside").is_none());
+    assert!(cx.debug_bounds("panel-right").is_none());
     let note = cx.update(|_, cx| cx.new(|cx| Note(cx.focus_handle())));
-    cx.update(|_, cx| toy.show_beside("sessions", note.clone().into(), cx));
+    cx.update(|_, cx| toy.show_panel(Panel::new("note", note.clone()), cx));
     cx.run_until_parked();
-    assert!(
-        cx.debug_bounds("terminals-beside").is_some(),
-        "drawn beside"
-    );
+    assert!(cx.debug_bounds("toy-note").is_some(), "drawn in the panel");
     cx.update(|window, cx| window.focus(&note.read(cx).0.clone(), cx));
-    cx.update(|_, cx| toy.close_beside("sessions", cx));
+    cx.update(|_, cx| toy.close_panel("note", cx));
     cx.run_until_parked();
-    assert!(cx.debug_bounds("terminals-beside").is_none(), "closed");
+    assert!(cx.debug_bounds("panel-right").is_none(), "closed");
     // The view lives on, holding the focus; the terminal takes it back.
     let page = PAGE.with(|p| p.borrow().clone()).expect("the page");
     assert!(cx.update(|window, cx| page.read(cx).term_focus.is_focused(window)));
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
 
-/// What the operator opens on the page lies over the windows: the
-/// scrollback search and Overview, and a view beside them opened, its edge
-/// dragged, given the whole area and closed with Esc, all leave every
-/// session at the size it had, here and for every other client, as does
-/// what opens in the Files panel already open at the window's edge. Send
-/// and putting a panel away or back are the ones the windows make room
-/// for (`send_drawer_makes_room_beside_a_lone_window`).
+/// Every way into the window's one panel makes the windows squeeze, tmux
+/// windows included, and gives them their width back as it closes by its
+/// Close, Escape or its key; the terminal has the keyboard back. Only one
+/// content shows at a time, and a picture shows in it. What lies over the
+/// windows (Overview) and what an agent's `ahjo view open` brings forward
+/// leave every session at the size it had.
 #[gpui::test]
-fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
+fn every_way_into_the_panel_squeezes_the_windows_and_gives_them_back(cx: &mut TestAppContext) {
     let Some(running) = start_config("terminals-opened-size", false, false, true, false) else {
         return;
     };
@@ -613,10 +603,10 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     let (shell, cx, settings) = open_pages_with_alpha(
         &running,
         "opened-size",
-        &[terminals, ahjo_files_app::build, ahjo_issue_app::build],
+        // Files and Work answer what a session prints, before the toy.
+        &[terminals, ahjo_files_app::build, ahjo_issue_app::build, toy],
         cx,
     );
-    // Wide enough that a drawer could have moved the window aside.
     cx.simulate_resize(gpui::size(px(1440.), px(900.)));
     let toy = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy", &[]));
     let page = PAGE.with(|p| p.borrow().clone()).expect("the page");
@@ -626,163 +616,136 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
             (g.cols, g.rows)
         })
     };
-    let size = || {
+    let width = || -> usize {
         tmux(
             &running,
-            &[
-                "display-message",
-                "-p",
-                "-t",
-                "alpha",
-                "#{window_width}x#{window_height}",
-            ],
+            &["display-message", "-p", "-t", "alpha", "#{window_width}"],
         )
+        .trim()
+        .parse()
+        .expect("a width")
     };
     // A new grid is sent once it has held a moment, on the test's clock.
-    until(cx, "alpha sized to its window", |cx| {
-        cx.executor().advance_clock(Duration::from_millis(100));
-        let (cols, rows) = grid(cx);
-        page.read_with(cx, |p, _| p.resizing.is_empty()) && size() == format!("{cols}x{rows}")
-    });
-    let (was_grid, was_size) = (grid(cx), size());
-    let unchanged = |cx: &mut VisualTestContext, when: &str| {
+    let sized = |cx: &mut VisualTestContext, what: &str| {
+        until(cx, what, |cx| {
+            cx.executor().advance_clock(Duration::from_millis(100));
+            let (cols, _) = grid(cx);
+            page.read_with(cx, |p, _| p.resizing.is_empty()) && width() == cols
+        });
+    };
+    sized(cx, "alpha sized to its window");
+    let whole = width();
+    let term_focused = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| page.read(cx).term_focus.is_focused(window))
+    };
+    let focus_term = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            let focus = page.read(cx).term_focus.clone();
+            window.focus(&focus, cx);
+        });
         cx.run_until_parked();
-        assert_eq!(grid(cx), was_grid, "the window's grid {when}");
+    };
+    // `content` opens in the one panel, alone, and alpha squeezes.
+    let opened = |cx: &mut VisualTestContext, content: &'static str, what: &str| {
+        until(cx, what, |cx| {
+            cx.debug_bounds(content).is_some() && cx.debug_bounds("panel-right").is_some()
+        });
+        assert!(cx.debug_bounds("panel-left").is_none(), "one panel: {what}");
+        let panel = cx.debug_bounds("panel-right").expect("the panel");
+        let window = cx.debug_bounds("window-0").expect("alpha's window");
         assert!(
-            page.read_with(cx, |p, _| p.resizing.is_empty()),
-            "no resize asked {when}"
+            window.right() <= panel.left() + px(1.),
+            "{what} covers no window: {window:?} {panel:?}"
         );
-        assert_eq!(size(), was_size, "alpha's size {when}");
+        until(cx, &format!("alpha squeezed beside {what}"), |cx| {
+            cx.executor().advance_clock(Duration::from_millis(100));
+            width() < whole
+        });
+        sized(cx, &format!("alpha sized beside {what}"));
+    };
+    let closed = |cx: &mut VisualTestContext, what: &str| {
+        until(cx, &format!("the panel closed: {what}"), |cx| {
+            cx.debug_bounds("panel-right").is_none()
+        });
+        until(cx, &format!("alpha's width back after {what}"), |cx| {
+            cx.executor().advance_clock(Duration::from_millis(100));
+            width() == whole
+        });
+        sized(cx, &format!("alpha sized after {what}"));
+        assert!(
+            term_focused(cx),
+            "the terminal has the keyboard after {what}"
+        );
     };
 
-    for (keys, drawn, what) in [
-        ("alt-h", "find-drawer", "the scrollback search"),
-        ("alt-v", "overview-grid", "Overview"),
-    ] {
-        cx.simulate_keystrokes(keys);
-        cx.run_until_parked();
-        assert!(cx.debug_bounds(drawn).is_some(), "{what} drawn");
-        unchanged(cx, &format!("with {what} open"));
-        cx.simulate_keystrokes("escape");
-        cx.run_until_parked();
-        assert!(cx.debug_bounds(drawn).is_none(), "Esc closed {what}");
-        unchanged(cx, &format!("after {what} closed"));
-    }
-
-    let note = cx.update(|_, cx| cx.new(|cx| Note(cx.focus_handle())));
-    cx.update(|_, cx| toy.show_beside("sessions", note.into(), cx));
+    // Overview lies over the windows and changes no size.
+    cx.simulate_keystrokes("alt-v");
     cx.run_until_parked();
-    let beside = cx.debug_bounds("terminals-beside").expect("drawn over");
-    // The terminals end where the Files panel stands.
-    let right = cx
-        .debug_bounds("panel-right")
-        .expect("the Files panel")
-        .left();
-    assert!(
-        (beside.right() - right).abs() < px(1.),
-        "at the terminals' right edge, where lines end: {beside:?}"
-    );
-    unchanged(cx, "with a view beside");
-    // The search lies against the view's left edge, leaving it in sight;
-    // Send stands right of both. Esc closes them and leaves the view.
-    for (keys, drawn, what) in [
-        ("alt-s", "send-drawer", "Send"),
-        ("alt-h", "find-drawer", "the scrollback search"),
-    ] {
-        cx.simulate_keystrokes(keys);
-        cx.run_until_parked();
-        let drawer = cx.debug_bounds(drawn).expect(drawn);
-        if drawn == "send-drawer" {
-            let moved = cx.debug_bounds("terminals-beside").expect("the view");
-            assert!(
-                moved.right() <= drawer.left() + px(1.),
-                "the view left of Send: {moved:?} {drawer:?}"
-            );
-        } else {
-            assert!(
-                (drawer.right() - beside.left()).abs() < px(1.),
-                "{what} beside the view: {drawer:?} {beside:?}"
-            );
-            unchanged(cx, &format!("with {what} and a view beside open"));
-        }
-        cx.simulate_keystrokes("escape");
-        cx.run_until_parked();
-        assert!(cx.debug_bounds(drawn).is_none(), "Esc closed {what}");
-        assert!(
-            cx.debug_bounds("terminals-beside").is_some(),
-            "the view stays"
-        );
-    }
-    // Closing a drawer gives the keyboard to the terminal; back to the view.
-    cx.update(|window, cx| {
-        let focus = page.read(cx).beside_focus.clone();
-        window.focus(&focus, cx);
-    });
-
-    let grip = cx.debug_bounds("beside-grip").expect("its edge").center();
-    cx.simulate_mouse_down(grip, gpui::MouseButton::Left, Modifiers::none());
-    for step in 1..=4 {
-        cx.simulate_mouse_move(
-            gpui::point(grip.x + px(60. * step as f32), grip.y),
-            gpui::MouseButton::Left,
-            Modifiers::none(),
-        );
-    }
-    cx.simulate_mouse_up(
-        gpui::point(grip.x + px(240.), grip.y),
-        gpui::MouseButton::Left,
-        Modifiers::none(),
-    );
-    let moved = cx.debug_bounds("beside-grip").expect("its edge").center();
-    assert!(moved.x > grip.x + px(100.), "the edge followed the drag");
-    unchanged(cx, "after dragging its edge");
-
-    cx.update(|_, cx| toy.toggle_whole_beside("sessions", cx));
-    cx.run_until_parked();
-    assert!(cx.debug_bounds("beside-grip").is_none(), "the whole area");
-    unchanged(cx, "with the view given the whole area");
-
+    assert!(cx.debug_bounds("overview-grid").is_some(), "Overview drawn");
+    sized(cx, "with Overview open");
+    assert_eq!(width(), whole, "Overview resized alpha");
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
     assert!(
-        cx.debug_bounds("terminals-beside").is_none(),
-        "Esc took it away"
+        cx.debug_bounds("overview-grid").is_none(),
+        "Esc closed Overview"
     );
-    unchanged(cx, "after it closed");
 
-    // Files is the panel at the window's edge, open here as the operator
-    // left it: its find (Alt+O) and a path the session printed, clicked,
-    // open in it and change no window's size. Putting it away is the
-    // operator's own act, and resizes.
+    // Another page's view, shown from elsewhere: the keyboard stays in the
+    // terminal; its Close takes it away.
+    assert!(term_focused(cx));
+    let note = cx.update(|_, cx| cx.new(|cx| Note(cx.focus_handle())));
+    cx.update(|_, cx| toy.show_panel(Panel::new("note", note), cx));
+    opened(cx, "toy-note", "a view from another page");
     assert!(
-        cx.debug_bounds("panel-right").is_some(),
-        "the Files panel open"
+        term_focused(cx),
+        "a view from elsewhere leaves the keyboard"
     );
-    cx.simulate_keystrokes("alt-o");
-    until(cx, "the Files panel's find", |cx| {
-        cx.debug_bounds("files-search").is_some()
-    });
-    assert!(
-        cx.debug_bounds("terminals-beside").is_none(),
-        "nothing over"
-    );
-    unchanged(cx, "with the Files panel's find");
+    click(cx, "panel-close".into());
+    closed(cx, "its Close");
 
+    // Send (Alt+S): Escape closes it.
+    cx.simulate_keystrokes("alt-s");
+    opened(cx, "send-drawer", "Send");
+    cx.simulate_keystrokes("escape");
+    closed(cx, "Escape in Send");
+
+    // The output search (Alt+H): its key closes it.
+    cx.simulate_keystrokes("alt-h");
+    opened(cx, "find-drawer", "the output search");
+    cx.simulate_keystrokes("alt-h");
+    closed(cx, "Alt+H again");
+
+    // Files (Alt+E), and Send opened over it: one shows, Back goes back.
+    cx.simulate_keystrokes("alt-e");
+    opened(cx, "files-list", "Files");
+    cx.simulate_keystrokes("alt-s");
+    opened(cx, "send-drawer", "Send over Files");
+    assert!(cx.debug_bounds("files-list").is_none(), "only Send shows");
+    click(cx, "panel-back".into());
+    opened(cx, "files-list", "Files back from Send");
+    assert!(cx.debug_bounds("send-drawer").is_none());
+    cx.simulate_keystrokes("ctrl-b");
+    closed(cx, "Ctrl+B in Files");
+
+    // A picture the session printed, clicked: it shows in Files.
     let command = format!("printf '\\033[2J\\033[Hmade {}\\n'", picture.display());
     tmux(&running, &["send-keys", "-t", "alpha", &command, "Enter"]);
-    until(cx, "the printed picture drawn small", |cx| {
-        page.read_with(cx, |p, _| !p.chips.borrow()[0].is_empty())
+    let mut was = None;
+    until(cx, "the printed picture drawn small, holding still", |cx| {
+        let now = page.read_with(cx, |p, _| p.chips.borrow()[0].first().map(|c| c.bounds));
+        now.is_some() && std::mem::replace(&mut was, now) == now
     });
-    let chip = page.read_with(cx, |p, _| p.chips.borrow()[0][0].bounds);
+    let chip = was.expect("the picture drawn small");
     cx.simulate_click(chip.center(), Modifiers::none());
-    until(cx, "the printed path open in the Files panel", |cx| {
+    until(cx, "the picture asked for", |cx| {
         cx.debug_bounds("file-view-plan.svg").is_some()
     });
-    assert!(
-        cx.debug_bounds("terminals-beside").is_none(),
-        "nothing over"
-    );
-    unchanged(cx, "with a printed path open in the Files panel");
+    opened(cx, "file-view-plan.svg", "a printed picture");
+    until(cx, "the picture drawn", |cx| {
+        cx.debug_bounds("files-picture")
+            .is_some_and(|b| b.size.width > px(10.) && b.size.height > px(5.))
+    });
     // Back in the terminal, Esc is the terminal's (agents need it) and the
     // picture stays.
     let window = cx.debug_bounds("window-0").expect("the window");
@@ -791,32 +754,26 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
         Modifiers::none(),
     );
     cx.run_until_parked();
-    assert!(cx.update(|window, cx| page.read(cx).term_focus.is_focused(window)));
+    assert!(term_focused(cx));
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
     assert!(
-        cx.debug_bounds("file-view-plan.svg").is_some(),
+        cx.debug_bounds("files-picture").is_some(),
         "Esc in the terminal leaves the picture"
     );
     // The shell took the Esc as a prefix; a fresh line for what follows.
     cx.simulate_keystrokes("ctrl-c");
+    cx.simulate_keystrokes("alt-e");
+    closed(cx, "Alt+E");
 
-    // Work lies over the windows: its panel (Alt+B), ...
-    {
-        let (keys, drawn, what) = ("alt-b", "issue-panel", "the Work panel");
-        cx.simulate_keystrokes(keys);
-        until(cx, what, |cx| {
-            cx.debug_bounds("terminals-beside").is_some() && cx.debug_bounds(drawn).is_some()
-        });
-        unchanged(cx, &format!("with {what} open"));
-        cx.simulate_keystrokes(keys);
-        until(cx, "the panel closed", |cx| {
-            cx.debug_bounds("terminals-beside").is_none()
-        });
-        unchanged(cx, &format!("after {what} closed"));
-    }
+    // Work (Alt+B): its key closes it.
+    focus_term(cx);
+    cx.simulate_keystrokes("alt-b");
+    opened(cx, "issue-panel", "the Work panel");
+    cx.simulate_keystrokes("alt-b");
+    closed(cx, "Alt+B again");
 
-    // ... and a work item the session printed, clicked.
+    // A work item the session printed, clicked: Alt+I closes it.
     tmux(
         &running,
         &[
@@ -842,15 +799,34 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
     until(cx, "the work item printed", |cx| item(cx).is_some());
     let at = item(cx).expect("printed");
     cx.simulate_click(at, Modifiers::none());
-    until(cx, "the item beside the windows", |cx| {
-        cx.debug_bounds("terminals-beside").is_some() && cx.debug_bounds("issue-beside").is_some()
-    });
-    unchanged(cx, "with a printed work item open beside");
+    opened(cx, "issue-beside", "a printed work item");
     cx.simulate_keystrokes("alt-i");
-    until(cx, "the item closed", |cx| {
-        cx.debug_bounds("terminals-beside").is_none()
+    closed(cx, "Alt+I");
+
+    // A diagram the session printed, clicked: its chip takes it away.
+    let command = "printf '\\033[2J\\033[Hflowchart LR\\n    A[Build] --> B[Test]\\n\\ndone\\n'";
+    tmux(&running, &["send-keys", "-t", "alpha", command, "Enter"]);
+    until(cx, "the diagram drawn small", |cx| {
+        page.read_with(cx, |p, _| {
+            p.chips.borrow()[0].len() == 1
+                && p.window_text(0).is_some_and(|t| t.contains("flowchart"))
+        })
     });
-    unchanged(cx, "after the work item closed");
+    let chip = |cx: &mut VisualTestContext| {
+        let mut was = None;
+        until(cx, "the diagram's chip holding still", |cx| {
+            let now = page.read_with(cx, |p, _| p.chips.borrow()[0].first().map(|c| c.bounds));
+            now.is_some() && std::mem::replace(&mut was, now) == now
+        });
+        was.expect("the chip").center()
+    };
+    let at = chip(cx);
+    cx.simulate_click(at, Modifiers::none());
+    opened(cx, "diagram-beside", "a printed diagram");
+    // The window narrowed beside the diagram: its chip moved with it.
+    let at = chip(cx);
+    cx.simulate_click(at, Modifiers::none());
+    closed(cx, "the diagram's chip");
 
     // An agent's `ahjo view open` brings the page forward; the windows
     // are as they were when the terminals come back.
@@ -875,13 +851,14 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
         until(cx, "ahjo view open answered", |_| opened.is_finished());
         assert_eq!(rt.block_on(opened).expect("its task"), 0, "{page_id}");
         assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some(page_id));
-        unchanged(cx, &format!("with {page_id} shown by ahjo view open"));
+        assert_eq!(width(), whole, "with {page_id} shown by ahjo view open");
         let terminals = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("sessions", &[]));
         cx.update(|_, cx| terminals.show(cx));
         until(cx, "the terminals back", |cx| {
             shell.read_with(cx, |s, _| s.shown_page()) == Some("sessions")
         });
-        unchanged(cx, &format!("with the terminals back from {page_id}"));
+        sized(cx, &format!("the terminals back from {page_id}"));
+        assert_eq!(width(), whole, "with the terminals back from {page_id}");
     }
     let _ = std::fs::remove_dir_all(settings.parent().expect("its folder"));
 }
@@ -890,11 +867,12 @@ fn nothing_opened_on_the_page_resizes_a_session(cx: &mut TestAppContext) {
 /// click, a middle click (a paste in a terminal), a wheel and the keys
 /// typed after them reach no session under it, no window under it takes
 /// the focus or starts reading back, and Esc after such a click closes
-/// what was clicked. Held for a view beside, Send, the output search,
-/// Overview, Peek and a launcher too big for its window, each over a live
-/// session. A view opened from elsewhere leaves the keyboard in the
-/// terminal; a panel opened by its key (Files, Work, Brain) has it in its
-/// find, and closed with Esc gives it back to the terminal.
+/// what was clicked. Held for the panel beside them (a view from another
+/// page, Files, Work, Send, the output search), Overview, Peek and a
+/// launcher too big for its window, each beside or over a live session. A
+/// view opened from elsewhere leaves the keyboard in the terminal; what
+/// opens by its key (Files, Work, Send) has it in its field, and closed
+/// with Esc gives it back to the terminal.
 #[gpui::test]
 fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContext) {
     let Some(running) = start_config("terminals-over", false, false, true, false) else {
@@ -970,31 +948,33 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
     let inside =
         |b: gpui::Bounds<gpui::Pixels>| gpui::point(b.right() - px(24.), b.bottom() - px(24.));
 
-    // A view beside: opened from elsewhere it leaves the keyboard in the
+    // The panel: a view opened from elsewhere leaves the keyboard in the
     // terminal; a click gives it the keyboard, and Esc closes it.
     let term_focused = |cx: &mut VisualTestContext| {
         cx.update(|window, cx| page.read(cx).term_focus.is_focused(window))
     };
     assert!(term_focused(cx), "alpha's terminal has the keyboard");
     let note = cx.update(|_, cx| cx.new(|cx| Note(cx.focus_handle())));
-    cx.update(|_, cx| toy.show_beside("sessions", note.into(), cx));
+    cx.update(|_, cx| toy.show_panel(Panel::new("note", note.clone()), cx));
     cx.run_until_parked();
     assert!(
         term_focused(cx),
         "a view opened from elsewhere leaves the keyboard in the terminal"
     );
-    let beside = cx.debug_bounds("terminals-beside").expect("drawn over");
-    poke(cx, beside.center(), "window-1");
-    untouched(cx, "a view beside", 0);
+    let beside = ahjo_testkit::app::held_still(cx, "toy-note");
+    let window = cx.debug_bounds("window-1").expect("window 1");
+    assert!(window.right() <= beside.left(), "the view covers no window");
+    poke(cx, beside.center(), "toy-note");
+    untouched(cx, "the panel", 0);
     assert!(
-        cx.update(|window, cx| page.read(cx).beside_focus.contains_focused(window, cx)),
+        cx.update(|window, cx| note.read(cx).0.is_focused(window)),
         "a click in the view gives it the keyboard"
     );
     cx.simulate_keystrokes("escape");
-    cx.run_until_parked();
-    assert!(
-        cx.debug_bounds("terminals-beside").is_none(),
-        "Esc after a click in the view closes it"
+    until(
+        cx,
+        "Esc after a click in the view puts the panel away",
+        |cx| cx.debug_bounds("panel-right").is_none(),
     );
     assert!(
         term_focused(cx),
@@ -1036,11 +1016,9 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
     });
     untouched(cx, "the Files panel's find", 0);
     cx.simulate_keystrokes("escape");
-    cx.run_until_parked();
-    assert!(
-        cx.debug_bounds("terminals-beside").is_none(),
-        "Esc closed Files"
-    );
+    until(cx, "Esc closed Files", |cx| {
+        cx.debug_bounds("panel-right").is_none()
+    });
     assert!(
         term_focused(cx),
         "Esc from Files gives the terminal the keyboard"
@@ -1056,15 +1034,13 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
         assert!(
-            cx.debug_bounds("terminals-beside").is_some(),
-            "the first Esc cleared {drawn}"
+            shell.read_with(cx, |s, cx| s.hub().read(cx).panel.open),
+            "the first Esc cleared {drawn}, the panel stays"
         );
         cx.simulate_keystrokes("escape");
-        cx.run_until_parked();
-        assert!(
-            cx.debug_bounds("terminals-beside").is_none(),
-            "Esc closed {drawn}"
-        );
+        until(cx, &format!("Esc closed {drawn}"), |cx| {
+            cx.debug_bounds("panel-right").is_none()
+        });
         assert!(
             term_focused(cx),
             "Esc from {drawn} gives the terminal the keyboard"
@@ -1094,12 +1070,12 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
         } else {
             inside(over)
         };
-        // Send lies over no window: they made room for it.
-        let under = if drawn == "send-drawer" {
+        // Send and the search lie over no window: they made room for them.
+        let under = if drawn != "overview-grid" {
             let window = cx.debug_bounds("window-1").expect("window 1");
             assert!(
                 window.right() <= over.left(),
-                "Send {over:?} beside window 1 {window:?}, not over it"
+                "{drawn} {over:?} beside window 1 {window:?}, not over it"
             );
             drawn
         } else {
@@ -1108,8 +1084,9 @@ fn what_lies_over_the_windows_takes_every_click_inside_it(cx: &mut TestAppContex
         poke(cx, at, under);
         untouched(cx, drawn, 0);
         cx.simulate_keystrokes("escape");
-        cx.run_until_parked();
-        assert!(cx.debug_bounds(drawn).is_none(), "Esc closed {drawn}");
+        until(cx, &format!("Esc closed {drawn}"), |cx| {
+            cx.debug_bounds(drawn).is_none()
+        });
         cx.update(|window, cx| {
             let focus = page.read(cx).term_focus.clone();
             window.focus(&focus, cx);
@@ -2189,7 +2166,7 @@ fn work_item_in_terminal_opens_beside_and_focus_is_published(cx: &mut TestAppCon
         }
     );
     until(cx, "item beside terminals", |cx| {
-        cx.debug_bounds("terminals-beside").is_some()
+        cx.debug_bounds("toy-note").is_some()
     });
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
     let beta = Key {
@@ -2952,14 +2929,9 @@ fn a_mermaid_diagram_a_session_prints_draws_small_and_opens_beside(cx: &mut Test
     until(cx, "the diagram drawn beside", |cx| {
         cx.debug_bounds("diagram-beside").is_some()
     });
-    // It opens as a picture does: at half the room, however small the
-    // diagram, and Send hands it to a session as its mermaid block.
-    let beside = cx.debug_bounds("terminals-beside").expect("beside");
-    let whole = cx.update(|window, _| window.viewport_size().width);
-    assert!(
-        beside.size.width > whole * 0.35,
-        "a small diagram opens at half the room: {beside:?} of {whole:?}"
-    );
+    // It opens in the window's panel, and Send hands it to a session as
+    // its mermaid block.
+    assert!(cx.debug_bounds("panel-right").is_some(), "in the panel");
     click(cx, "diagram-send".into());
     until(cx, "Send with the diagram", |cx| {
         page.read_with(cx, |p, _| {
@@ -2968,9 +2940,10 @@ fn a_mermaid_diagram_a_session_prints_draws_small_and_opens_beside(cx: &mut Test
             })
         })
     });
-    cx.simulate_keystrokes("escape");
-    until(cx, "Send closed", |cx| {
-        cx.debug_bounds("send-drawer").is_none()
+    // Back goes from Send to the diagram it was opened over.
+    click(cx, "panel-back".into());
+    until(cx, "Send closed, the diagram back", |cx| {
+        cx.debug_bounds("send-drawer").is_none() && cx.debug_bounds("diagram-beside").is_some()
     });
     // Its chip, clicked again, takes it away.
     cx.simulate_click(chip.center(), Modifiers::none());
@@ -3347,7 +3320,7 @@ fn send_opened_from_a_session_is_aimed_at_it_and_delivers_there(cx: &mut TestApp
 /// A point in the Send drawer where nothing but the drawer is: below what
 /// its body holds.
 fn send_blank(cx: &mut VisualTestContext) -> gpui::Point<gpui::Pixels> {
-    let body = cx.debug_bounds("send-body").expect("the Send drawer");
+    let body = ahjo_testkit::app::held_still(cx, "send-body");
     gpui::point(body.center().x, body.bottom() - px(24.))
 }
 
@@ -3399,7 +3372,7 @@ fn a_terminal_clicked_beside_send_takes_the_keys_and_send_keeps_its_draft(cx: &m
 
 /// Files dropped on Send are attached: one from this computer (the
 /// system's drop) is copied to the target's node, one dragged from the
-/// Files panel goes as its path there; both paths follow into the session.
+/// Files page goes as its path there; both paths follow into the session.
 #[gpui::test]
 fn files_dropped_on_send_are_attached_and_reach_the_session(cx: &mut TestAppContext) {
     let Some(running) = start_config("send-drops", false, false, true, false) else {
@@ -3442,7 +3415,10 @@ fn files_dropped_on_send_are_attached_and_reach_the_session(cx: &mut TestAppCont
     });
     cx.simulate_event(gpui::FileDropEvent::Submit { position: at });
     until(cx, "the computer's file attached", |cx| attached(cx) == 1);
-    until(cx, "the node's file in the Files panel", |cx| {
+    // One panel: Send stays beside the Files page, whose file is dragged.
+    let files = _shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("files", &[]));
+    cx.update(|_, cx| files.show(cx));
+    until(cx, "the node's file on the Files page", |cx| {
         cx.debug_bounds("file-row-on-node.txt").is_some()
     });
     let from = cx.debug_bounds("file-row-on-node.txt").unwrap().center();
@@ -3673,11 +3649,11 @@ fn typing_while_reading_history_reaches_the_program_and_keeps_the_history(cx: &m
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 
-/// Send stands at the right of the windows, which make room for it: it
-/// covers none of a lone window, and the window has its width back once it
-/// closes.
+/// Send stands in the panel at the right of the windows, which make room
+/// for it: it covers none of a lone window, and the window has its width
+/// back once it closes.
 #[gpui::test]
-fn send_drawer_makes_room_beside_a_lone_window(cx: &mut TestAppContext) {
+fn send_makes_room_beside_a_lone_window(cx: &mut TestAppContext) {
     let Some(running) = start("terminals-send-layout") else {
         return;
     };
@@ -3705,7 +3681,7 @@ fn send_drawer_makes_room_beside_a_lone_window(cx: &mut TestAppContext) {
 
 /// The Files panel stands at the right of the windows, which give it room.
 /// A focused terminal keeps Ctrl+B (tmux's prefix, an agent's background
-/// key), so it stays; Alt+E hides it and the window widens, and Ctrl+B
+/// key), so it stays; Alt+E puts it away and the window widens, and Ctrl+B
 /// where nothing takes it brings it back.
 #[gpui::test]
 fn the_files_panel_goes_and_comes_with_its_keys_and_a_terminal_keeps_ctrl_b(
@@ -3723,6 +3699,8 @@ fn the_files_panel_goes_and_comes_with_its_keys_and_a_terminal_keeps_ctrl_b(
     let page = PAGE.with(|p| p.borrow().clone()).unwrap();
     cx.simulate_resize(gpui::size(px(1440.), px(900.)));
     let body = |cx: &mut VisualTestContext| page.read_with(cx, |p, _| p.geo.borrow()[0].body);
+    until(cx, "terminal geometry", |cx| body(cx).is_some());
+    cx.simulate_keystrokes("alt-e");
     until(cx, "the panel at the windows' right", |cx| {
         let Some(panel) = cx.debug_bounds("panel-right") else {
             return false;
@@ -3730,6 +3708,12 @@ fn the_files_panel_goes_and_comes_with_its_keys_and_a_terminal_keeps_ctrl_b(
         body(cx).is_some_and(|b| b.origin.x + b.size.width <= panel.origin.x)
     });
     let beside = body(cx).unwrap().size.width;
+    let window = cx.debug_bounds("window-0").expect("the window");
+    cx.simulate_click(
+        gpui::point(window.left() + px(20.), window.bottom() - px(20.)),
+        Modifiers::none(),
+    );
+    cx.run_until_parked();
     assert!(
         cx.update(|window, cx| page.read(cx).term_focus.is_focused(window)),
         "alpha's terminal has the keyboard"
@@ -3875,11 +3859,12 @@ fn a_tab_rename_over_peek_is_kept_when_peek_attaches(cx: &mut TestAppContext) {
     let _ = std::fs::remove_dir_all(settings.parent().unwrap());
 }
 
-/// Send asked from a view beside the terminals (the Brain panel, a file
-/// beside) gives the keyboard back to that view when it closes, sent or
-/// dismissed, not to the terminal the view lies over (ahjo-4y1).
+/// Send asked from what shows in the panel (the Brain, a file) opens over
+/// it, and gives it the keyboard back when it closes, sent or gone back
+/// from, not to the terminal (ahjo-4y1); Escape puts the panel away and
+/// gives the terminal the keyboard.
 #[gpui::test]
-fn send_from_a_view_beside_gives_the_keyboard_back_to_it(cx: &mut TestAppContext) {
+fn send_from_the_panel_gives_the_keyboard_back_to_what_it_opened_over(cx: &mut TestAppContext) {
     let Some(running) = start("terminals-send-beside") else {
         return;
     };
@@ -3887,7 +3872,7 @@ fn send_from_a_view_beside_gives_the_keyboard_back_to_it(cx: &mut TestAppContext
     let page = PAGE.with(|p| p.borrow().clone()).unwrap();
     let toy = shell.read_with(cx, |s, _| Host::new(s.hub()).for_page("toy", &[]));
     let note = cx.update(|_, cx| cx.new(|cx| Note(cx.focus_handle())));
-    cx.update(|_, cx| toy.show_beside("sessions", note.clone().into(), cx));
+    cx.update(|_, cx| toy.show_panel(Panel::new("note", note.clone()), cx));
     cx.run_until_parked();
     let note_focused =
         |cx: &mut VisualTestContext| cx.update(|window, cx| note.read(cx).0.is_focused(window));
@@ -3909,20 +3894,14 @@ fn send_from_a_view_beside_gives_the_keyboard_back_to_it(cx: &mut TestAppContext
             cx.debug_bounds("send-go").is_some()
         });
     };
-    // Dismissed with Esc.
-    ask(cx, "echo beside-esc");
-    cx.simulate_keystrokes("escape");
-    until(cx, "the drawer closed", |cx| {
+    // Gone back from.
+    ask(cx, "echo beside-back");
+    click(cx, "panel-back".into());
+    until(cx, "Send closed", |cx| {
         cx.debug_bounds("send-drawer").is_none()
     });
-    assert!(
-        cx.debug_bounds("terminals-beside").is_some(),
-        "still beside"
-    );
-    assert!(
-        note_focused(cx),
-        "Esc gives the view beside the keyboard back"
-    );
+    assert!(cx.debug_bounds("toy-note").is_some(), "the view back");
+    assert!(note_focused(cx), "Back gives the view the keyboard back");
     // Sent: the drawer closes once it arrived.
     ask(cx, "echo beside-$((40+2))");
     click(cx, "send-go".into());
@@ -3938,8 +3917,15 @@ fn send_from_a_view_beside_gives_the_keyboard_back_to_it(cx: &mut TestAppContext
         note_focused(cx),
         "a send gives the view beside the keyboard back"
     );
-    // Once the view is gone, the terminal takes the keyboard.
-    cx.update(|_, cx| toy.close_beside("sessions", cx));
+    // Escape puts the panel away; the terminal takes the keyboard.
+    ask(cx, "echo beside-esc");
+    cx.simulate_keystrokes("escape");
+    until(cx, "the panel away", |cx| {
+        cx.debug_bounds("panel-right").is_none()
+    });
+    assert!(cx.update(|window, cx| page.read(cx).term_focus.is_focused(window)));
+    // With the view gone, Send alone; Escape gives the terminal the keys.
+    cx.update(|_, cx| toy.close_panel("note", cx));
     cx.run_until_parked();
     cx.update(|_, cx| {
         toy.ask(

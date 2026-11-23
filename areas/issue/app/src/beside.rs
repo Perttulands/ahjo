@@ -1,6 +1,6 @@
-//! An item beside the page that named it (a terminal's Bead id): from the
-//! board the page holds when it holds the item, at once; else read from
-//! its node with its family's titles.
+//! An item in the window's panel, beside the page that named it (a
+//! terminal's Bead id): from the board the page holds when it holds the
+//! item, at once; else read from its node with its family's titles.
 use crate::Issue;
 use crate::store::issue::Board;
 use crate::view::Place;
@@ -11,10 +11,49 @@ use ahjo_issue_contract::{Item, ProjectView, Snapshot, StoreView, commands::Show
 use gpui::{AppContext, Context, Entity, IntoElement, Render, Window, div, prelude::*};
 use std::rc::Rc;
 
+/// The item's content in the window's panel.
+pub(crate) const CARD: &str = "item";
+
 struct Card {
     work: Entity<Issue>,
     error: Option<(String, bool)>,
     loading: bool,
+}
+
+impl Card {
+    /// What the card says while it has no item to show.
+    fn words(&self) -> Option<(&'static str, &'static str)> {
+        match &self.error {
+            Some((_, true)) => Some(("issue-beside-not-found", "Item not found")),
+            Some((_, false)) => Some(("issue-beside-failed", "Could not read item")),
+            None if self.loading => Some(("issue-beside-loading", "Reading item…")),
+            None => None,
+        }
+    }
+}
+
+impl ahjo_app_kit::panel::PanelView for Card {
+    fn head(&mut self, _: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let t = theme(cx).clone();
+        let words = self.words();
+        self.work.update(cx, |work, cx| match work.shown_row() {
+            Some(row) => work
+                .detail_head(&t, row, Place::Beside, cx)
+                .into_any_element(),
+            None => {
+                let (selector, words) = words.unwrap_or(("issue-beside-none", ""));
+                pane::title(&t, words)
+                    .debug_selector(move || selector.into())
+                    .into_any_element()
+            }
+        })
+    }
+    fn can_go_back(&self, cx: &gpui::App) -> bool {
+        !self.work.read(cx).trail.is_empty()
+    }
+    fn go_back(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.work.update(cx, |work, cx| work.back(cx));
+    }
 }
 
 impl Render for Card {
@@ -26,12 +65,7 @@ impl Render for Card {
                 work.detail(&t, row, Place::Beside, cx)
             })
         });
-        let words = match &self.error {
-            Some((_, true)) => Some(("issue-beside-not-found", "Item not found")),
-            Some((_, false)) => Some(("issue-beside-failed", "Could not read item")),
-            None if self.loading => Some(("issue-beside-loading", "Reading item…")),
-            None => None,
-        };
+        let words = self.words();
         div()
             .id("issue-beside")
             .debug_selector(|| "issue-beside".into())
@@ -41,35 +75,27 @@ impl Render for Card {
             .flex()
             .flex_col()
             .bg(t.surface)
-            .border_r_1()
-            .border_color(t.divider)
             .font_family(FAMILY)
             .text_color(t.text)
-            .when_some(
-                words.filter(|_| detail.is_none()),
-                |d, (selector, words)| {
-                    let error = self.error.clone().map(|(e, _)| e);
-                    let detail_error = error.clone();
-                    d.child(
-                        pane::head(&t)
-                            .child(pane::title(&t, words).debug_selector(move || selector.into())),
-                    )
-                    .child(
-                        pane::empty(&t, error.unwrap_or_default(), None)
-                            .when_some(detail_error, |d, e| {
-                                d.debug_selector(move || format!("issue-beside-error-{e}"))
-                            }),
-                    )
-                },
-            )
+            .when(words.is_some() && detail.is_none(), |d| {
+                let error = self.error.clone().map(|(e, _)| e);
+                let detail_error = error.clone();
+                d.child(
+                    pane::empty(&t, error.unwrap_or_default(), None)
+                        .when_some(detail_error, |d, e| {
+                            d.debug_selector(move || format!("issue-beside-error-{e}"))
+                        }),
+                )
+            })
             .children(detail)
     }
 }
 
 impl Issue {
+    /// Shows item `id` in the window's panel, beside the page that named
+    /// it.
     pub(crate) fn open_beside(
         &mut self,
-        from: &'static str,
         id: String,
         node: Option<NodeId>,
         window: &mut Window,
@@ -80,12 +106,10 @@ impl Issue {
             .unwrap_or_else(|| NodeId(String::new()));
         let host = self.host.clone();
         let card_work = cx.new(|cx| Issue::new(host.clone(), window, cx));
-        self.beside_from = Some(from);
         // The page's board holds the item: it shows now, family and all.
         if let Some(row) = self.find_on(&id, Some(node.as_str())) {
             let (board, snapshots) = (self.board.clone(), self.snapshots.clone());
             card_work.update(cx, |w, cx| {
-                w.beside_from = Some(from);
                 w.board = board;
                 w.snapshots = snapshots;
                 w.select(row, cx);
@@ -98,10 +122,9 @@ impl Issue {
                     loading: false,
                 }
             });
-            host.show_beside(from, card.into(), cx);
+            host.show_panel(ahjo_app_kit::panel::Panel::new(CARD, card), cx);
             return;
         }
-        card_work.update(cx, |w, _| w.beside_from = Some(from));
         let card = cx.new(|cx| {
             cx.observe(&card_work, |_, _, cx| cx.notify()).detach();
             Card {
@@ -110,7 +133,7 @@ impl Issue {
                 loading: true,
             }
         });
-        host.show_beside(from, card.clone().into(), cx);
+        host.show_panel(ahjo_app_kit::panel::Panel::new(CARD, card.clone()), cx);
         let task = host.call(
             node.clone(),
             ShowIssue {

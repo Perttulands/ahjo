@@ -89,7 +89,7 @@ impl SideOn {
     }
 }
 
-/// Which edge of the window a page's panel stands at.
+/// Which edge of the window the panel stands at.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Edge {
     Left,
@@ -97,13 +97,15 @@ pub enum Edge {
     Right,
 }
 
-/// A page's panel: a column of its own at an edge of the window, apart
-/// from the side panel, opened and put away by Ctrl+B as in VS Code.
-#[derive(Clone)]
-pub struct Panel {
-    pub view: AnyView,
-    pub on: SideOn,
-    pub edge: Edge,
+impl Edge {
+    /// The edge a setting names: `left`, else the right.
+    pub fn named(name: &str) -> Edge {
+        if name == "left" {
+            Edge::Left
+        } else {
+            Edge::Right
+        }
+    }
 }
 
 /// What the shell hears from the hub, after the update that caused it.
@@ -115,13 +117,10 @@ pub enum HubEvent {
         body: Vec<u8>,
     },
     /// Page `to` answers this, which page `from` asked (`""`: the shell).
-    /// `over`: `from` stays shown where `to` is live on it, and `to`
-    /// answers over it ([`crate::Host::ask_over`]).
     Ask {
         to: &'static str,
         from: &'static str,
         ask: Ask,
-        over: bool,
     },
     /// Show this page.
     Show(&'static str),
@@ -133,8 +132,8 @@ pub enum HubEvent {
     /// `app.json` was edited outside the app and read again: these pages'
     /// sections changed.
     SettingsReloaded(Vec<&'static str>),
-    /// A view page `page` lent beside a page, or as its section of the
-    /// side panel, opened or closed.
+    /// What page `page` lent (its section of the side panel, or its
+    /// content in the panel) opened, closed or gave way.
     Lent(&'static str),
     /// The link to `node` changed state; `None` when the app no longer
     /// follows that node. Every page hears it.
@@ -172,18 +171,11 @@ pub struct Hub {
     clicks: HashMap<String, Run>,
     /// The read models pages share, by type.
     models: HashMap<TypeId, Model>,
-    /// What is open beside each page, by the page, with the page that lent
-    /// it.
-    beside: HashMap<&'static str, (&'static str, AnyView)>,
-    /// The pages that can give what is beside them their whole room, and
-    /// those doing so now.
-    widens: HashSet<&'static str>,
-    whole: HashSet<&'static str>,
-    /// The sections of the side panel, by the page that lent each, with
-    /// the pages each shows on.
+    /// The sections of the side panel, by the page that lent each,
+    /// with the pages each shows on.
     side: HashMap<&'static str, (AnyView, SideOn)>,
-    /// The panels pages lent, by the page that lent each.
-    panels: HashMap<&'static str, Panel>,
+    /// The panel's contents at the window's edge: the one showing on top.
+    pub panel: crate::panel::Stack,
     /// The page the window shows, as the shell last drew it.
     shown: Option<&'static str>,
     /// The views that may hold unsaved work, each with the page it is from.
@@ -250,11 +242,8 @@ impl Hub {
             away: HashSet::new(),
             clicks: HashMap::new(),
             models: HashMap::new(),
-            beside: HashMap::new(),
-            widens: HashSet::new(),
-            whole: HashSet::new(),
             side: HashMap::new(),
-            panels: HashMap::new(),
+            panel: Default::default(),
             shown: None,
             guards: vec![],
         }
@@ -786,61 +775,71 @@ impl Hub {
         cx.notify();
     }
 
-    /// What is open beside `page`.
-    pub fn beside(&self, page: &str) -> Option<AnyView> {
-        self.beside.get(page).map(|(_, view)| view.clone())
-    }
-
-    /// Whether a view page `page` lent shows on other pages: beside a
-    /// page, or as its section of the open side panel.
+    /// Whether a view page `page` lent shows on other pages: its
+    /// section of the open side panel, or its content in the open panel.
     pub fn lends(&self, page: &str) -> bool {
-        self.beside.values().any(|(from, _)| *from == page)
-            || (self.settings.side_open && self.side.contains_key(page))
-            || (self.settings.panel_open && self.panels.contains_key(page))
+        (self.settings.side_open && self.side.contains_key(page)) || self.panel.lends(page)
     }
 
-    /// Page `page`'s panel.
-    pub fn panel(&self, page: &str) -> Option<Panel> {
-        self.panels.get(page).cloned()
+    /// The panel's top content while it stands beside page `shown`: open,
+    /// or put away and still sliding (`open` says which).
+    pub fn panel_on(&self, shown: &str) -> Option<&crate::panel::Panel> {
+        self.panel.top().filter(|p| p.shows_on(shown))
     }
 
-    /// Lends `panel` as page `page`'s, or takes it back.
-    pub fn set_panel(&mut self, page: &'static str, panel: Option<Panel>, cx: &mut Context<Self>) {
-        match panel {
-            Some(panel) => self.panels.insert(page, panel),
-            None => self.panels.remove(page),
-        };
-        cx.emit(HubEvent::Lent(page));
-        cx.notify();
+    /// Opens the panel with `panel` on top. The page whose content showed
+    /// before hears it gave way, and this page that its content shows.
+    pub fn show_panel(&mut self, panel: crate::panel::Panel, cx: &mut Context<Self>) {
+        let before = self.panel_page();
+        let page = panel.page;
+        self.panel.show(panel);
+        self.lent_panel(before, Some(page), cx);
     }
 
-    /// The panels that stand while page `shown` shows, open or put away.
-    pub fn panels_on(&self, shown: &str) -> Vec<(&'static str, Panel)> {
-        let mut on: Vec<(&'static str, Panel)> = self
-            .panels
-            .iter()
-            .filter(|(page, p)| p.on.stands(page, shown))
-            .map(|(page, p)| (*page, p.clone()))
-            .collect();
-        on.sort_by_key(|(page, _)| *page);
-        on
+    /// Takes content `name` out of the panel: what it opened over shows
+    /// again, or the panel closes when none is left.
+    pub fn remove_panel(&mut self, name: &str, cx: &mut Context<Self>) {
+        let before = self.panel_page();
+        self.panel.remove(name);
+        let after = self.panel_page();
+        self.lent_panel(before, after, cx);
     }
 
-    /// Opens or puts away the panels, kept for the next run.
+    /// Opens or puts away the panel, its content kept for Ctrl+B to bring
+    /// back.
     pub fn set_panel_open(&mut self, open: bool, cx: &mut Context<Self>) {
-        if self.settings.panel_open == open {
+        if self.panel.open == open || (open && self.panel.top().is_none()) {
             return;
         }
-        self.settings.panel_open = open;
-        self.save(cx);
-        let lenders: Vec<&'static str> = self.panels.keys().copied().collect();
-        for page in lenders {
+        let before = self.panel_page();
+        self.panel.open = open;
+        let after = self.panel_page();
+        self.lent_panel(before, after, cx);
+    }
+
+    /// The page whose content shows in the open panel.
+    fn panel_page(&self) -> Option<&'static str> {
+        self.panel.top().filter(|_| self.panel.open).map(|p| p.page)
+    }
+
+    fn lent_panel(
+        &mut self,
+        before: Option<&'static str>,
+        after: Option<&'static str>,
+        cx: &mut Context<Self>,
+    ) {
+        for page in before.into_iter().chain(after) {
             cx.emit(HubEvent::Lent(page));
+        }
+        // Even when the same page shows: the shell looks where the
+        // keyboard was.
+        if before.is_none() && after.is_none() {
+            cx.emit(HubEvent::Lent(""));
         }
         cx.notify();
     }
 
-    /// The panels' width as dragged; `keep` writes it for the next run.
+    /// The panel's width as dragged; `keep` writes it for the next run.
     pub fn set_panel_width(&mut self, width: f32, keep: bool, cx: &mut Context<Self>) {
         self.settings.panel_width = crate::settings::panel_width(width);
         if keep {
@@ -894,50 +893,6 @@ impl Hub {
         cx.notify();
     }
 
-    /// Opens `view`, lent by page `from`, beside `page`, or closes what is
-    /// there.
-    pub fn set_beside(
-        &mut self,
-        page: &'static str,
-        from: &'static str,
-        view: Option<AnyView>,
-        cx: &mut Context<Self>,
-    ) {
-        let old = match view {
-            Some(view) => self.beside.insert(page, (from, view)),
-            None => self.beside.remove(page),
-        };
-        self.whole.remove(page);
-        if let Some((lender, _)) = old {
-            cx.emit(HubEvent::Lent(lender));
-        }
-        if self.beside.contains_key(page) {
-            cx.emit(HubEvent::Lent(from));
-        }
-        cx.notify();
-    }
-
-    /// Page `page` can give what is beside it its whole room.
-    pub fn widens(&mut self, page: &'static str) {
-        self.widens.insert(page);
-    }
-
-    /// Whether what is beside `page` has its whole room; `None` if the
-    /// page cannot give it.
-    pub fn whole(&self, page: &str) -> Option<bool> {
-        self.widens
-            .contains(page)
-            .then(|| self.whole.contains(page))
-    }
-
-    /// Gives what is beside `page` its whole room, or takes it back.
-    pub fn toggle_whole(&mut self, page: &'static str, cx: &mut Context<Self>) {
-        if self.widens.contains(page) && !self.whole.remove(page) {
-            self.whole.insert(page);
-        }
-        cx.notify();
-    }
-
     /// Asks `unsaved` about `view`, of page `page`, whenever the window
     /// would close, until `view` is gone.
     pub fn guard_close(&mut self, page: &'static str, view: AnyWeakEntity, unsaved: Unsaved) {
@@ -966,27 +921,6 @@ impl Hub {
         ask: Ask,
         cx: &mut Context<Self>,
     ) -> Result<(), Error> {
-        self.ask_from(from, ask, false, cx)
-    }
-
-    /// [`Hub::ask`], answered over page `from` where its answerer is live
-    /// there.
-    pub fn ask_over(
-        &mut self,
-        from: &'static str,
-        ask: Ask,
-        cx: &mut Context<Self>,
-    ) -> Result<(), Error> {
-        self.ask_from(from, ask, true, cx)
-    }
-
-    fn ask_from(
-        &mut self,
-        from: &'static str,
-        ask: Ask,
-        over: bool,
-        cx: &mut Context<Self>,
-    ) -> Result<(), Error> {
         let to = self
             .answers
             .iter()
@@ -994,12 +928,7 @@ impl Hub {
             .map(|(id, _)| *id);
         match to {
             Some(to) => {
-                cx.emit(HubEvent::Ask {
-                    to,
-                    from,
-                    ask,
-                    over,
-                });
+                cx.emit(HubEvent::Ask { to, from, ask });
                 Ok(())
             }
             None => {

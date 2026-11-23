@@ -162,11 +162,6 @@ pub struct Layer {
     /// Escape is its content's (a terminal's program), so it does not
     /// close it; it says on screen how it closes.
     pub keeps_escape: bool,
-    /// It lies beside the page rather than over it (Send), drawn within
-    /// this area: it takes the keyboard as it opens, but a click elsewhere
-    /// takes the keyboard away while it stays open, and Escape is its only
-    /// while the keyboard is in the area.
-    pub beside: Option<FocusHandle>,
 }
 
 impl Layer {
@@ -178,24 +173,12 @@ impl Layer {
             focus: None,
             dismiss: None,
             keeps_escape: false,
-            beside: None,
         }
     }
 
-    /// Lies beside the page, drawn within `area` (see [`Layer::beside`]).
-    pub fn beside(mut self, area: FocusHandle) -> Self {
-        self.beside = Some(area);
-        self
-    }
-
-    /// The keyboard is in this layer: in its focus, or within the area of
-    /// a layer beside the page.
-    pub fn has_keyboard(&self, window: &gpui::Window, cx: &App) -> bool {
+    /// The keyboard is in this layer's focus.
+    pub fn has_keyboard(&self, window: &gpui::Window) -> bool {
         self.focus.as_ref().is_some_and(|f| f.is_focused(window))
-            || self
-                .beside
-                .as_ref()
-                .is_some_and(|a| a.contains_focused(window, cx))
     }
 
     pub fn keeps_escape(mut self) -> Self {
@@ -500,61 +483,7 @@ impl Host {
             .unwrap_or_else(|| Err(Error::new("closed", "The app is closing.")))
     }
 
-    /// [`Host::ask`], and this page stays shown: the page that answers
-    /// draws over it, where that page is live here (its panel is open on
-    /// this page). Otherwise the answering page is shown, as for an ask.
-    pub fn ask_over(&self, ask: Ask, cx: &mut App) -> Result<(), Error> {
-        let from = self.page;
-        self.update(cx, |h, cx| h.ask_over(from, ask, cx))
-            .unwrap_or_else(|| Err(Error::new("closed", "The app is closing.")))
-    }
-
-    /// The view an answer put beside this page, if one is open there.
-    pub fn beside(&self, cx: &App) -> Option<AnyView> {
-        self.read(cx, |h| h.beside(self.page)).flatten()
-    }
-
-    /// The view beside page `page`, if one is open there: a view shown
-    /// beside another page learns from it whether it still shows.
-    pub fn beside_of(&self, page: &str, cx: &App) -> Option<AnyView> {
-        self.read(cx, |h| h.beside(page)).flatten()
-    }
-
-    /// Answers a beside ask ([`Ask::beside`]): `view` opens beside page
-    /// `asker`, which draws it where its layout has room, and stays shown.
-    /// While it is open this page's channels stay on, so its frames keep
-    /// arriving while another page shows.
-    pub fn show_beside(&self, asker: &'static str, view: AnyView, cx: &mut App) {
-        let page = self.page;
-        self.update(cx, |h, cx| h.set_beside(asker, page, Some(view), cx));
-    }
-
-    /// This page can give what is beside it its whole room
-    /// ([`Host::toggle_whole_beside`]).
-    pub fn widens_beside(&self, cx: &mut App) {
-        let page = self.page;
-        self.update(cx, |h, _| h.widens(page));
-    }
-
-    /// Whether what is beside page `page` has the page's whole room; `None`
-    /// when that page cannot give it, so a view offers the choice only
-    /// where it does something.
-    pub fn whole_beside(&self, page: &str, cx: &App) -> Option<bool> {
-        self.read(cx, |h| h.whole(page)).flatten()
-    }
-
-    /// Gives what is beside page `page` the page's whole room, or back.
-    pub fn toggle_whole_beside(&self, page: &'static str, cx: &mut App) {
-        self.update(cx, |h, cx| h.toggle_whole(page, cx));
-    }
-
-    /// Closes what is beside page `page` (its asker, or the answerer).
-    pub fn close_beside(&self, page: &'static str, cx: &mut App) {
-        let from = self.page;
-        self.update(cx, |h, cx| h.set_beside(page, from, None, cx));
-    }
-
-    /// Guards `view` (this page, or a view it shows beside another page)
+    /// Guards `view` (this page, or its content in the panel)
     /// against the window closing over its unsaved work: while
     /// `view` lives, closing the window asks `unsaved`, which names what it
     /// holds unsaved (a file's name) or is `None` when all is saved. While
@@ -612,10 +541,10 @@ impl Host {
         self.update(cx, |h, cx| h.notify(notification, Rc::new(click), cx));
     }
 
-    /// Puts `view` in the side panel as this page's section: the panel at
+    /// Puts `view` in the side panel as this page's section: the column at
     /// the window's left, drawn in the pages' order on the pages `on` says.
-    /// While the panel is open this page's channels stay on, as for a view
-    /// it lends beside another page.
+    /// While the side panel is open this page's channels stay on, as while
+    /// its content shows in the panel.
     pub fn lend_side(&self, view: AnyView, on: crate::hub::SideOn, cx: &mut App) {
         let page = self.page;
         assert!(
@@ -635,41 +564,37 @@ impl Host {
         self.update(cx, |h, cx| h.set_side_open(open, cx));
     }
 
-    /// Lends `view` as this page's panel: a column of its own at the
-    /// window's `edge`, on the pages `on` says, opened and put away with
-    /// Ctrl+B. While it is open this page's channels stay on.
-    pub fn lend_panel(
-        &self,
-        view: AnyView,
-        on: crate::hub::SideOn,
-        edge: crate::hub::Edge,
-        cx: &mut App,
-    ) {
+    /// Opens the panel at the window's edge with `panel` showing, as this
+    /// page's content of that name; what showed there before waits under
+    /// it, for Back. The page shown makes room for it. While it shows,
+    /// this page's channels stay on.
+    pub fn show_panel(&self, mut panel: crate::panel::Panel, cx: &mut App) {
         let page = self.page;
-        assert!(!page.is_empty(), "a panel is lent by a page's own host");
-        let panel = crate::hub::Panel { view, on, edge };
-        self.update(cx, |h, cx| h.set_panel(page, Some(panel), cx));
+        assert!(!page.is_empty(), "panel content is a page's own");
+        panel.page = page;
+        panel.name = self.layer_name(&panel.name);
+        self.update(cx, |h, cx| h.show_panel(panel, cx));
     }
 
-    /// Takes this page's panel back: the column it stood in goes, and
-    /// the page beside gets its room.
-    pub fn take_panel(&self, cx: &mut App) {
-        let page = self.page;
-        assert!(!page.is_empty(), "a panel is lent by a page's own host");
-        self.update(cx, |h, cx| h.set_panel(page, None, cx));
+    /// Takes this page's content `name` out of the panel: what it opened
+    /// over shows again, or the panel closes.
+    pub fn close_panel(&self, name: &str, cx: &mut App) {
+        let name = self.layer_name(name);
+        self.update(cx, |h, cx| h.remove_panel(&name, cx));
     }
 
-    /// Whether the panels are open.
-    pub fn panel_open(&self, cx: &App) -> bool {
-        self.read(cx, |h| h.settings.panel_open).unwrap_or(true)
+    /// Puts the panel away, keeping what it shows for Ctrl+B to bring back.
+    pub fn put_panel_away(&self, cx: &mut App) {
+        self.update(cx, |h, cx| h.set_panel_open(false, cx));
     }
 
-    /// Opens or puts away the panels, kept for the next run.
-    pub fn set_panel_open(&self, open: bool, cx: &mut App) {
-        self.update(cx, |h, cx| h.set_panel_open(open, cx));
+    /// This page's content `name` shows in the open panel.
+    pub fn panel_shows(&self, name: &str, cx: &App) -> bool {
+        let name = self.layer_name(name);
+        self.read(cx, |h| h.panel.shows(&name)).unwrap_or(false)
     }
 
-    /// The panels' width.
+    /// The panel's width.
     pub fn panel_width(&self, cx: &App) -> f32 {
         self.read(cx, |h| h.settings.panel_width)
             .unwrap_or(crate::theme::size::PANEL)
@@ -680,7 +605,7 @@ impl Host {
         self.read(cx, |h| h.shown()).flatten()
     }
 
-    /// The width the side panel and the open panels take from the window
+    /// The width the side panel and the open panel take from the window
     /// while this page shows: what is left is the page's.
     pub fn side_room(&self, cx: &App) -> f32 {
         let page = self.page;
@@ -690,12 +615,12 @@ impl Host {
             } else {
                 crate::theme::size::SIDE_SHUT
             };
-            let panels = if h.settings.panel_open && !h.panels_on(page).is_empty() {
+            let panel = if h.panel.open && h.panel_on(page).is_some() {
                 h.settings.panel_width
             } else {
                 0.
             };
-            side + panels
+            side + panel
         })
         .unwrap_or(crate::theme::size::SIDE)
     }

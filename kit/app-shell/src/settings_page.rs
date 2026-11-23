@@ -47,6 +47,8 @@ const APP: &[Setting] = &[
         .note("Ahjo Swarm's shortcuts take their keys before the terminal does."),
     Setting::toggle("show_keys", "Show shortcut keys", false)
         .note("Each shortcut's keys show at the foot of the window for a moment."),
+    Setting::choice("panel_edge", "Panel", "right", &[("right", "Right"), ("left", "Left")])
+        .note("The edge of the window the panel stands at: what opens beside the page (a file, an item, Send). Ctrl+B shows and hides it."),
 ];
 
 /// Whose a setting is: the shell's, or a page's.
@@ -499,6 +501,7 @@ impl SettingsPage {
             Owner::App => match key {
                 "node" => Value::from(hub.settings.node.clone()),
                 "show_keys" => Value::from(hub.settings.show_keys),
+                "panel_edge" => Value::from(hub.settings.panel_edge.clone()),
                 "theme" => Value::from(hub.settings.theme.clone()),
                 "size" => Value::from(hub.settings.size),
                 _ => Value::from(hub.settings.keys),
@@ -548,6 +551,8 @@ impl SettingsPage {
                 } else if key == "theme" {
                     h.settings.theme = value.as_str().unwrap_or_default().into();
                     h.apply_theme(cx);
+                } else if key == "panel_edge" {
+                    h.settings.panel_edge = value.as_str().unwrap_or_default().into();
                 } else if key == "show_keys" {
                     h.settings.show_keys = value.as_bool().unwrap_or(false);
                 } else if key == "size" {

@@ -1,4 +1,4 @@
-//! A mermaid diagram a session printed, drawn whole beside the terminals
+//! A mermaid diagram a session printed, drawn whole in the window's panel
 //! as a picture is: Send hands it to a session, fit to the panel's width at
 //! first, Fit / 1:1 / − / + as the picture viewer has them, and a drag (or
 //! the wheel) moves it about.
@@ -9,9 +9,9 @@ use ahjo_app_kit::host::Host;
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use gpui::{
-    Bounds, Context, FontWeight, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
-    ParentElement, Pixels, Point, Render, RenderImage, ScrollDelta, ScrollEvent, Styled, Window,
-    canvas, div, point, prelude::*, px,
+    Bounds, Context, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement,
+    Pixels, Point, Render, RenderImage, ScrollDelta, ScrollEvent, Styled, Window, canvas, div,
+    point, prelude::*, px,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -195,6 +195,26 @@ impl DiagramView {
     }
 }
 
+impl ahjo_app_kit::panel::PanelView for DiagramView {
+    fn head(&mut self, _: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let t = theme(cx).clone();
+        div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(pane::title(&t, "Diagram"))
+            .child(
+                pane::send(&t, "diagram-send", &self.host, self.reference())
+                    .debug_selector(|| "diagram-send".into()),
+            )
+            .when(self.drawn.is_ok(), |d| d.child(self.controls(cx)))
+            .into_any_element()
+    }
+}
+
 impl Render for DiagramView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
@@ -254,105 +274,65 @@ impl Render for DiagramView {
             .p(px(size::DIAGRAM_PAD))
             .into_any_element(),
         };
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(t.surface)
-            .border_r_1()
-            .border_color(t.divider)
-            .child(
-                div()
-                    .h(px(size::STRIP))
-                    .flex_none()
-                    .pl(px(12.))
-                    .pr(px(6.))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .border_b_1()
-                    .border_color(t.divider)
-                    .child(
-                        div()
-                            .flex_1()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Diagram"),
-                    )
-                    .child(
-                        pane::send(&t, "diagram-send", &self.host, self.reference())
-                            .debug_selector(|| "diagram-send".into()),
-                    )
-                    .when(self.drawn.is_ok(), |d| d.child(self.controls(cx)))
-                    .children(self.host.whole_beside(crate::PAGE, cx).map(|whole| {
-                        kit::whole_button(&t, whole).on_click(
-                            cx.listener(|v, _, _, cx| v.host.toggle_whole_beside(crate::PAGE, cx)),
-                        )
-                    }))
-                    .child(
-                        kit::button(&t, "diagram-close", "Close", Kind::Quiet).on_click(
-                            cx.listener(|v, _, _, cx| v.host.close_beside(crate::PAGE, cx)),
-                        ),
-                    ),
-            )
-            .child(
-                div()
-                    .id("diagram-room")
-                    .debug_selector(|| "diagram-beside".into())
-                    .flex_1()
-                    .min_h_0()
-                    .p(px(size::DIAGRAM_PAD))
-                    .bg(t.term_bg)
-                    .cursor_grab()
-                    .when(self.held.is_some(), |d| d.cursor_grabbing())
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|v, e: &MouseDownEvent, _, cx| {
-                            v.held = Some((e.position, v.pan));
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_move(cx.listener(|v, e: &MouseMoveEvent, _, cx| {
-                        let Some((from, pan)) = v.held else {
-                            return;
-                        };
-                        if e.pressed_button != Some(MouseButton::Left) {
-                            v.held = None;
-                            cx.notify();
-                            return;
-                        }
-                        v.pan = Px {
-                            w: pan.w + f32::from(e.position.x - from.x),
-                            h: pan.h + f32::from(e.position.y - from.y),
-                        };
+        div().size_full().flex().flex_col().bg(t.surface).child(
+            div()
+                .id("diagram-room")
+                .debug_selector(|| "diagram-beside".into())
+                .flex_1()
+                .min_h_0()
+                .p(px(size::DIAGRAM_PAD))
+                .bg(t.term_bg)
+                .cursor_grab()
+                .when(self.held.is_some(), |d| d.cursor_grabbing())
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|v, e: &MouseDownEvent, _, cx| {
+                        v.held = Some((e.position, v.pan));
                         cx.notify();
-                    }))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|v, _, _, cx| {
-                            v.held = None;
-                            cx.notify();
-                        }),
-                    )
-                    .on_mouse_up_out(
-                        MouseButton::Left,
-                        cx.listener(|v, _, _, cx| {
-                            v.held = None;
-                            cx.notify();
-                        }),
-                    )
-                    .on_scroll(cx.listener(|v, e: &ScrollEvent, _, cx| {
-                        let (dx, dy) = match e.delta {
-                            ScrollDelta::Pixels(p) => (f32::from(p.x), f32::from(p.y)),
-                            ScrollDelta::Lines(l) => (l.x * WHEEL_LINE, l.y * WHEEL_LINE),
-                        };
-                        // Shift turns the wheel sideways, for a mouse without a tilt.
-                        if e.modifiers.shift && dx == 0. {
-                            v.pan_by(dy, 0., cx);
-                        } else {
-                            v.pan_by(dx, dy, cx);
-                        }
-                    }))
-                    .child(body),
-            )
+                    }),
+                )
+                .on_mouse_move(cx.listener(|v, e: &MouseMoveEvent, _, cx| {
+                    let Some((from, pan)) = v.held else {
+                        return;
+                    };
+                    if e.pressed_button != Some(MouseButton::Left) {
+                        v.held = None;
+                        cx.notify();
+                        return;
+                    }
+                    v.pan = Px {
+                        w: pan.w + f32::from(e.position.x - from.x),
+                        h: pan.h + f32::from(e.position.y - from.y),
+                    };
+                    cx.notify();
+                }))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|v, _, _, cx| {
+                        v.held = None;
+                        cx.notify();
+                    }),
+                )
+                .on_mouse_up_out(
+                    MouseButton::Left,
+                    cx.listener(|v, _, _, cx| {
+                        v.held = None;
+                        cx.notify();
+                    }),
+                )
+                .on_scroll(cx.listener(|v, e: &ScrollEvent, _, cx| {
+                    let (dx, dy) = match e.delta {
+                        ScrollDelta::Pixels(p) => (f32::from(p.x), f32::from(p.y)),
+                        ScrollDelta::Lines(l) => (l.x * WHEEL_LINE, l.y * WHEEL_LINE),
+                    };
+                    // Shift turns the wheel sideways, for a mouse without a tilt.
+                    if e.modifiers.shift && dx == 0. {
+                        v.pan_by(dy, 0., cx);
+                    } else {
+                        v.pan_by(dx, dy, cx);
+                    }
+                }))
+                .child(body),
+        )
     }
 }

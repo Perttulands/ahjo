@@ -78,10 +78,8 @@ thread_local! {
     static TOY_FOCUS: RefCell<Option<FocusHandle>> = const { RefCell::new(None) };
 }
 
-/// A stand-in for the terminals: it holds the keyboard, draws what is
-/// beside it and answers Send.
+/// A stand-in for the terminals: it holds the keyboard and answers Send.
 struct Toy {
-    host: ahjo_app_kit::Host,
     focus: FocusHandle,
 }
 impl ahjo_app_kit::Page for Toy {
@@ -105,7 +103,7 @@ impl gpui::Render for Toy {
     fn render(
         &mut self,
         _: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
+        _: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
         use gpui::prelude::*;
         gpui::div()
@@ -114,12 +112,6 @@ impl gpui::Render for Toy {
             .track_focus(&self.focus)
             .debug_selector(|| "toy-page".into())
             .child("Toy")
-            .children(self.host.beside(cx).map(|view| {
-                gpui::div()
-                    .debug_selector(|| "toy-beside".into())
-                    .size_full()
-                    .child(view)
-            }))
     }
 }
 fn toy(
@@ -127,10 +119,10 @@ fn toy(
     window: &mut gpui::Window,
     cx: &mut gpui::App,
 ) -> ahjo_app_kit::Mounted {
-    ahjo_app_kit::mount(host, window, cx, |host, _, cx| {
+    ahjo_app_kit::mount(host, window, cx, |_, _, cx| {
         let focus = cx.focus_handle();
         TOY_FOCUS.with(|f| *f.borrow_mut() = Some(focus.clone()));
-        Toy { host, focus }
+        Toy { focus }
     })
 }
 
@@ -178,7 +170,7 @@ fn the_panel_searches_reads_follows_sends_and_gives_the_keyboard_back(cx: &mut T
     // listed and the search taking the keys at once.
     cx.simulate_keystrokes("alt-l");
     until(cx, "the Brain panel", |cx| {
-        cx.debug_bounds("toy-beside").is_some() && cx.debug_bounds("brain-arrival-0").is_some()
+        cx.debug_bounds("panel-right").is_some() && cx.debug_bounds("brain-arrival-0").is_some()
     });
     assert!(!toy_focused(cx));
     cx.simulate_input("first");
@@ -204,7 +196,7 @@ fn the_panel_searches_reads_follows_sends_and_gives_the_keyboard_back(cx: &mut T
         cx.debug_bounds("brain-reading-notes/second.md").is_some()
     });
     assert!(cx.debug_bounds("brain-result-0").is_none(), "one column");
-    click(cx, "brain-back");
+    click(cx, "panel-back");
     until(cx, "Back to the list", |cx| {
         cx.debug_bounds("brain-result-selected-1").is_some()
     });
@@ -237,7 +229,7 @@ fn the_panel_searches_reads_follows_sends_and_gives_the_keyboard_back(cx: &mut T
     // Esc from the page read closes the panel; the keyboard goes back.
     cx.simulate_keystrokes("escape");
     until(cx, "the panel closed by Esc", |cx| {
-        cx.debug_bounds("toy-beside").is_none()
+        cx.debug_bounds("panel-right").is_none()
     });
     assert!(toy_focused(cx), "the terminals have the keyboard again");
 
@@ -247,29 +239,29 @@ fn the_panel_searches_reads_follows_sends_and_gives_the_keyboard_back(cx: &mut T
     until(cx, "the panel again, on the page read", |cx| {
         cx.debug_bounds("brain-reading-notes/first.md").is_some()
     });
-    click(cx, "brain-back");
+    click(cx, "panel-back");
     until(cx, "the list", |cx| {
         cx.debug_bounds("brain-result-0").is_some()
     });
     cx.simulate_keystrokes("escape");
     until(cx, "the search cleared", |cx| {
-        cx.debug_bounds("brain-result-0").is_none() && cx.debug_bounds("toy-beside").is_some()
+        cx.debug_bounds("brain-result-0").is_none() && cx.debug_bounds("panel-right").is_some()
     });
     cx.simulate_keystrokes("escape");
     until(cx, "the panel closed", |cx| {
-        cx.debug_bounds("toy-beside").is_none()
+        cx.debug_bounds("panel-right").is_none()
     });
     assert!(toy_focused(cx));
 
     // Alt+L toggles it, the keyboard following.
     cx.simulate_keystrokes("alt-l");
     until(cx, "the panel reopened", |cx| {
-        cx.debug_bounds("toy-beside").is_some()
+        cx.debug_bounds("panel-right").is_some()
     });
     assert!(!toy_focused(cx));
     cx.simulate_keystrokes("alt-l");
     until(cx, "the panel closed by Alt+L", |cx| {
-        cx.debug_bounds("toy-beside").is_none()
+        cx.debug_bounds("panel-right").is_none()
     });
     assert!(toy_focused(cx));
     assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));

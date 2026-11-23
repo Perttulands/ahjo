@@ -449,23 +449,6 @@ pub fn badge(
         .child(text.into())
 }
 
-/// A view's Expand / Restore beside a page that can give it its whole
-/// room ([`crate::Host::whole_beside`]): set it beside the view's Close.
-pub fn whole_button(t: &Theme, whole: bool) -> Stateful<Div> {
-    button(
-        t,
-        "beside-whole",
-        if whole { "Restore" } else { "Expand" },
-        Kind::Quiet,
-    )
-    .debug_selector(|| "beside-whole".into())
-    .tooltip(tip(if whole {
-        "Back to its own width"
-    } else {
-        "Give it the page's whole area"
-    }))
-}
-
 /// A hover explanation, drawn like a menu: `.tooltip(kit::tip(why))`.
 pub fn tip(
     why: impl Into<SharedString>,
@@ -528,4 +511,138 @@ mod tests {
         let bounds = cx.debug_bounds("device-label").expect("the label is drawn");
         assert!(bounds.size.width > px(0.) && bounds.size.height > px(0.));
     }
+}
+
+/// Which edge of what it sizes a grip stands on. Dragged away from what it
+/// sizes, it widens it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GripEdge {
+    Left,
+    Right,
+}
+
+/// Where a drag of a grip is: under way, let go (the width to keep), or a
+/// double click asking for the width it first had.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    Moving,
+    Kept,
+    Reset,
+}
+
+/// The one grip for an edge dragged to size what it edges (a panel, a
+/// list): caught [`size::GRIP_HIT`] wide across the edge, lit along it while
+/// hovered or held. A press holds the width `now`; the drag hands `on` the
+/// width it makes, within `range`, as [`Phase::Moving`], and the release,
+/// caught wherever on the window it happens, as [`Phase::Kept`]; a double
+/// click hands [`Phase::Reset`]. The caller keeps the width. It stands
+/// absolutely at `edge` of the relative box it is put in.
+#[allow(clippy::too_many_arguments)]
+pub fn grip(
+    t: &Theme,
+    id: impl Into<ElementId>,
+    edge: GripEdge,
+    now: f32,
+    range: (f32, f32),
+    window: &mut gpui::Window,
+    cx: &mut App,
+    on: impl Fn(f32, Phase, &mut gpui::Window, &mut App) + 'static,
+) -> Stateful<Div> {
+    let id: ElementId = id.into();
+    // Where the press was, and the width then, while held.
+    let held = window.use_keyed_state(id.clone(), cx, |_, _| None::<(f32, f32)>);
+    let is_held = held.read(cx).is_some();
+    let on = std::rc::Rc::new(on);
+    let width_at = move |from: f32, width: f32, x: f32| {
+        let moved = if edge == GripEdge::Right {
+            x - from
+        } else {
+            from - x
+        };
+        (width + moved).clamp(range.0, range.1.max(range.0))
+    };
+    let (press, moving, release) = (held.clone(), held.clone(), held);
+    let (on_moving, on_release, on_reset) = (on.clone(), on.clone(), on);
+    let line = div()
+        .w(px(size::GRIP))
+        .h_full()
+        .group_hover("grip", |d| d.bg(t.accent_soft()))
+        .when(is_held, |d| d.bg(t.accent_soft()));
+    div()
+        .id(id)
+        .group("grip")
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .w(px(size::GRIP_HIT))
+        .when(edge == GripEdge::Left, |d| d.left(px(-size::GRIP_HIT / 2.)))
+        .when(edge == GripEdge::Right, |d| {
+            d.right(px(-size::GRIP_HIT / 2.))
+        })
+        .flex()
+        .justify_center()
+        .cursor_col_resize()
+        .child(line)
+        .on_mouse_down(gpui::MouseButton::Left, move |e, window, cx| {
+            cx.stop_propagation();
+            if e.click_count == 2 {
+                press.update(cx, |h, _| *h = None);
+                on_reset(now, Phase::Reset, window, cx);
+                return;
+            }
+            let x = f32::from(e.position.x);
+            press.update(cx, |h, cx| {
+                *h = Some((x, now));
+                cx.notify();
+            });
+        })
+        // The drag and its release are the window's while held, so the
+        // pointer may leave the thin edge without a cover over the window.
+        .child(
+            gpui::canvas(
+                |_, _, _| (),
+                move |_, _, window, cx| {
+                    if moving.read(cx).is_none() {
+                        return;
+                    }
+                    let (moving, release) = (moving.clone(), release.clone());
+                    let (on_moving, on_release) = (on_moving.clone(), on_release.clone());
+                    window.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, window, cx| {
+                        let Some((from, width)) = *moving.read(cx) else {
+                            return;
+                        };
+                        if phase == gpui::DispatchPhase::Bubble {
+                            on_moving(
+                                width_at(from, width, f32::from(e.position.x)),
+                                Phase::Moving,
+                                window,
+                                cx,
+                            );
+                            window.refresh();
+                        }
+                    });
+                    window.on_mouse_event(move |e: &gpui::MouseUpEvent, phase, window, cx| {
+                        if phase != gpui::DispatchPhase::Bubble
+                            || e.button != gpui::MouseButton::Left
+                        {
+                            return;
+                        }
+                        let Some((from, width)) = release.update(cx, |h, cx| {
+                            cx.notify();
+                            h.take()
+                        }) else {
+                            return;
+                        };
+                        on_release(
+                            width_at(from, width, f32::from(e.position.x)),
+                            Phase::Kept,
+                            window,
+                            cx,
+                        );
+                    });
+                },
+            )
+            .absolute()
+            .size_full(),
+        )
 }

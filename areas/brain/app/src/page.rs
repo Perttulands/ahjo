@@ -1,5 +1,5 @@
 //! The brain area's part in Swarm: a page without a tab that owns the
-//! Alt+L chord, and the Brain panel it opens over the terminals. The
+//! Alt+L chord, and the Brain it shows in the window's panel. The
 //! panel's requests live here; its state and drawing stay apart.
 use crate::state::{self, Brain, SETTLE_MS};
 use ahjo_app_kit::widgets::select::Selectable;
@@ -17,10 +17,10 @@ use gpui::{
 };
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-/// The page the Brain panel opens beside.
-const PANEL_BESIDE: &str = "sessions";
+/// The Brain in the window's panel.
+const PANEL: &str = "brain";
 
-/// Never shown: it lends its panel beside the terminals.
+/// Never shown: it shows the Brain in the window's panel.
 pub struct BrainPage {
     panel: Entity<Panel>,
 }
@@ -85,8 +85,6 @@ pub struct Panel {
     pub(crate) reader_focus: FocusHandle,
     /// Ctrl+wheel over the page read, a step not yet taken.
     pub(crate) zoom_wheel: Rc<std::cell::Cell<ahjo_app_kit::zoom::Wheel>>,
-    /// Where the keyboard was before the panel opened.
-    return_focus: Option<FocusHandle>,
     me: WeakEntity<Panel>,
 }
 
@@ -123,51 +121,32 @@ impl Panel {
             reveal: false,
             reader_focus: cx.focus_handle(),
             zoom_wheel: Default::default(),
-            return_focus: None,
             me: cx.weak_entity(),
         }
     }
 
-    /// Whether the panel is the view beside the terminals.
+    /// Whether the Brain shows in the window's panel.
     pub(crate) fn is_open(&self, cx: &App) -> bool {
-        self.host
-            .beside_of(PANEL_BESIDE, cx)
-            .zip(self.me.upgrade())
-            .is_some_and(|(beside, me)| beside.entity_id() == me.entity_id())
+        self.host.panel_shows(PANEL, cx)
     }
 
-    /// Alt+L: the panel opens over the terminals as anything beside them
-    /// does, so no session changes size, with the search taking the keys;
-    /// or it closes again.
+    /// Alt+L: the Brain shows in the window's panel, beside the page, with
+    /// the search taking the keys; or the panel is put away again.
     fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.is_open(cx) {
-            self.close(window, cx);
+            self.host.put_panel_away(cx);
             return;
         }
         let Some(me) = self.me.upgrade() else {
             return;
         };
-        self.return_focus = window.focused(cx);
         self.read_arrivals(cx);
-        self.host.show_beside(PANEL_BESIDE, me.into(), cx);
-        self.host.for_page(PANEL_BESIDE, &[]).show(cx);
+        self.host
+            .show_panel(ahjo_app_kit::panel::Panel::new(PANEL, me), cx);
         if self.state.page.is_some() {
             window.focus(&self.reader_focus, cx);
         } else {
             field::focus(&self.field, window, cx);
-        }
-    }
-
-    /// Closes the panel, the keyboard going back where it was when the
-    /// panel opened if it was in the panel.
-    pub(crate) fn close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let in_panel = self.field.read(cx).is_focused(window)
-            || self.reader_focus.contains_focused(window, cx);
-        self.host.close_beside(PANEL_BESIDE, cx);
-        if let Some(focus) = self.return_focus.take()
-            && in_panel
-        {
-            window.focus(&focus, cx);
         }
     }
 

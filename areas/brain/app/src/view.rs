@@ -1,5 +1,6 @@
-//! The Brain panel drawn: the search on top, under it what arrived lately
-//! or what the search found, or the page read in their place.
+//! The Brain drawn in the window's panel: the search in the panel's
+//! header, under it what arrived lately or what the search found; or the
+//! page read in their place, its title in the header.
 use crate::page::Panel;
 use crate::state::PageRef;
 use crate::tokens::*;
@@ -14,14 +15,14 @@ use gpui::{
 impl Render for Panel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
-        let reading = self.state.page.is_some() || self.state.page_error.is_some();
+        let reading = self.reading();
         let body = if reading {
             self.reader(&t, window, cx).into_any_element()
         } else {
             self.list(&t, cx).into_any_element()
         };
         let selected = self.select.clone();
-        // The terminals decide its width.
+        // The panel decides its width.
         div()
             .id("brain-panel")
             .debug_selector(|| "brain-panel".into())
@@ -31,25 +32,9 @@ impl Render for Panel {
             .bg(t.surface)
             .font_family(FAMILY)
             .text_color(t.text)
-            .child(self.search_head(&t, cx))
             .child(div().flex_1().min_h_0().flex().flex_col().child(body))
             .on_key_down(cx.listener(move |panel, event: &KeyDownEvent, window, cx| {
                 let k = &event.keystroke;
-                let in_field = panel.field.read(cx).is_focused(window);
-                if k.key == "escape" && !k.modifiers.modified() {
-                    // Esc clears what is typed, then closes the panel.
-                    if in_field && !panel.field.read(cx).text.is_empty() {
-                        panel.field.update(cx, |field, cx| field.set("", false, cx));
-                        panel.typed("", cx);
-                    } else {
-                        panel.close(window, cx);
-                    }
-                    cx.stop_propagation();
-                    return;
-                }
-                if in_field {
-                    return;
-                }
                 if let Some(z) = ahjo_app_kit::zoom::from_key(k) {
                     panel.zoom_read(z, 1, cx);
                     cx.stop_propagation();
@@ -67,9 +52,47 @@ impl Render for Panel {
     }
 }
 
+impl ahjo_app_kit::panel::PanelView for Panel {
+    fn head(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let t = theme(cx).clone();
+        if self.reading() {
+            return self.reader_head(&t).into_any_element();
+        }
+        // The search stands in the panel's header: Esc there clears what
+        // is typed; with nothing typed it is the panel's, and puts it away.
+        self.search_head(&t)
+            .on_key_down(cx.listener(|panel, event: &KeyDownEvent, _, cx| {
+                let k = &event.keystroke;
+                if k.key == "escape"
+                    && !k.modifiers.modified()
+                    && !panel.field.read(cx).text.is_empty()
+                {
+                    panel.field.update(cx, |field, cx| field.set("", false, cx));
+                    panel.typed("", cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .into_any_element()
+    }
+    fn can_go_back(&self, _: &gpui::App) -> bool {
+        self.reading()
+    }
+    fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.back(window, cx);
+    }
+    fn focus(&self, _: &gpui::App) -> Option<gpui::FocusHandle> {
+        Some(self.reader_focus.clone())
+    }
+}
+
 impl Panel {
-    /// The search, how many it found, and Close.
-    fn search_head(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
+    /// A page is read, or failed to be, in the list's place.
+    fn reading(&self) -> bool {
+        self.state.page.is_some() || self.state.page_error.is_some()
+    }
+
+    /// The search and how many it found.
+    fn search_head(&self, t: &Theme) -> Div {
         let count = self
             .state
             .count()
@@ -78,7 +101,13 @@ impl Panel {
                 let selector = format!("brain-count-{count}");
                 pane::meta(t, count, None).debug_selector(move || selector)
             });
-        pane::head(t)
+        div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .gap(px(size::HEAD_GAP))
             .child(
                 div()
                     .debug_selector(|| "brain-search".into())
@@ -87,12 +116,25 @@ impl Panel {
                     .child(self.field.clone()),
             )
             .children(count)
-            .child(
-                pane::act(t, "brain-close", "Close")
-                    .tooltip(kit::tip("Alt+L or Esc"))
-                    .debug_selector(|| "brain-close-beside".into())
-                    .on_click(cx.listener(|panel, _, window, cx| panel.close(window, cx))),
-            )
+    }
+
+    /// The page read: its title and Send.
+    fn reader_head(&self, t: &Theme) -> Div {
+        let head = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .gap(px(size::HEAD_GAP));
+        let Some(page) = self.state.page.as_ref() else {
+            return head.child(div().flex_1());
+        };
+        head.child(pane::title(t, page.title.clone()).debug_selector(|| "brain-page-title".into()))
+            .children(self.state.reference().map(|reference| {
+                pane::send(t, "brain-send", &self.host, reference)
+                    .debug_selector(|| "brain-send".into())
+            }))
     }
 
     /// The list: what the search found while something is typed, else
@@ -248,32 +290,20 @@ impl Panel {
     /// The page read: Back, its title and Send over the page, which
     /// scrolls and zooms on its own.
     fn reader(&mut self, t: &Theme, window: &mut Window, cx: &mut Context<Self>) -> Div {
-        let mut head = pane::head(t).child(
-            pane::act(t, "brain-back", "Back")
-                .debug_selector(|| "brain-back".into())
-                .tooltip(kit::tip("Alt+Left"))
-                .on_click(cx.listener(|panel, _, window, cx| panel.back(window, cx))),
-        );
         let Some(page) = self.state.page.clone() else {
             let why = self.state.page_error.clone().unwrap_or_default();
             let body = div()
                 .debug_selector(|| "brain-page-error".into())
                 .child(pane::empty(t, why, None).text_color(t.error));
-            return pane::detail(t, "brain-reader", head.child(div().flex_1()), body);
+            return pane::panel_detail(t, "brain-reader", None, body);
         };
-        head = head
-            .child(pane::title(t, page.title.clone()).debug_selector(|| "brain-page-title".into()))
-            .children(self.state.reference().map(|reference| {
-                pane::send(t, "brain-send", &self.host, reference)
-                    .debug_selector(|| "brain-send".into())
-            }));
         let body = self.page_body(t, &page, window, cx);
         let me = cx.weak_entity();
         let catch = ahjo_app_kit::zoom::catch(self.zoom_wheel.clone(), move |n, _, cx| {
             let z = if n > 0 { Zoom::In } else { Zoom::Out };
             let _ = me.update(cx, |panel, cx| panel.zoom_read(z, n.abs(), cx));
         });
-        pane::detail_scrolled(t, "brain-reader", &self.scroll, head, body)
+        pane::panel_detail(t, "brain-reader", Some(&self.scroll), body)
             .relative()
             .bg(t.bg)
             .child(catch)

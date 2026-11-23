@@ -198,12 +198,7 @@ fn the_files_panel_browses_sends_and_remembers_on_any_page(cx: &mut TestAppConte
         s.hub()
             .update(cx, |h, cx| h.set_panel_width(480., false, cx))
     });
-    // Put away first, so Alt+O is what brings it.
-    cx.simulate_keystrokes("alt-e");
-    slid(cx);
-    until(cx, "the panel put away", |cx| {
-        cx.debug_bounds("panel-right").is_none()
-    });
+    assert!(cx.debug_bounds("panel-right").is_none(), "nothing open yet");
     cx.simulate_keystrokes("alt-o");
     slid(cx);
     tree(cx, "file-row-folder");
@@ -216,7 +211,7 @@ fn the_files_panel_browses_sends_and_remembers_on_any_page(cx: &mut TestAppConte
         cx.debug_bounds("panel-right").is_some(),
         "at the window's edge"
     );
-    assert!(cx.debug_bounds("files-close-panel").is_some(), "Close");
+    assert!(cx.debug_bounds("panel-close").is_some(), "Close");
     click(cx, "file-row-folder");
     tree(cx, "file-row-note.txt");
     click(cx, "file-row-note.txt");
@@ -232,9 +227,8 @@ fn the_files_panel_browses_sends_and_remembers_on_any_page(cx: &mut TestAppConte
         SENT.with(|sent| sent.borrow().clone()),
         Some(format!("path {}", file.display()))
     );
-    let panel_open = |cx: &mut VisualTestContext| {
-        shell.read_with(cx, |s, cx| s.hub().read(cx).settings.panel_open)
-    };
+    let panel_open =
+        |cx: &mut VisualTestContext| shell.read_with(cx, |s, cx| s.hub().read(cx).panel.open);
     // With the keyboard in the panel, its key puts it away.
     cx.simulate_keystrokes("alt-e");
     slid(cx);
@@ -254,7 +248,7 @@ fn the_files_panel_browses_sends_and_remembers_on_any_page(cx: &mut TestAppConte
         cx.debug_bounds("file-view-note.txt").is_some() && cx.debug_bounds("files-send").is_some()
     });
     assert!(panel_open(cx));
-    click(cx, "files-back");
+    click(cx, "panel-back");
     until(cx, "back to the tree, the file picked", |cx| {
         cx.debug_bounds("picked-note.txt").is_some() && cx.debug_bounds("files-send").is_none()
     });
@@ -335,12 +329,8 @@ fn a_printed_path_opens_the_one_files_panel_and_the_windows_make_room(cx: &mut T
     until(cx, "terminal painted", |cx| {
         terminal.read_with(cx, |p, _| p.geo.borrow()[0].origin.is_some())
     });
-    // Put away, then opened for its find: at the session's folder, picked.
-    cx.simulate_keystrokes("alt-e");
-    slid(cx);
-    until(cx, "the panel put away", |cx| {
-        cx.debug_bounds("panel-right").is_none()
-    });
+    // Opened for its find: at the session's folder, picked.
+    assert!(cx.debug_bounds("panel-right").is_none(), "nothing open yet");
     cx.simulate_keystrokes("alt-o");
     slid(cx);
     until(cx, "the panel at the session's folder", |cx| {
@@ -549,8 +539,14 @@ fn browse_find_edit_save_and_send_to_a_session(cx: &mut TestAppContext) {
     assert_eq!(std::fs::read(&file).unwrap(), b"after");
     assert!(cx.debug_bounds("files-unsaved").is_none());
     click(cx, "files-send");
-    until(cx, "send drawer", |cx| cx.debug_bounds("send-go").is_some());
-    assert_eq!(shell.read_with(cx, |s, _| s.shown_page()), Some("sessions"));
+    until(cx, "Send in the panel", |cx| {
+        cx.debug_bounds("send-go").is_some()
+    });
+    assert_eq!(
+        shell.read_with(cx, |s, _| s.shown_page()),
+        Some("files"),
+        "Files stays shown, Send beside it"
+    );
     click(cx, "send-go");
     let expected = format!("path {}", file.display());
     until(cx, "reference delivered to session", |_| {
@@ -1303,9 +1299,8 @@ fn a_reload_keeps_the_tree_on_its_device(cx: &mut TestAppContext) {
     std::fs::remove_dir_all(root).unwrap();
 }
 
-struct TerminalPage {
-    host: ahjo_app_kit::Host,
-}
+/// A page beside which Files shows in the panel.
+struct TerminalPage;
 impl ahjo_app_kit::Page for TerminalPage {
     const ID: &'static str = "sessions";
     const TITLE: &'static str = "Terminals";
@@ -1314,10 +1309,9 @@ impl gpui::Render for TerminalPage {
     fn render(
         &mut self,
         _: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
+        _: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        use gpui::prelude::*;
-        gpui::div().size_full().children(self.host.beside(cx))
+        gpui::div()
     }
 }
 fn terminal(
@@ -1325,7 +1319,7 @@ fn terminal(
     window: &mut gpui::Window,
     cx: &mut gpui::App,
 ) -> ahjo_app_kit::Mounted {
-    ahjo_app_kit::mount(host, window, cx, |host, _, _| TerminalPage { host })
+    ahjo_app_kit::mount(host, window, cx, |_, _, _| TerminalPage)
 }
 
 /// A long rendered document stays in the terminal's side pane and scrolls.
@@ -1366,11 +1360,8 @@ fn markdown_beside_terminal_scrolls_inside_its_border(cx: &mut TestAppContext) {
         )
         .unwrap()
     });
-    until(cx, "rendered Markdown", |cx| {
-        cx.debug_bounds("files-markdown-rendered").is_some()
-    });
+    let viewport = ahjo_testkit::app::held_still(cx, "files-markdown-rendered");
     let viewer = cx.debug_bounds("files-viewer").unwrap();
-    let viewport = cx.debug_bounds("files-markdown-rendered").unwrap();
     let before = cx.debug_bounds("files-markdown-content").unwrap();
     assert!(viewport.top() >= viewer.top() && viewport.bottom() <= viewer.bottom());
     assert!(
@@ -2430,6 +2421,12 @@ fn every_file_act_in_the_files_panel_reaches_the_disk(cx: &mut TestAppContext) {
     let (shell, cx) = cx.add_window_view(move |window, cx| {
         ahjo_app_shell::start(&[toy, ahjo_files_app::build], Some(url), None, window, cx)
     });
+    until(cx, "node connected", |cx| {
+        shell.read_with(cx, |s, cx| {
+            !ahjo_app_kit::Host::new(s.hub()).nodes(cx).is_empty()
+        })
+    });
+    cx.simulate_keystrokes("alt-e");
     until(cx, "the panel beside the toy page, marked", |cx| {
         cx.debug_bounds("panel-right").is_some()
             && cx.debug_bounds("file-row-sub").is_some()
@@ -2486,7 +2483,7 @@ fn every_file_act_in_the_files_panel_reaches_the_disk(cx: &mut TestAppContext) {
             == Some("written")
     });
     click(cx, "files-discard");
-    click(cx, "files-back");
+    click(cx, "panel-back");
     tree(cx, "file-row-new.txt");
     menu_on(cx, "file-row-new.txt");
     menu(cx, "Delete");

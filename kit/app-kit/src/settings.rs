@@ -37,10 +37,9 @@ pub struct Settings {
     /// The side panel (the sessions, on every page) is open; put
     /// away it is a narrow edge.
     pub side_open: bool,
-    /// The panels a page lends (Files) are open; Ctrl+B opens and puts
-    /// them away.
-    pub panel_open: bool,
-    /// The panels' width, as last dragged.
+    /// The edge of the window the panel stands at: `right` or `left`.
+    pub panel_edge: String,
+    /// The panel's width, as last dragged.
     pub panel_width: f32,
     /// The fleet as last seen: each node's device and environment, so an
     /// away device keeps its name until it answers again, across restarts
@@ -77,7 +76,7 @@ impl Default for Settings {
             theme: crate::theme::Direction::default().key().into(),
             size: crate::zoom::app::DEFAULT,
             side_open: true,
-            panel_open: true,
+            panel_edge: "right".into(),
             panel_width: crate::theme::size::PANEL,
             places: Default::default(),
             sections: Map::new(),

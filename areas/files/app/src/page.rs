@@ -34,6 +34,8 @@ use std::time::Duration;
 
 /// How often a shown page asks whether what it shows changed on disk.
 const WATCH: Duration = Duration::from_secs(2);
+/// Files' content in the window's panel.
+const PANEL: &str = "files";
 /// Changes seen on disk ask for recent changes again at most this often.
 const RECENT_AGAIN: Duration = Duration::from_secs(60);
 /// A pause in typing this long sends the find.
@@ -358,8 +360,6 @@ impl Page for FilesPage {
             ],
         )
         .note("Beside the open files: the folder tree, what changed by session, or nothing."),
-        ahjo_app_kit::Setting::choice("panel", "Panel", "right", &[("right", "Right"), ("left", "Left")])
-            .note("The edge of the window the Files panel stands at on the other pages. Ctrl+B or Alt+E shows and hides it."),
     ];
     fn chords(&self, _: &App) -> Vec<ahjo_app_kit::chords::Chord> {
         let me = self.me.clone();
@@ -390,7 +390,6 @@ impl Page for FilesPage {
             self.side = kept.side;
             self.laid_out(window, cx);
         }
-        self.lend_panel(cx);
     }
     fn shown(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = on;
@@ -746,14 +745,14 @@ impl FilesPage {
             ahjo_app_kit::widgets::field::focus(&self.query, window, cx);
             return;
         }
-        if self.host.panel_open(cx) && !find {
-            panel.update(cx, |p, cx| p.close_panel(cx));
+        if self.host.panel_shows(PANEL, cx) && !find {
+            panel.update(cx, |p, cx| p.close_panel(window, cx));
             return;
         }
         // Open with its find in hand, the find's key puts it away; open
         // with the keyboard elsewhere, it takes the keyboard to the find.
         if find && panel.read(cx).seen_now(cx) && panel.read(cx).query.read(cx).is_focused(window) {
-            panel.update(cx, |p, cx| p.close_panel(cx));
+            panel.update(cx, |p, cx| p.close_panel(window, cx));
             return;
         }
         // A session outside the roots leaves the panel where it was.
@@ -772,7 +771,7 @@ impl FilesPage {
             p.refresh_recent(cx);
             p.watch(window, cx);
         });
-        self.host.set_panel_open(true, cx);
+        self.show_panel(cx);
         let (query, focus) = {
             let p = panel.read(cx);
             (p.query.clone(), p.focus.clone())
@@ -784,16 +783,13 @@ impl FilesPage {
         }
     }
 
-    /// Lends the window the Files panel, at the edge the settings say.
-    pub(crate) fn lend_panel(&self, cx: &mut App) {
+    /// Shows Files in the window's panel, on the other pages.
+    fn show_panel(&self, cx: &mut App) {
         let Some(panel) = self.panel.clone() else {
             return;
         };
-        let kept: store::Kept = self.host.setting(cx).unwrap_or_default();
-        self.host.lend_panel(
-            panel.into(),
-            ahjo_app_kit::hub::SideOn::OtherPages,
-            kept.panel_edge(),
+        self.host.show_panel(
+            ahjo_app_kit::panel::Panel::new(PANEL, panel).off_its_page(),
             cx,
         );
     }
@@ -833,17 +829,14 @@ impl FilesPage {
             p.open_at(path, line, window, cx);
             p.watch(window, cx);
         });
-        self.host.set_panel_open(true, cx);
+        self.show_panel(cx);
     }
-    /// The panel's Close, Esc: put away, its unsaved edits asked about
-    /// first.
-    pub fn close_panel(&mut self, cx: &mut Context<Self>) {
-        if !self.drafts.is_empty() {
-            self.confirm_close_panel = true;
-            cx.notify();
-            return;
+    /// Esc and Alt+E in the panel: put away, its unsaved edits asked
+    /// about first.
+    pub fn close_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if ahjo_app_kit::panel::PanelView::may_close(self, window, cx) {
+            self.host.put_panel_away(cx);
         }
-        self.host.set_panel_open(false, cx);
     }
     pub fn cancel_close_panel(&mut self, cx: &mut Context<Self>) {
         self.confirm_close_panel = false;
@@ -852,7 +845,7 @@ impl FilesPage {
     pub fn discard_and_close_panel(&mut self, cx: &mut Context<Self>) {
         self.drafts.clear();
         self.confirm_close_panel = false;
-        self.host.set_panel_open(false, cx);
+        self.host.put_panel_away(cx);
     }
     fn request(
         &self,
@@ -1773,7 +1766,7 @@ impl FilesPage {
     pub(crate) fn finish_edit(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         if self.opened.as_ref().is_some_and(|o| !o.editing) {
             if self.is_panel {
-                self.close_panel(cx);
+                self.close_panel(w, cx);
             } else {
                 w.focus(&self.focus, cx);
             }
@@ -1969,7 +1962,7 @@ impl FilesPage {
             && self.query.read(cx).is_focused(window)
             && self.query.read(cx).text.is_empty()
         {
-            self.close_panel(cx);
+            self.close_panel(window, cx);
             cx.stop_propagation();
             return;
         }
@@ -2089,7 +2082,7 @@ impl FilesPage {
             // In the panel, Esc puts it away (its drafts are
             // asked about first), with a find under the file shown too.
             "escape" if self.is_panel && (self.find.is_none() || self.opened.is_some()) => {
-                self.close_panel(cx);
+                self.close_panel(window, cx);
             }
             "escape" => {
                 if self.find.is_some() {
@@ -2817,7 +2810,7 @@ impl FilesPage {
             });
         }
         if self.is_panel {
-            self.host.panel_open(cx) && self.host.shown_page(cx) != Some(<Self as Page>::ID)
+            self.host.panel_shows(PANEL, cx) && self.host.shown_page(cx) != Some(<Self as Page>::ID)
         } else {
             self.shown
         }

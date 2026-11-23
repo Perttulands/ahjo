@@ -77,8 +77,8 @@ pub trait Page: Render + Sized + 'static {
     fn shown(&mut self, _shown: bool, _window: &mut Window, _cx: &mut Context<Self>) {}
 
     /// An ask of a kind it answers, from page `from` (`""`: the shell). A
-    /// beside ask ([`Ask::beside`]) is answered with
-    /// [`Host::show_beside`] and leaves `from` shown.
+    /// beside ask ([`Ask::beside`]) is answered in the panel
+    /// ([`Host::show_panel`]) and leaves `from` shown.
     fn answer(
         &mut self,
         _ask: Ask,

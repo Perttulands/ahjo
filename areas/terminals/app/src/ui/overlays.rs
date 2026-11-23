@@ -212,15 +212,6 @@ pub(super) fn tab_menu(ws: &Workspace, i: usize) -> Vec<MenuItem> {
 }
 
 impl Terminals {
-    /// A transparent layer under a surface: a click outside closes it, and
-    /// reaches nothing under it.
-    pub(super) fn scrim(&self, name: &'static str, cx: &mut Context<Self>) -> gpui::Div {
-        div().absolute().inset_0().occlude().on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |s, _, _, cx| s.close(name, cx)),
-        )
-    }
-
     /// Whether session `key`'s name is being edited `at` this place.
     pub(super) fn renaming_at(&self, key: &Key, at: NameAt) -> bool {
         matches!(self.surfaces.last(), Some(Surface::RenameSession(k, a)) if k == key && *a == at)
@@ -496,11 +487,7 @@ impl Terminals {
         cx.notify();
     }
 
-    pub(super) fn render_find(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_find(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
         let mut results = div()
             .id("find-results")
@@ -521,22 +508,8 @@ impl Terminals {
                 if trunc { ", stopped early" } else { "" }
             ),
         });
-        // It lies over the windows, so once a hit is shown it keeps only
-        // its query and that hit.
-        let compact = self.find_shown.is_some();
-        let shown_hit = self.find_shown.and_then(|i| {
-            let (matches, _) = found.as_ref()?;
-            let m = matches.get(i)?;
-            let name = self.fleet.session_of_pane(&m.node, m.pane)?.name.clone();
-            Some((i, matches.len(), name, m.line, m.context[1].clone()))
-        });
         let query = self.find_query.read(cx).text.clone();
-        let inset = self.beside_inset(window, cx) + self.send_room(window, cx);
-        let width = crate::store::send::width(
-            Some(size::FIND_DRAWER),
-            window.viewport_size().width / px(1.) - self.host.side_room(cx) - inset,
-        );
-        let lead = hit_lead(width, &query);
+        let lead = hit_lead(self.host.panel_width(cx), &query);
         if let Some((matches, _)) = &found {
             let cursor = self.find_cursor.min(matches.len().saturating_sub(1));
             for (i, m) in matches.iter().enumerate().take(500) {
@@ -597,20 +570,11 @@ impl Terminals {
                 );
             }
         }
-        // Open, it stands the height of the page at the right; once a hit
-        // is shown it shrinks to its query and that hit at the bottom right,
-        // so the hit's window keeps its tab and head in view, and the hit,
-        // which lands in the middle of the view, stays clear.
-        let drawer = div()
+        // It stands in the window's panel, beside the windows, which make
+        // room for it: the hit opened stays in sight beside the list.
+        div()
             .id("find")
             .debug_selector(|| "find-drawer".into())
-            .absolute()
-            .right(px(inset))
-            .occlude()
-            .map(|d| match compact {
-                true => d.bottom(px(size::TILE_GAP)),
-                false => d.top_0().bottom_0(),
-            })
             // Shift+Enter steps back; the field would take it as Enter.
             .capture_action(cx.listener(
                 |s, _: &ahjo_app_kit::widgets::field::ShiftEnter, window, cx| {
@@ -618,34 +582,10 @@ impl Terminals {
                     cx.stop_propagation();
                 },
             ))
-            .w(px(width))
+            .size_full()
             .flex()
             .flex_col()
             .bg(t.surface)
-            .border_l_1()
-            .border_color(t.divider)
-            .shadow_lg()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .h(px(size::STRIP))
-                    .px(px(12.))
-                    .flex()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(t.divider)
-                    .child(
-                        div()
-                            .flex_1()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Search output"),
-                    )
-                    .child(
-                        kit::button(&t, "find-close", "Close", Kind::Quiet)
-                            .tooltip(kit::tip("Esc"))
-                            .on_click(cx.listener(|s, _, _, cx| s.close(surface::FIND, cx))),
-                    ),
-            )
             .child(
                 div()
                     .p(px(12.))
@@ -656,30 +596,7 @@ impl Terminals {
                     .children(summary.map(|s| kit::note(&t, s, Some(t.dim)))),
             )
             .child(kit::rule(&t))
-            .map(|d| match (compact, shown_hit) {
-                (true, Some((i, n, name, line, text))) => d.child(
-                    div()
-                        .debug_selector(|| "find-shown".into())
-                        .px(px(12.))
-                        .py(px(8.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.))
-                        .child(div().text_size(px(11.)).text_color(t.dim).child(format!(
-                            "{} of {n} · {name}, line {}",
-                            i + 1,
-                            line + 1
-                        )))
-                        .child(hit_line(&t, &text, &query, lead)),
-                ),
-                _ => d.child(results),
-            });
-        div()
-            .absolute()
-            .inset_0()
-            // Compact, it leaves the windows to be read and clicked.
-            .when(!compact, |d| d.child(self.scrim(surface::FIND, cx)))
-            .child(drawer)
+            .child(results)
             .into_any_element()
     }
 }

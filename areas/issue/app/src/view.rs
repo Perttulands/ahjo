@@ -12,6 +12,7 @@ use crate::{Entry, Issue, Layout, Moved};
 use ahjo_app_kit::hub::now_ms;
 use ahjo_app_kit::theme::{FAMILY, Theme, size, theme};
 use ahjo_app_kit::widgets::kit;
+use ahjo_app_kit::widgets::kit::{GripEdge, Phase};
 use ahjo_app_kit::widgets::markdown;
 use ahjo_app_kit::widgets::pane;
 use ahjo_app_kit::widgets::select;
@@ -46,7 +47,7 @@ impl Render for Issue {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
         let viewport = f32::from(window.viewport_size().width);
-        let list = self.list_column(&t, viewport, cx);
+        let list = self.list_column(&t, viewport, window, cx);
         let detail = match self.shown_row() {
             Some(row) => {
                 self.want_text(row, cx);
@@ -157,7 +158,13 @@ impl Issue {
 
     /// The list column: its head, a line saying the project could not be
     /// read when so, and the rows.
-    fn list_column(&mut self, t: &Theme, viewport: f32, cx: &mut Context<Self>) -> Div {
+    fn list_column(
+        &mut self,
+        t: &Theme,
+        viewport: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let head = self.list_head(t, cx);
         let mut body = div().flex_1().min_h_0().flex().flex_col();
         if !self.picking
@@ -301,69 +308,39 @@ impl Issue {
                 .absolute()
                 .size_full(),
             )
-            .child(self.grip(t, cx))
+            .child(self.grip(t, width, window, cx))
     }
 
-    /// The list's edge, dragged to widen or narrow it: a press on it holds
-    /// the width it had, the drag moves it, the release keeps it.
-    fn grip(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The list's edge, dragged to widen or narrow it and kept; a double
+    /// click gives it back the width it has until dragged.
+    fn grip(
+        &self,
+        t: &Theme,
+        width: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let page = cx.weak_entity();
-        div()
-            .id("issue-grip")
-            .debug_selector(|| "issue-grip".into())
-            .absolute()
-            .top_0()
-            .bottom_0()
-            .right(px(-GRIP / 2.))
-            .w(px(GRIP))
-            .cursor(gpui::CursorStyle::ResizeLeftRight)
-            .hover(|d| {
-                d.bg(gpui::Hsla {
-                    a: GRIP_INK,
-                    ..t.accent
-                })
-            })
-            .child(
-                gpui::canvas(
-                    |_, _, _| (),
-                    move |b, _, window, _| {
-                        let (down, moving, up) = (page.clone(), page.clone(), page);
-                        window.on_mouse_event(move |e: &MouseDownEvent, phase, _, cx| {
-                            if phase == gpui::DispatchPhase::Bubble
-                                && e.button == MouseButton::Left
-                                && b.contains(&e.position)
-                            {
-                                let x = f32::from(e.position.x);
-                                let _ = down
-                                    .update(cx, |w, _| w.grip = Some((x, w.list_drawn.get().1)));
-                            }
-                        });
-                        window.on_mouse_event(move |e: &gpui::MouseMoveEvent, phase, _, cx| {
-                            if phase == gpui::DispatchPhase::Bubble
-                                && e.pressed_button == Some(MouseButton::Left)
-                            {
-                                let x = f32::from(e.position.x);
-                                let _ = moving.update(cx, |w, cx| {
-                                    if let Some((from, width)) = w.grip {
-                                        w.drag_list(width + x - from, cx);
-                                    }
-                                });
-                            }
-                        });
-                        window.on_mouse_event(move |e: &gpui::MouseUpEvent, phase, _, cx| {
-                            if phase == gpui::DispatchPhase::Bubble && e.button == MouseButton::Left
-                            {
-                                let _ = up.update(cx, |w, cx| {
-                                    if w.grip.take().is_some() {
-                                        w.keep_list(cx);
-                                    }
-                                });
-                            }
-                        });
-                    },
-                )
-                .size_full(),
-            )
+        kit::grip(
+            t,
+            "issue-grip",
+            GripEdge::Right,
+            width,
+            (LIST_MIN, LIST_MAX),
+            window,
+            cx,
+            move |width, phase, _, cx| {
+                let _ = page.update(cx, |w, cx| match phase {
+                    Phase::Moving => w.drag_list(width, cx),
+                    Phase::Kept => {
+                        w.drag_list(width, cx);
+                        w.keep_list(cx);
+                    }
+                    Phase::Reset => w.reset_list(cx),
+                });
+            },
+        )
+        .debug_selector(|| "issue-grip".into())
     }
 
     fn list_head(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
@@ -640,9 +617,10 @@ impl Issue {
         (out, picked)
     }
 
-    /// The item view: its title and actions on the head line, then what it
-    /// is, what it is part of and waits on, its text, and its children.
-    pub(crate) fn detail(
+    /// The item's head: Back on the page along its trail, its title, Send
+    /// and its menu. Beside the page it is the panel's header, whose Back
+    /// and Close are the panel's.
+    pub(crate) fn detail_head(
         &self,
         t: &Theme,
         row: usize,
@@ -650,24 +628,22 @@ impl Issue {
         cx: &mut Context<Self>,
     ) -> Div {
         let r = &self.board.rows[row];
-        let mut head = pane::head(t);
-        let back = match place {
-            Place::Panel => true,
-            _ => !self.trail.is_empty(),
+        let mut head = match place {
+            Place::Page => pane::head(t),
+            Place::Beside | Place::Panel => div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .items_center()
+                .gap(px(size::HEAD_GAP)),
         };
-        if back {
+        if place == Place::Page && !self.trail.is_empty() {
             head = head.child(
                 pane::act(t, "w-back", "Back")
                     .debug_selector(|| "w-back".into())
                     .tooltip(kit::tip("Alt+Left"))
-                    .on_click(cx.listener(move |w, _, _, cx| {
-                        if place == Place::Panel {
-                            w.panel_item = None;
-                            cx.notify();
-                        } else {
-                            w.back(cx);
-                        }
-                    })),
+                    .on_click(cx.listener(|w, _, _, cx| w.back(cx))),
             );
         }
         let title = r.title.clone();
@@ -688,23 +664,18 @@ impl Issue {
                     w.host.menu(w.item_menu(row), e.position(), cx)
                 })),
         );
-        if place != Place::Page {
-            head = head.child(
-                pane::act(t, "issue-close", "Close")
-                    .tooltip(kit::tip(if place == Place::Panel {
-                        "Alt+B"
-                    } else {
-                        "Alt+I"
-                    }))
-                    .on_click(cx.listener(move |w, _, _, cx| {
-                        if place == Place::Panel {
-                            w.close_panel(cx);
-                        } else if let Some(from) = w.beside_from {
-                            w.host.close_beside(from, cx);
-                        }
-                    })),
-            );
-        }
+        head
+    }
+
+    /// The item view: its title and actions on the head line, then what it
+    /// is, what it is part of and waits on, its text, and its children.
+    pub(crate) fn detail(
+        &self,
+        t: &Theme,
+        row: usize,
+        place: Place,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let (body, aside) = self.item_body(t, row, place, cx);
         match place {
             // On the page the item's relations and children stand in a
@@ -713,13 +684,14 @@ impl Issue {
             Place::Page => pane::detail_beside(
                 t,
                 "issue-detail",
-                head,
+                self.detail_head(t, row, place, cx),
                 body,
                 aside.map(|a| a.into_any_element()),
                 pane::Narrow::Above,
             ),
-            Place::Beside => pane::detail(t, "issue-beside-detail", head, body),
-            Place::Panel => pane::detail(t, "issue-panel-detail", head, body),
+            // Beside the page its head stands in the panel's header.
+            Place::Beside => pane::panel_detail(t, "issue-beside-detail", None, body),
+            Place::Panel => pane::panel_detail(t, "issue-panel-detail", None, body),
         }
     }
 

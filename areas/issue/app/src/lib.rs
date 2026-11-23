@@ -146,10 +146,8 @@ pub struct Issue {
     entries: Vec<Entry>,
     selected: Option<RowKey>,
     selected_node: Option<String>,
-    /// The page shows on behalf of a page beside which it lies.
-    beside_from: Option<&'static str>,
     card_line: Option<(String, String)>,
-    trail: Vec<(Option<String>, RowKey)>,
+    pub(crate) trail: Vec<(Option<String>, RowKey)>,
     prose: Rc<RefCell<Selectable>>,
     wanted: Option<(String, Option<String>)>,
     sessions: Option<Entity<SessionList>>,
@@ -162,15 +160,15 @@ pub struct Issue {
     /// The panel over the terminals, made the first time it opens, and the
     /// item it shows instead of its tree.
     panel: Option<Entity<panel::Panel>>,
-    panel_item: Option<RowKey>,
+    pub(crate) panel_item: Option<RowKey>,
     /// The panel lists the projects to choose from, and the one chosen in
     /// it since it opened.
-    panel_picking: bool,
+    pub(crate) panel_picking: bool,
     panel_project: Option<String>,
     /// The panel's find, which has the keyboard when Alt+B opens it, and
     /// what holds the keyboard in the panel once the find is left.
     panel_search: Entity<TextField>,
-    panel_focus: FocusHandle,
+    pub(crate) panel_focus: FocusHandle,
     /// Items' text, which the snapshot leaves out, as read from their
     /// node: by reference, with the update it was read for.
     texts: HashMap<String, (Option<u64>, text::Text)>,
@@ -193,11 +191,9 @@ pub struct Issue {
     /// The list's width once dragged at its edge, kept; until then a
     /// share of the room ([`tokens::LIST_SHARE_OPEN`]), so a wide window
     /// widens it. Where it starts and its width as last drawn: the room
-    /// is measured from there, and a drag starts from that width. While
-    /// the edge is held: where the press was, and the width then.
+    /// is measured from there.
     list_w: Option<f32>,
     list_drawn: Rc<std::cell::Cell<(f32, f32)>>,
-    grip: Option<(f32, f32)>,
     /// The strip and the time page show every project, not the chosen one.
     every: bool,
     /// The strip's chart is folded away to one line; kept.
@@ -268,13 +264,7 @@ impl Page for Issue {
             self.rebuild(cx);
         }
     }
-    fn answer(
-        &mut self,
-        ask: Ask,
-        from: &'static str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn answer(&mut self, ask: Ask, _: &'static str, window: &mut Window, cx: &mut Context<Self>) {
         if let Ask::Reveal {
             id,
             node,
@@ -282,7 +272,7 @@ impl Page for Issue {
             ..
         } = ask
         {
-            self.open_beside(from, id, node, window, cx);
+            self.open_beside(id, node, window, cx);
         } else if let Ask::Reveal { id, node, .. } = ask {
             self.wanted = Some((id, node.map(|n| n.to_string())));
             self.open_wanted(cx);
@@ -302,8 +292,8 @@ impl Page for Issue {
             .everywhere(),
             ahjo_app_kit::chords::Chord::new("i", "Close the item", move |_, cx| {
                 let _ = close.update(cx, |work, cx| {
-                    if let Some(from) = work.beside_from.take() {
-                        work.host.close_beside(from, cx);
+                    if work.host.panel_shows(beside::CARD, cx) {
+                        work.host.put_panel_away(cx);
                     }
                 });
             })
@@ -389,7 +379,6 @@ impl Issue {
             entries: Vec::new(),
             selected: None,
             selected_node: None,
-            beside_from: None,
             card_line: None,
             trail: Vec::new(),
             prose: Rc::default(),
@@ -419,7 +408,6 @@ impl Issue {
                 .unwrap_or(tokens::IDLE_DEFAULT),
             list_w: settings["list_width"].as_f64().map(|w| w as f32),
             list_drawn: Rc::new(std::cell::Cell::new((0., tokens::LIST_W))),
-            grip: None,
             every: layout == Layout::Time,
             chart_folded: settings["chart_folded"].as_bool().unwrap_or(false),
             state: None,
@@ -993,6 +981,13 @@ impl Issue {
         cx.notify();
     }
 
+    /// The list's width as it was until dragged: a share of the room.
+    pub fn reset_list(&mut self, cx: &mut Context<Self>) {
+        self.list_w = None;
+        self.keep("list_width", serde_json::Value::Null, cx);
+        cx.notify();
+    }
+
     pub fn keep_list(&mut self, cx: &mut Context<Self>) {
         if let Some(w) = self.list_w {
             self.keep("list_width", serde_json::json!(w.round()), cx);
@@ -1334,8 +1329,8 @@ impl Issue {
             // The terminals choose the target by their own rule (the
             // terminal this item sits beside, else the last one sent to),
             // never by guessing from the item's folder. Issue stays shown,
-            // with Send over it.
-            let _ = self.host.ask_over(
+            // with Send in the panel beside it.
+            let _ = self.host.ask(
                 Ask::Send {
                     reference: line,
                     target: None,

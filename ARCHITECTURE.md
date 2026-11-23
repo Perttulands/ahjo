@@ -226,18 +226,9 @@ reserves, or whose `everywhere` chords share a key, naming both;
   a path, reveal a thing, launch a session in a folder on a node) is plain data that goes to the page declaring it
   answers it; when none does, the asker gets an `unanswered` error and the
   status line says so. View control's `open` reaches pages the same way. A
-  beside ask (open a path beside, or a reveal marked `beside`, as an issue
-  named in a terminal opens its card) leaves the asker shown: the answering page
-  hands it a view (`Host::show_beside`), which the asker draws where its
-  layout has room (`Host::beside`), as the terminals draw an issue's card.
-  Files answers a beside ask its own way: the path opens in its edge panel
-  (below), which it opens.
-- **Views beside.** A page may also open a view of its own beside the
-  terminals without being asked, toggled by an `everywhere` chord (Work's
-  on Alt+B, Brain's on Alt+L): the same
-  `Host::show_beside`, so it lies over the terminal windows and no shared
-  session changes size. While a view a page lent is open beside another,
-  that page's channels stay on, as while it shows.
+  beside ask (Send, open a path beside, or a reveal marked `beside`, as an
+  issue named in a terminal opens its card) leaves the asker shown: the
+  answering page shows its answer in the window's panel (below).
 - **Side panel.** The column at the window's left is the shell's, on every
   page: each page may lend it one section (`Host::lend_side`), and the
   operator puts it away to a narrow edge and back (`Host::set_side_open`,
@@ -247,28 +238,45 @@ reserves, or whose `everywhere` chords share a key, naming both;
   while the panel is open, and acts through its page (a session goes to
   Sessions), so a page's own lists stay its own. A section says where it
   shows (`SideOn`).
-- **Edge panel.** A page may lend one panel to an edge of the window
-  (`Host::lend_panel`), beside the page rather than over it. Files lends the
-  window's one Files panel, at the right unless its setting says left, on
-  the other pages only, since on Files the page itself holds the same: a
-  Files of its own in one column, its list (find, recent changes, folders,
-  every act on them) or the file opened from it. Every way to Files beside
-  another page opens it: its chords, a path clicked in a terminal, a beside
-  ask from any page. One switch shows and hides every edge panel, Ctrl+B as
-  in VS Code and Files' chord (Alt+E, VS Code's Explorer key; Alt+O brings it
-  at the focused session's folder with its find), sliding in and out; its
-  width is dragged at its inner edge. Both are kept in `app.json`. Ctrl+B is
+- **The panel.** Everything a page opens beside another, asked or not,
+  stands in the window's one panel, the shell's, at the right edge unless
+  the shell's setting says left: a file (Files, in one column, its list or
+  the file opened from it), an item's card, Issues' work (Alt+B), the
+  Brain (Alt+L), Send, the output search, a diagram, a mission's open card.
+  A page shows its content there with `Host::show_panel`, a `PanelView`
+  that says its head; the shell draws the one header around it (Back
+  where it applies, the head, Close) and its edge. One content shows at a
+  time; what it opened over waits under it, and Back, or its page taking
+  it out (`Host::close_panel`, as a send that arrived does), brings it
+  back; content opened while the panel is put away starts it over, so
+  Back leads only to what showed. Content says where it stands (`SideOn`): Files not on Files, which
+  holds the same, a mission's card only on Missions. Close, Escape with
+  the keyboard in it, Ctrl+B and the content's own chord put the panel
+  away, once the content lets it (`PanelView::may_close`: unsaved edits are
+  asked about first); Ctrl+B brings it back. It never holds the keyboard:
+  a click outside it takes the keyboard away and leaves it open, and when
+  it goes with the keyboard in it the keyboard goes to the page. Ctrl+B is
   the shell's only when what has the keyboard did not take it: a terminal
   always takes it (tmux's prefix, a harness's background key, readline), so
-  Alt+E is the way from a terminal. A panel put away with the keyboard in
-  it gives the keyboard back to the page.
+  each content's chord is the way from a terminal. While a page's content
+  shows, that page's channels stay on. The width dragged at its inner edge
+  is kept in `app.json`; whether it is open is not. Every edge dragged to
+  size what it edges (the panel, Issues' list) is `kit::grip`: one hit
+  width, the release caught by the window rather than a cover over it,
+  and a double click back to the first width. Only Peek still opens
+  over the page, a glance that any click outside closes. Why one panel:
+  four kinds of side surface (a view over the terminals, a drawer that
+  held the keyboard, a squeezing Files panel, a page's own column) each
+  had its own look, keys and bugs; one panel has one of each.
 - **Window sizes.** A shared session's terminal windows change size only for
-  the operator's own act: putting a panel away or bringing it back (as a
-  path he clicks brings the Files panel), dragging an edge, opening Send. A page showing, a view beside, the
-  output search or Peek never resizes them; they lie over the windows.
-  Resizes settle before they reach tmux, so a sliding panel sends one.
+  the operator's own act: opening the panel or putting it away (as a path
+  he clicks, Send or an item's card opens it), dragging an edge. What
+  opens beside the windows makes room for itself rather than covering
+  them. A page showing, the panel's content changing, or Peek never
+  resizes them. Resizes settle before they reach tmux, so a sliding panel
+  sends one.
 - **Unsaved work.** The shell owns the window's one close handler. A page
-  guards itself, or a view it shows beside another page, with
+  guards itself, or its content in the panel, with
   `Host::guard_close`, which names what that view holds unsaved; while any
   guarded view names something, closing the window brings its page forward
   and asks over the window whether to leave it or keep editing. A view that

@@ -42,8 +42,6 @@ const TAB_GAP: f32 = 6.;
 const EDGE: f32 = 2.;
 /// How long after the last keystroke the drawer applies an edit.
 const APPLY_AFTER: std::time::Duration = std::time::Duration::from_millis(600);
-/// A file opened from a run, beside it.
-const BESIDE_W: f32 = 560.;
 /// How much a dialog's backdrop dims the page behind it.
 const SCRIM: f32 = 0.7;
 /// Flow, the mission in words, as a panel beside its board.
@@ -1376,6 +1374,57 @@ impl MissionsPage {
     }
     /// The open card's panel, the page's column of the window's edge
     /// panel: one header with its title, Delete, Done and Close.
+    /// The open card's head in the panel's header: what it is, Delete and
+    /// Done (the panel's Close beside them); a run's card or a wire says
+    /// its own.
+    pub(crate) fn editor_head(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if let Some(card) = self
+            .run
+            .inspect
+            .clone()
+            .filter(|_| self.selected_run().is_some())
+        {
+            return self.run_card_head(&card, cx);
+        }
+        if let Some(wire) = self.canvas.wire.clone() {
+            return self.wire_head(&wire, cx);
+        }
+        let t = theme(cx).clone();
+        let ed = self.editor.as_ref()?;
+        Some(
+            div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .items_center()
+                .gap(px(TAB_GAP))
+                .child(ahjo_app_kit::widgets::pane::title(
+                    &t,
+                    match ed.kind {
+                        EditKind::Step => "Step",
+                        EditKind::Input => "Input",
+                        EditKind::Gate => "Gate",
+                        EditKind::End => "End",
+                    },
+                ))
+                .when(!ed.deleting, |d| {
+                    d.child(
+                        kit::button(&t, "step-delete", "Delete", Kind::Quiet)
+                            .debug_selector(|| "step-delete".into())
+                            .on_click(cx.listener(|p, _, _, cx| p.delete_card(cx))),
+                    )
+                })
+                .child(
+                    kit::button(&t, "step-save", "Done", Kind::Primary)
+                        .debug_selector(|| "step-save".into())
+                        .on_click(cx.listener(|p, _, _, cx| p.save_step(cx))),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The open card's body in the panel, under its head.
     pub(crate) fn editor_column(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         if let Some(card) = self
             .run
@@ -1390,43 +1439,6 @@ impl MissionsPage {
         }
         let t = theme(cx).clone();
         let ed = self.editor.as_ref()?;
-        let header = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(TAB_GAP))
-            .px(px(PAD))
-            .py(px(TAB_GAP))
-            .border_b_1()
-            .border_color(t.divider)
-            .child(
-                div()
-                    .flex_1()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(match ed.kind {
-                        EditKind::Step => "Step",
-                        EditKind::Input => "Input",
-                        EditKind::Gate => "Gate",
-                        EditKind::End => "End",
-                    }),
-            )
-            .when(!ed.deleting, |d| {
-                d.child(left(
-                    kit::button(&t, "step-delete", "Delete", Kind::Quiet)
-                        .debug_selector(|| "step-delete".into())
-                        .on_click(cx.listener(|p, _, _, cx| p.delete_card(cx))),
-                ))
-            })
-            .child(
-                kit::button(&t, "step-save", "Done", Kind::Primary)
-                    .debug_selector(|| "step-save".into())
-                    .on_click(cx.listener(|p, _, _, cx| p.save_step(cx))),
-            )
-            .child(
-                kit::button(&t, "panel-close", "×", Kind::Quiet)
-                    .debug_selector(|| "panel-close".into())
-                    .on_click(cx.listener(|p, _, window, cx| p.close_editor(window, cx))),
-            );
         let body = div()
             .id("step-editor")
             .flex_1()
@@ -1972,7 +1984,6 @@ impl MissionsPage {
                 .size_full()
                 .flex()
                 .flex_col()
-                .child(header)
                 .child(body)
                 .into_any_element(),
         )
@@ -1986,8 +1997,8 @@ impl MissionsPage {
             || (self.run.inspect.is_some() && self.selected_run().is_some())
     }
 
-    /// Lends the open card's panel to the window's edge panel while a card
-    /// is open, opening the edge panel for it, and takes it back after.
+    /// Shows the open card in the window's panel while a card is open, on
+    /// this page only, and takes it out after.
     fn lend_card_panel(&mut self, cx: &mut Context<Self>) {
         let is_open = self.is_card_panel_open();
         if is_open == self.is_panel_lent {
@@ -2002,15 +2013,12 @@ impl MissionsPage {
         let host = self.host.clone();
         cx.defer(move |cx| {
             if is_open {
-                host.lend_panel(
-                    panel.into(),
-                    ahjo_app_kit::hub::SideOn::OwnPage,
-                    ahjo_app_kit::hub::Edge::Right,
+                host.show_panel(
+                    ahjo_app_kit::panel::Panel::new(card_panel::CARD, panel).on_its_page(),
                     cx,
                 );
-                host.set_panel_open(true, cx);
             } else {
-                host.take_panel(cx);
+                host.close_panel(card_panel::CARD, cx);
             }
         });
     }
@@ -2416,20 +2424,6 @@ impl Render for MissionsPage {
                 }
             }))
             .text_color(t.text)
-            // A file a run names opens here, beside the run that made it.
-            .when_some(self.host.beside(cx), |root, beside| {
-                root.child(
-                    div()
-                        .id("missions-beside")
-                        .debug_selector(|| "missions-beside".into())
-                        .w(px(BESIDE_W))
-                        .flex_none()
-                        .h_full()
-                        .border_l_1()
-                        .border_color(t.divider)
-                        .child(beside),
-                )
-            })
             .children(start_form)
             .children(form)
             .children(attempts_form)

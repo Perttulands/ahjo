@@ -266,10 +266,10 @@ impl Terminals {
                 return;
             }
             Action::Find => {
-                if self.is_open(surface::FIND) {
-                    self.close(surface::FIND, cx);
+                if self.in_panel(surface::FIND, cx) {
+                    self.host.put_panel_away(cx);
                 } else {
-                    self.open(Surface::Find, window, cx);
+                    self.show_in_panel(surface::FIND, window, cx);
                 }
                 return;
             }

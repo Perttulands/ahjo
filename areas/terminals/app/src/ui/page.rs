@@ -283,14 +283,9 @@ pub struct Terminals {
     pub places: BTreeMap<String, Place>,
     /// The page is the one shown.
     pub shown: bool,
-    /// The drawers put away while another page shows.
-    put_away: Vec<Surface>,
-    /// A view was beside the page when it last drew.
-    beside_open: bool,
-    /// Holds the keyboard for the view beside, so Esc closes it.
-    pub beside_focus: gpui::FocusHandle,
-    /// Its edge is being dragged: from where, and the width then.
-    pub beside_resizing: Option<(f32, f32)>,
+    /// The diagram last shown in the window's panel, for its chip to take
+    /// away again.
+    pub diagram: Option<gpui::WeakEntity<super::diagram::DiagramView>>,
     /// What is open over the page, bottom first, as this page opened it.
     pub surfaces: Vec<Surface>,
     /// Status lines said since the page last handed them to the app.
@@ -341,7 +336,8 @@ pub struct Terminals {
     /// The sessions Send sends to, in the order they were chosen.
     pub send_targets: Vec<Key>,
     pub send: super::send::Draft,
-    /// The Send drawer's area: the keyboard is Send's while it is within.
+    /// Send's area: a click in it that gives the keyboard to nothing
+    /// there goes on with the draft.
     pub send_area: gpui::FocusHandle,
     pub find_query: Entity<TextField>,
     pub find_cursor: usize,
@@ -422,8 +418,6 @@ pub fn now_ms() -> u64 {
 
 impl Terminals {
     pub fn new(host: Host, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // What opens beside the windows may have their whole area.
-        host.widens_beside(cx);
         let mut said = vec![];
         let settings = match Settings::load(&host, cx) {
             Ok(mut s) => {
@@ -480,11 +474,8 @@ impl Terminals {
             settings,
             places,
             shown: false,
-            put_away: vec![],
-            beside_open: false,
-            beside_focus: cx.focus_handle(),
+            diagram: None,
             send_area: cx.focus_handle(),
-            beside_resizing: None,
             surfaces: vec![],
             said,
             geo: Rc::new(RefCell::new([Geo::default(); SLOTS])),
@@ -1090,13 +1081,6 @@ impl Terminals {
         self.surfaces.retain(|x| x.name() != name);
         self.surfaces.push(s.clone());
         let focus = match &s {
-            Surface::Send => {
-                if self.send_targets.is_empty() {
-                    self.send_finder.read(cx).query.focus_handle(cx)
-                } else {
-                    self.send_note.focus_handle(cx)
-                }
-            }
             Surface::Overview => {
                 self.host
                     .channel(ahjo_terminals_contract::OVERVIEW, true, cx);
@@ -1104,13 +1088,6 @@ impl Terminals {
                 self.overview_scroll.scroll_to_item(1);
                 self.sync(cx);
                 self.focus.clone()
-            }
-            Surface::Find => {
-                self.find_cursor = 0;
-                self.find_shown = None;
-                self.find_query
-                    .update(cx, |f, cx| f.set(&f.text.clone(), true, cx));
-                self.find_query.focus_handle(cx)
             }
             Surface::Peek => self.peek_focus.clone(),
             Surface::RenameTab(_) | Surface::RenameSession(..) | Surface::ViewName(..) => {
@@ -1122,17 +1099,12 @@ impl Terminals {
         let mut layer = ahjo_app_kit::host::Layer::new(name, view)
             .cover(s.cover())
             .focus(focus.clone())
-            .on_dismiss(move |window, cx| {
-                let _ = page.update(cx, |p, cx| p.closed(name, window, cx));
+            .on_dismiss(move |_, cx| {
+                let _ = page.update(cx, |p, cx| p.closed(name, cx));
             });
         // Peek is a terminal: Escape is its program's.
         if matches!(s, Surface::Peek) {
             layer = layer.keeps_escape();
-        }
-        // Send lies beside the windows: a click on one gives it the
-        // keyboard, and the drawer keeps its draft until it is clicked.
-        if matches!(s, Surface::Send) {
-            layer = layer.beside(self.send_area.clone());
         }
         self.host.layer(layer, cx);
         window.focus(&focus, cx);
@@ -1152,8 +1124,41 @@ impl Terminals {
         self.host.close_layer(name, cx);
     }
 
+    /// Shows Send or the output search (`name`) in the window's panel,
+    /// beside whatever page shows, its field taking the keys.
+    pub fn show_in_panel(
+        &mut self,
+        name: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let focus = match name {
+            surface::FIND => {
+                self.find_cursor = 0;
+                self.find_shown = None;
+                self.find_query
+                    .update(cx, |f, cx| f.set(&f.text.clone(), true, cx));
+                self.find_query.focus_handle(cx)
+            }
+            _ if self.send_targets.is_empty() && !self.send.new_agent => {
+                self.send_finder.read(cx).query.focus_handle(cx)
+            }
+            _ => self.send_note.focus_handle(cx),
+        };
+        let view = surface::view(self.me.clone(), name, cx);
+        self.host
+            .show_panel(ahjo_app_kit::panel::Panel::new(name, view), cx);
+        window.focus(&focus, cx);
+        cx.notify();
+    }
+
+    /// Send or the search (`name`) shows in the window's panel.
+    pub fn in_panel(&self, name: &str, cx: &gpui::App) -> bool {
+        self.host.panel_shows(name, cx)
+    }
+
     /// The app closed the surface named `name`.
-    fn closed(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn closed(&mut self, name: &str, cx: &mut Context<Self>) {
         let Some(i) = self.surfaces.iter().position(|s| s.name() == name) else {
             return;
         };
@@ -1174,9 +1179,6 @@ impl Terminals {
                 self.geo.borrow_mut()[PEEK_SLOT] = Geo::default();
                 self.chips.borrow_mut()[PEEK_SLOT].clear();
                 self.sync(cx);
-            }
-            Surface::Send if self.shown => {
-                self.send_closed(window, cx);
             }
             _ => {}
         }
@@ -1722,8 +1724,11 @@ impl Terminals {
         let k = Key::of(s);
         self.place(k, window, cx);
         // The hits stay open, the query keeps the keys: Enter goes on to
-        // the next, Shift+Enter back. Where the drawer would lie over the
-        // windows it shrinks to its query and this hit.
+        // the next, Shift+Enter back. From another page, the sessions
+        // page shows the hit.
+        if !self.shown {
+            self.host.for_page(crate::PAGE, &[]).show(cx);
+        }
         self.find_cursor = i;
         self.find_shown = Some(i);
         self.find_scroll.scroll_to_item(i);
@@ -1755,13 +1760,7 @@ impl Terminals {
         let words = words.trim().to_string();
         self.clear_rail_search(cx);
         self.find_query.update(cx, |f, cx| f.set(&words, false, cx));
-        if self.is_open(surface::FIND) {
-            self.find_cursor = 0;
-            self.find_shown = None;
-            field::focus(&self.find_query, window, cx);
-        } else {
-            self.open(Surface::Find, window, cx);
-        }
+        self.show_in_panel(surface::FIND, window, cx);
         self.fleet.search(&words);
         cx.notify();
     }
@@ -1925,28 +1924,19 @@ impl Page for Terminals {
         Some(self.render_tabs(shown, window, cx))
     }
 
-    /// The search and Send drawers belong to this page: they go while
-    /// another page shows, and come back with it. Peek and Overview are a
-    /// glance at this page's sessions, so leaving the page closes them.
-    fn shown(&mut self, shown: bool, window: &mut Window, cx: &mut Context<Self>) {
+    /// Peek and Overview are a glance at this page's sessions, so leaving
+    /// the page closes them. Send and the search stand in the window's
+    /// panel, beside any page.
+    fn shown(&mut self, shown: bool, _: &mut Window, cx: &mut Context<Self>) {
         self.shown = shown;
-        if shown {
-            for s in std::mem::take(&mut self.put_away) {
-                self.open(s, window, cx);
-            }
-        } else {
-            let away: Vec<Surface> = (self.surfaces.iter())
-                .filter(|s| matches!(s, Surface::Find | Surface::Send))
-                .cloned()
-                .collect();
+        if !shown {
             let glances: Vec<Surface> = (self.surfaces.iter())
                 .filter(|s| matches!(s, Surface::Peek | Surface::Overview))
                 .cloned()
                 .collect();
-            for s in away.iter().chain(&glances) {
+            for s in &glances {
                 self.close(s.name(), cx);
             }
-            self.put_away = away;
         }
         cx.notify();
     }
@@ -2005,11 +1995,6 @@ impl Page for Terminals {
 impl Render for Terminals {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.see_focused(window);
-        // What had the keyboard went away (a view beside closed): it comes
-        // back to the terminal that looks focused. A closed view can keep
-        // the focus while it lives elsewhere, so its closing is enough.
-        let beside = self.host.beside(cx).is_some();
-        let beside_closed = std::mem::replace(&mut self.beside_open, beside) && !beside;
         // An empty window's keys are its launcher's: the terminal would drop
         // them, having no session to type into.
         let w = self.settings.workspace.focus;
@@ -2021,14 +2006,14 @@ impl Render for Terminals {
         let nowhere = window.focused(cx).is_none();
         if self.shown && self.surfaces.is_empty() {
             match launcher {
-                Some(l) if beside_closed || nowhere || self.term_focus.is_focused(window) => {
+                Some(l) if nowhere || self.term_focus.is_focused(window) => {
                     l.update(cx, |l, cx| l.focus_first(window, cx));
                 }
-                None if beside_closed || nowhere => window.focus(&self.term_focus, cx),
+                None if nowhere => window.focus(&self.term_focus, cx),
                 _ => {}
             }
         }
-        self.render_terminals(window, cx)
+        self.render_terminals(cx)
     }
 }
 

@@ -1,7 +1,6 @@
 //! What the page knows and decides, apart from how it is drawn: plain data
 //! and rules, tested without a window.
 
-pub mod beside;
 pub mod devices;
 pub mod find;
 pub mod launch;

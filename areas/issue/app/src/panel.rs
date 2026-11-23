@@ -1,6 +1,6 @@
-//! The Issue panel (Alt+B), over the terminals as anything beside them is so
-//! no session changes size: the focused session's project's open work as
-//! the page's tree, or an item from it read in place with Back and Send.
+//! Issues in the window's panel (Alt+B), beside any page: the focused
+//! session's project's open work as the page's tree, or an item from it
+//! read in place, Back going back to the tree.
 use crate::Issue;
 use crate::store::issue::outline::{self, Line};
 use crate::tokens::*;
@@ -12,8 +12,8 @@ use gpui::{
     AnyElement, AppContext, Context, Div, Entity, KeyDownEvent, Render, Window, div, prelude::*, px,
 };
 
-/// The page the Issue panel opens beside.
-pub(crate) const PANEL_BESIDE: &str = "sessions";
+/// Issues' work in the window's panel.
+pub(crate) const PANEL: &str = "issues";
 
 pub(crate) struct Panel {
     work: Entity<Issue>,
@@ -29,18 +29,37 @@ impl Render for Panel {
         self.work.update(cx, |work, cx| work.render_panel(cx))
     }
 }
+impl ahjo_app_kit::panel::PanelView for Panel {
+    fn head(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        self.work.update(cx, |work, cx| work.panel_head(cx))
+    }
+    fn can_go_back(&self, cx: &gpui::App) -> bool {
+        let work = self.work.read(cx);
+        work.panel_item.is_some() || work.panel_picking
+    }
+    fn go_back(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.work.update(cx, |work, cx| {
+            if work.panel_picking {
+                work.panel_picking = false;
+            } else {
+                work.panel_item = None;
+            }
+            cx.notify();
+        });
+    }
+    fn focus(&self, cx: &gpui::App) -> Option<gpui::FocusHandle> {
+        Some(self.work.read(cx).panel_focus.clone())
+    }
+}
+
 impl Issue {
-    /// Whether the Issue panel is the view beside the terminals.
+    /// Whether Issues' work shows in the window's panel.
     pub(crate) fn panel_open(&self, cx: &gpui::App) -> bool {
-        self.panel.as_ref().is_some_and(|panel| {
-            self.host
-                .beside_of(PANEL_BESIDE, cx)
-                .is_some_and(|b| b.entity_id() == panel.entity_id())
-        })
+        self.host.panel_shows(PANEL, cx)
     }
 
-    /// Opens the Issue panel beside the terminals and shows them, its find
-    /// holding the keyboard, or closes it.
+    /// Shows the work in the window's panel, its find holding the
+    /// keyboard, or puts the panel away.
     pub(crate) fn toggle_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.panel_open(cx) {
             self.close_panel(cx);
@@ -57,8 +76,8 @@ impl Issue {
         self.panel_picking = false;
         self.panel_project = None;
         self.panel_search.update(cx, |f, cx| f.set("", false, cx));
-        self.host.show_beside(PANEL_BESIDE, panel.into(), cx);
-        self.host.for_page(PANEL_BESIDE, &[]).show(cx);
+        self.host
+            .show_panel(ahjo_app_kit::panel::Panel::new(PANEL, panel), cx);
         field::focus(&self.panel_search, window, cx);
     }
 
@@ -99,7 +118,8 @@ impl Issue {
         found.here.into_iter().chain(found.elsewhere).collect()
     }
 
-    /// Esc in the panel: a find is cleared, else the panel closes.
+    /// Esc in the panel's find clears it; with nothing to clear, Esc is
+    /// the panel's and puts it away.
     fn panel_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if e.keystroke.key != "escape" || e.keystroke.modifiers.modified() {
             return;
@@ -107,17 +127,56 @@ impl Issue {
         let search = self.panel_search.read(cx);
         if search.is_focused(window) && !search.text.is_empty() {
             self.panel_search.update(cx, |f, cx| f.set("", false, cx));
-        } else {
-            self.close_panel(cx);
+            cx.stop_propagation();
+            cx.notify();
         }
-        cx.stop_propagation();
-        cx.notify();
     }
 
     pub(crate) fn close_panel(&mut self, cx: &mut Context<Self>) {
         if self.panel_open(cx) {
-            self.host.close_beside(PANEL_BESIDE, cx);
+            self.host.put_panel_away(cx);
         }
+    }
+
+    /// The panel's header: the item's head, else what the panel lists
+    /// (the project, chosen there).
+    fn panel_head(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let t = theme(cx).clone();
+        if let Some(row) = self
+            .panel_item
+            .as_ref()
+            .and_then(|key| self.board.position(key))
+        {
+            return self
+                .detail_head(&t, row, Place::Panel, cx)
+                .into_any_element();
+        }
+        if self.panel_picking {
+            return pane::title(&t, "Project").into_any_element();
+        }
+        let label = self
+            .panel_project(cx)
+            .map(|p| self.board.projects[p].label.clone())
+            .unwrap_or_else(|| "Project".into());
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .child(
+                pane::act(&t, "issue-panel-project", label)
+                    .debug_selector(|| "issue-panel-project".into())
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(t.text)
+                    .tooltip(kit::tip("Choose the project"))
+                    .on_click(cx.listener(|w, _, _, cx| {
+                        w.panel_picking = true;
+                        cx.notify();
+                    })),
+            )
+            .into_any_element()
     }
 
     fn render_panel(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -134,27 +193,6 @@ impl Issue {
             None if self.panel_picking => self.panel_projects(&t, cx),
             None => {
                 let project = self.panel_project(cx);
-                let label = project
-                    .map(|p| self.board.projects[p].label.clone())
-                    .unwrap_or_else(|| "Project".into());
-                let head = pane::head(&t)
-                    .child(
-                        div().flex_1().min_w_0().flex().child(
-                            pane::act(&t, "issue-panel-project", label)
-                                .debug_selector(|| "issue-panel-project".into())
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(t.text)
-                                .tooltip(kit::tip("Choose the project"))
-                                .on_click(cx.listener(|w, _, _, cx| {
-                                    w.panel_picking = true;
-                                    cx.notify();
-                                })),
-                        ),
-                    )
-                    .child(self.panel_close(&t, cx));
                 let finding = !self.panel_search.read(cx).text.trim().is_empty();
                 let lines = if finding {
                     self.panel_rows(cx)
@@ -201,7 +239,7 @@ impl Issue {
                             .into_any_element(),
                     ),
                 );
-                panel_frame(div().flex_none().child(head).child(find), rows)
+                panel_frame(find, rows)
             }
         };
         // The terminals decide its width.
@@ -220,22 +258,12 @@ impl Issue {
             .into_any_element()
     }
 
-    fn panel_close(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement + use<> {
-        pane::act(t, "issue-close-beside", "Close")
-            .debug_selector(|| "issue-close-beside".into())
-            .tooltip(kit::tip("Alt+B or Esc"))
-            .on_click(cx.listener(|w, _, _, cx| w.close_panel(cx)))
-    }
-
     /// The projects to choose from in the panel, as the page lists them:
     /// most open work first, each with how much is open. The one chosen
     /// shows in the panel now and is the page's from then on.
     fn panel_projects(&self, t: &Theme, cx: &mut Context<Self>) -> Div {
         let open = outline::open_counts(&self.board);
         let current = self.panel_project(cx);
-        let head = pane::head(t)
-            .child(pane::title(t, "Project"))
-            .child(self.panel_close(t, cx));
         let mut rows = div().flex().flex_col().py(px(size::ROW_INSET));
         for (at, p) in self.projects_named("").into_iter().enumerate() {
             let info = &self.board.projects[p];
@@ -252,11 +280,11 @@ impl Issue {
                     })),
             );
         }
-        panel_frame(head, rows)
+        panel_frame(div(), rows)
     }
 }
 
-/// The panel's head over its rows, which scroll.
+/// The panel's find (or nothing) over its rows, which scroll.
 fn panel_frame(head: Div, rows: Div) -> Div {
     div().size_full().flex().flex_col().child(head).child(
         div()

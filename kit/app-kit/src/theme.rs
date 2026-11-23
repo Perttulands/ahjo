@@ -53,10 +53,11 @@ pub mod size {
     pub const PANEL_MAX: f32 = 960.;
     /// The least a page keeps beside a panel dragged wide.
     pub const PANEL_PAGE_MIN: f32 = 400.;
-    /// The grip on a panel's inner edge: the line it lights, and how wide
-    /// it is caught, across the edge.
-    pub const PANEL_GRIP: f32 = 6.;
-    pub const PANEL_GRIP_HIT: f32 = 16.;
+    /// A grip on an edge dragged to size what it edges
+    /// ([`crate::widgets::kit::grip`]): the line it lights, and how wide it
+    /// is caught, across the edge.
+    pub const GRIP: f32 = 6.;
+    pub const GRIP_HIT: f32 = 16.;
     /// The widest a finder row's other words (a folder that found it) are
     /// drawn at its end.
     pub const FINDER_FOUND_BY: f32 = 160.;

@@ -2,8 +2,8 @@
 //! chip saying what it is ("image" with a thumbnail, or "diagram") just
 //! after the text of the row that names it (a diagram's header), where the
 //! row has room; the picture while the pointer rests on the name or the
-//! chip; on a click the whole picture in Files beside, as any path opens,
-//! or the diagram drawn beside. The grid's text never moves.
+//! chip; on a click the whole picture in Files in the window's panel, as
+//! any path opens, or the diagram drawn there. The grid's text never moves.
 
 use super::super::diagram::{self as panel, DiagramView};
 use super::super::page::Terminals;
@@ -23,6 +23,9 @@ use gpui::{
 };
 use gpui::{AppContext, ImageFormat, Task};
 use std::sync::Arc;
+
+/// A diagram in the window's panel.
+const DIAGRAM: &str = "diagram";
 
 /// The most pictures one window draws small at a time.
 const MOST: usize = 12;
@@ -323,16 +326,17 @@ impl Terminals {
         }
     }
 
-    /// A diagram drawn whole beside the terminals, as a picture opens; the
-    /// same diagram's chip takes it away again.
+    /// A diagram drawn whole in the window's panel, as a picture opens;
+    /// the same diagram's chip takes it away again.
     pub(in crate::ui) fn open_diagram(&mut self, source: String, cx: &mut Context<Self>) {
-        let shown = self
-            .host
-            .beside(cx)
-            .and_then(|v| v.downcast::<DiagramView>().ok())
-            .is_some_and(|v| v.read(cx).source == source);
+        let shown = self.host.panel_shows(DIAGRAM, cx)
+            && self
+                .diagram
+                .as_ref()
+                .and_then(|v| v.upgrade())
+                .is_some_and(|v| v.read(cx).source == source);
         if shown {
-            self.host.close_beside(crate::PAGE, cx);
+            self.host.close_panel(DIAGRAM, cx);
             return;
         }
         let colours = self.diagram_colours(cx);
@@ -352,7 +356,8 @@ impl Terminals {
                     Err(why) => (Arc::from(""), Err(why)),
                 };
                 let view = cx.new(|cx| DiagramView::new(host.clone(), source, svg, drawn, cx));
-                host.show_beside(crate::PAGE, view.into(), cx);
+                p.diagram = Some(view.downgrade());
+                host.show_panel(ahjo_app_kit::panel::Panel::new(DIAGRAM, view), cx);
             });
         })
         .detach();

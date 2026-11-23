@@ -14,8 +14,31 @@ impl MissionsPage {
         cx.notify();
     }
 
-    /// The open card's panel in the run shown: one header with its title
-    /// and Close, then what it did and what it is.
+    /// The open card's head in the run shown: its name (the panel's Close
+    /// beside it).
+    pub(super) fn run_card_head(
+        &self,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        let t = theme(cx).clone();
+        let mission = self.state.mission.as_ref()?;
+        Some(
+            div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .items_center()
+                .child(ahjo_app_kit::widgets::pane::title(
+                    &t,
+                    mission.card_name(id).to_owned(),
+                ))
+                .into_any_element(),
+        )
+    }
+
+    /// The open card's panel in the run shown: what it did and what it is.
     pub(super) fn run_card_column(
         &self,
         id: &str,
@@ -24,26 +47,6 @@ impl MissionsPage {
         let t = theme(cx).clone();
         let mission = self.state.mission.as_ref()?;
         let run = self.selected_run()?;
-        let header = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(TAB_GAP))
-            .px(px(PAD))
-            .py(px(TAB_GAP))
-            .border_b_1()
-            .border_color(t.divider)
-            .child(
-                div()
-                    .flex_1()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(mission.card_name(id).to_owned()),
-            )
-            .child(
-                kit::button(&t, "panel-close", "×", Kind::Quiet)
-                    .debug_selector(|| "panel-close".into())
-                    .on_click(cx.listener(|p, _, window, cx| p.close_editor(window, cx))),
-            );
         let fact = |label: &'static str, words: String| {
             div()
                 .flex()
@@ -150,7 +153,6 @@ impl MissionsPage {
                 .size_full()
                 .flex()
                 .flex_col()
-                .child(header)
                 .child(body)
                 .into_any_element(),
         )

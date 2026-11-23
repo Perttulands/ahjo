@@ -110,8 +110,41 @@ impl MissionsPage {
         )
     }
 
-    /// The open wire's panel: its two ends, each opening its card, and
-    /// Delete while the mission is not running.
+    /// The open wire's head: what it is, and Delete while the mission is
+    /// not running (the panel's Close beside them).
+    pub(super) fn wire_head(&self, id: &str, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let t = theme(cx).clone();
+        let mission = self.state.mission.as_ref()?;
+        let wire = mission.connections.iter().find(|c| c.id == id)?;
+        let running = self.selected_run().is_some();
+        let unwire = MissionChange::UnwireConnection {
+            from: wire.from.clone(),
+            to: wire.to.clone(),
+        };
+        Some(
+            div()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .flex()
+                .items_center()
+                .gap(px(TAB_GAP))
+                .child(ahjo_app_kit::widgets::pane::title(&t, "Wire"))
+                .when(!running, |d| {
+                    d.child(
+                        kit::button(&t, "wire-delete", "Delete", Kind::Quiet)
+                            .debug_selector(|| "wire-delete".into())
+                            .on_click(cx.listener(move |p, _, window, cx| {
+                                p.write_board(unwire.clone(), WriteMode::Edit, cx);
+                                p.close_editor(window, cx);
+                            })),
+                    )
+                })
+                .into_any_element(),
+        )
+    }
+
+    /// The open wire's panel: its two ends, each opening its card.
     pub(super) fn wire_column(&self, id: &str, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let t = theme(cx).clone();
         let mission = self.state.mission.as_ref()?;
@@ -123,7 +156,6 @@ impl MissionsPage {
             "fail" => format!("{}, when it fails", mission.card_name(from)),
             _ => mission.card_name(from).to_owned(),
         };
-        let running = self.selected_run().is_some();
         let end = |selector: &'static str, words: String, card: &str| {
             let card = card.to_owned();
             left(
@@ -132,40 +164,6 @@ impl MissionsPage {
                     .on_click(cx.listener(move |p, _, _, cx| p.edit_step(&card, cx))),
             )
         };
-        let unwire = MissionChange::UnwireConnection {
-            from: wire.from.clone(),
-            to: wire.to.clone(),
-        };
-        let header = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(TAB_GAP))
-            .px(px(PAD))
-            .py(px(TAB_GAP))
-            .border_b_1()
-            .border_color(t.divider)
-            .child(
-                div()
-                    .flex_1()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Wire"),
-            )
-            .when(!running, |d| {
-                d.child(
-                    kit::button(&t, "wire-delete", "Delete", Kind::Quiet)
-                        .debug_selector(|| "wire-delete".into())
-                        .on_click(cx.listener(move |p, _, window, cx| {
-                            p.write_board(unwire.clone(), WriteMode::Edit, cx);
-                            p.close_editor(window, cx);
-                        })),
-                )
-            })
-            .child(
-                kit::button(&t, "panel-close", "×", Kind::Quiet)
-                    .debug_selector(|| "panel-close".into())
-                    .on_click(cx.listener(|p, _, window, cx| p.close_editor(window, cx))),
-            );
         let body = div()
             .id("wire-panel")
             .flex_1()
@@ -184,7 +182,6 @@ impl MissionsPage {
                 .size_full()
                 .flex()
                 .flex_col()
-                .child(header)
                 .child(body)
                 .into_any_element(),
         )

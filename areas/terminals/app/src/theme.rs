@@ -30,17 +30,6 @@ pub mod size {
     pub const ASK_MARK: f32 = 12.;
     /// A rail row's menu button, at the row's end.
     pub const ROW_MENU: f32 = 20.;
-    /// The least a view beside the windows (a file a link named, a
-    /// diagram) narrows to.
-    pub const BESIDE_MIN: f32 = 320.;
-    /// The edge between that view and the windows, dragged to size it, and
-    /// the grip marked on it.
-    pub const BESIDE_SEAM: f32 = 12.;
-    pub const BESIDE_GRIP_W: f32 = 3.;
-    pub const BESIDE_GRIP_H: f32 = 32.;
-    /// The width a window keeps readable beside a view opened over the
-    /// windows.
-    pub const WINDOW_MIN: f32 = 440.;
     pub const TILE_HEAD: f32 = 34.;
     pub const TILE_GAP: f32 = 6.;
     /// How far either side of the gap between two windows still counts as
@@ -48,15 +37,6 @@ pub mod size {
     pub const SEAM_PAD: f32 = 12.;
     /// The widest a session's tag grows in a window's head.
     pub const TAG_MAX: f32 = 320.;
-    /// The Send drawer: its width with nothing remembered, the least it may
-    /// be, and how much of the page it leaves uncovered (CHROTE's SendDrawer).
-    pub const DRAWER: f32 = 380.;
-    pub const DRAWER_MIN: f32 = 320.;
-    pub const DRAWER_ROOM: f32 = 480.;
-    /// Scrollback search shares the same space rules as Send.
-    pub const FIND_DRAWER: f32 = 460.;
-    /// The grip at the drawer's inner edge that resizes it.
-    pub const DRAWER_GRIP: f32 = 6.;
     pub const LAUNCHER: f32 = 420.;
     /// The share of an empty window above its launcher.
     pub const LAUNCHER_TOP: f32 = 0.12;

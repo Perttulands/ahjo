@@ -27,8 +27,9 @@ enum Refocus {
     Layers { moved: bool, lost: bool },
     /// Another page shows.
     PageShown,
-    /// The panels were put away with the keyboard in one.
-    PanelPutAway,
+    /// The panel was put away, or what it showed went, with the keyboard
+    /// in it.
+    PanelGone,
 }
 
 /// How long the keys a chord was typed with stay on screen.
@@ -48,8 +49,8 @@ pub struct Shell {
     /// Pages whose drawing failed, and why, until Try again.
     pub(crate) failed: HashMap<&'static str, String>,
     pub(crate) view: ViewControl,
-    /// Pages whose channels are on: the one shown, and those that lent a
-    /// view beside a page.
+    /// Pages whose channels are on: the one shown, and those whose section
+    /// or content shows on it.
     channels_on: HashSet<&'static str>,
     /// The operator chose to close the window over unsaved work.
     leaving: bool,
@@ -62,19 +63,15 @@ pub struct Shell {
     pub(crate) veils: crate::veil::Veils,
     /// The wheel's part of a step toward the app's zoom.
     pub(crate) app_wheel: std::rc::Rc<std::cell::Cell<ahjo_app_kit::zoom::Wheel>>,
-    /// A page answering over another ([`HubEvent::Ask`]'s `over`): the
-    /// answerer's index and the asker's. Leaving the asker tells the
-    /// answerer it is hidden, so what it opened over the asker goes too.
-    pub(crate) over: Option<(usize, usize)>,
-    /// The panels as last drawn: open or not, and when they last began to
+    /// The panel as last drawn: open or not, and when it last began to
     /// slide open or away.
     pub(crate) panel_drawn: Option<bool>,
-    /// Whether the panels were open when the hub last said so: putting
-    /// them away hands the keyboard back if it was in one.
-    panel_was_open: bool,
+    /// What the open panel showed when the hub last said so: when it goes
+    /// with the keyboard in it, the keyboard goes where it can be used.
+    panel_was: Option<String>,
     pub(crate) panel_moved: Option<Instant>,
-    /// A panel's inner edge is being dragged.
-    pub(crate) panel_dragging: bool,
+    /// The panel's area: the keyboard is in the panel while it is within.
+    pub(crate) panel_focus: FocusHandle,
     /// This app's updates, when it runs from an install (`update`).
     pub(crate) updates: Option<Entity<ahjo_app_kit::update::Updates>>,
     _subscriptions: Vec<Subscription>,
@@ -216,7 +213,6 @@ impl Shell {
             cx.defer_in(window, move |s, window, cx| s.show(first, window, cx));
         }
         let size = hub.read(cx).settings.size;
-        let panel_was_open = hub.read(cx).settings.panel_open;
         window.set_ui_scale(ahjo_app_kit::zoom::app::scale(size), cx);
         Self {
             hub,
@@ -237,11 +233,10 @@ impl Shell {
             status_expiry: None,
             veils: Default::default(),
             app_wheel: Default::default(),
-            over: None,
             panel_drawn: None,
-            panel_was_open,
+            panel_was: None,
             panel_moved: None,
-            panel_dragging: false,
+            panel_focus: cx.focus_handle(),
             updates: None,
             _subscriptions: subscriptions,
         }
@@ -262,26 +257,61 @@ impl Shell {
     }
 
     /// A zoom key no surface with a zoom of its own took sizes the app.
-    pub(crate) fn zoom_key(&mut self, e: &KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn zoom_key(
+        &mut self,
+        e: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(z) = ahjo_app_kit::zoom::from_key(&e.keystroke) {
             cx.stop_propagation();
             self.hub.update(cx, |h, cx| h.zoom_app(z, 1, cx));
-        } else if panel_key(&e.keystroke) && self.toggle_panel(cx) {
+        } else if panel_key(&e.keystroke) && self.toggle_panel(window, cx) {
             cx.stop_propagation();
         }
     }
 
-    /// Opens or puts away the panels standing on the page shown, as
-    /// Ctrl+B does; whether there were any.
-    pub(crate) fn toggle_panel(&mut self, cx: &mut Context<Self>) -> bool {
+    /// Ctrl+B: puts the panel away, or brings back what it showed, with
+    /// the keyboard in it; whether there was anything to bring.
+    pub(crate) fn toggle_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let shown = self.shown_page().unwrap_or_default();
         let hub = self.hub.read(cx);
-        if hub.panels_on(shown).is_empty() {
+        let Some(top) = hub.panel_on(shown).cloned() else {
             return false;
+        };
+        if hub.panel.open {
+            self.put_panel_away(window, cx);
+        } else {
+            self.hub.update(cx, |h, cx| h.set_panel_open(true, cx));
+            if let Some(focus) = top.focus(cx) {
+                window.focus(&focus, cx);
+            }
         }
-        let open = !hub.settings.panel_open;
-        self.hub.update(cx, |h, cx| h.set_panel_open(open, cx));
         true
+    }
+
+    /// The panel's Close, Escape in it and Ctrl+B: it goes once what it
+    /// shows lets it (unsaved edits are asked about first).
+    pub(crate) fn put_panel_away(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(top) = self.hub.read(cx).panel.top().cloned() else {
+            return;
+        };
+        if top.may_close(window, cx) {
+            self.hub.update(cx, |h, cx| h.set_panel_open(false, cx));
+        }
+    }
+
+    /// The panel's Back: what it shows steps back, or else it goes and
+    /// what it opened over shows again.
+    pub(crate) fn panel_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(top) = self.hub.read(cx).panel.top().cloned() else {
+            return;
+        };
+        if top.can_go_back(cx) {
+            top.go_back(window, cx);
+        } else if top.may_close(window, cx) {
+            self.hub.update(cx, |h, cx| h.remove_panel(&top.name, cx));
+        }
     }
 
     pub fn hub(&self) -> &Entity<Hub> {
@@ -298,19 +328,13 @@ impl Shell {
     }
 
     /// Shows page `i`: the one shown before hides and turns its channels
-    /// off unless it lent a view beside a page, this one turns its on. A
-    /// page without a tab is never shown.
+    /// off unless what it lent shows, this one turns its on. A page
+    /// without a tab is never shown.
     pub fn show(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         if self.shown == Some(i) || !self.pages[i].meta.tab {
             return;
         }
         let old = self.shown.replace(i);
-        if let Some((answerer, asker)) = self.over.take()
-            && i != asker
-            && i != answerer
-        {
-            self.pages[answerer].shown(false, window, cx);
-        }
         let id = self.pages[i].meta.id;
         self.hub.update(cx, |h, _| h.set_shown(Some(id)));
         if let Some(old) = old {
@@ -323,8 +347,8 @@ impl Shell {
         cx.notify();
     }
 
-    /// Turns page `i`'s channels on while it shows or a view it lent is
-    /// beside a page, and off otherwise.
+    /// Turns page `i`'s channels on while it shows or what it lent shows,
+    /// and off otherwise.
     fn sync_channels(&mut self, i: usize, cx: &mut Context<Self>) {
         let meta = self.pages[i].meta;
         let wanted = self.shown == Some(i) || self.hub.read(cx).lends(meta.id);
@@ -370,19 +394,10 @@ impl Shell {
                     log::warn!("a frame of kind {kind:#04x} from {node} that no page takes");
                 }
             }
-            HubEvent::Ask {
-                to,
-                from,
-                ask,
-                over,
-            } => {
+            HubEvent::Ask { to, from, ask } => {
                 if let Some(i) = self.index_of(to) {
-                    let over = *over && self.hub.read(cx).lends(to);
-                    if !ask.beside() && !over {
+                    if !ask.beside() {
                         self.show(i, window, cx);
-                    }
-                    if over && let Some(f) = self.index_of(from) {
-                        self.over = Some((i, f));
                     }
                     self.pages[i].answer(ask.clone(), from, window, cx);
                 }
@@ -394,15 +409,21 @@ impl Shell {
                 if let Some(i) = self.index_of(id) {
                     self.sync_channels(i, cx);
                 }
-                // A panel put away with the keyboard in it would take the
-                // keyboard with it, and no key would reach a chord: it goes
-                // back to the page, or the layer on top.
-                let open = self.hub.read(cx).settings.panel_open;
-                if std::mem::replace(&mut self.panel_was_open, open) && !open {
-                    let page = self.shown.and_then(|i| self.pages[i].focus(cx));
-                    let in_page = page.is_some_and(|f| f.contains_focused(window, cx));
-                    if !in_page {
-                        self.refocus(Refocus::PanelPutAway, window, cx);
+                // What the panel showed went with the keyboard in it (put
+                // away, or closed by its page): the keyboard would go with
+                // it and no key would reach a chord. It goes to what shows
+                // there now, else back to the page or the layer on top.
+                let hub = self.hub.read(cx);
+                let now = hub.panel.top().filter(|_| hub.panel.open).cloned();
+                let was =
+                    std::mem::replace(&mut self.panel_was, now.as_ref().map(|p| p.name.clone()));
+                if was.is_some()
+                    && was != self.panel_was
+                    && self.panel_focus.contains_focused(window, cx)
+                {
+                    match now.and_then(|p| p.focus(cx)) {
+                        Some(focus) => window.focus(&focus, cx),
+                        None => self.refocus(Refocus::PanelGone, window, cx),
                     }
                 }
             }
@@ -425,7 +446,7 @@ impl Shell {
                 // The keyboard was in a layer that closed, or nowhere.
                 let lost = before.is_none()
                     || closed.iter().any(|s| match s {
-                        Surface::Layer(l) => l.has_keyboard(window, cx),
+                        Surface::Layer(l) => l.has_keyboard(window),
                         Surface::Menu(_) => false,
                     });
                 for s in closed {
@@ -479,15 +500,12 @@ impl Shell {
     }
 
     /// Gives the keyboard to the top layer that takes it, else to the shown
-    /// page. A closed layer's dismiss that moved the keyboard itself (Send
-    /// handing it back to the view beside it came from) keeps it there
-    /// while no layer is left to take it. A layer beside the page (Send)
-    /// does not take the keyboard from where the operator put it: only
-    /// what lost it, from a layer that closed, comes back to it; and a
-    /// page that shows takes it unless that layer has it.
+    /// page. A closed layer's dismiss that moved the keyboard itself keeps
+    /// it there while no layer is left to take it. A layer closing with
+    /// the keyboard elsewhere (in the panel) leaves it there.
     fn refocus(&mut self, why: Refocus, window: &mut Window, cx: &mut Context<Self>) {
         let top = self.hub.read(cx).stack.iter().rev().find_map(|s| match s {
-            Surface::Layer(l) => l.focus.clone().map(|f| (f, l.clone())),
+            Surface::Layer(l) => l.focus.clone(),
             Surface::Menu(_) => None,
         });
         let page = || {
@@ -497,16 +515,13 @@ impl Shell {
         };
         let to = match (top, why) {
             (None, Refocus::Layers { moved: true, .. }) => return,
-            (None, _) => page(),
-            (Some((_, l)), _) if l.beside.is_some() && l.has_keyboard(window, cx) => return,
-            (Some((f, l)), Refocus::Layers { lost, .. }) if l.beside.is_some() => {
-                if !lost {
-                    return;
-                }
-                f
+            (None, Refocus::Layers { lost: false, .. })
+                if self.panel_focus.contains_focused(window, cx) =>
+            {
+                return;
             }
-            (Some((_, l)), Refocus::PageShown) if l.beside.is_some() => page(),
-            (Some((f, _)), _) => f,
+            (None, _) => page(),
+            (Some(f), _) => f,
         };
         window.focus(&to, cx);
     }
@@ -610,12 +625,7 @@ impl Shell {
         }
         let all = self.chords(cx);
         let hub = self.hub.read(cx);
-        // A layer beside the page has Escape only while it has the keyboard:
-        // typed into a terminal beside Send, Escape is the program's.
-        let top = hub.stack.top().filter(|s| match s {
-            Surface::Layer(l) => l.beside.is_none() || l.has_keyboard(window, cx),
-            Surface::Menu(_) => true,
-        });
+        let top = hub.stack.top();
         let keyboard = Keyboard {
             on: hub.settings.keys,
             leader: self.leader,

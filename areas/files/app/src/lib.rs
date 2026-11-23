@@ -15,11 +15,10 @@ pub fn build(
 ) -> ahjo_app_kit::Mounted {
     ahjo_app_kit::mount(host, window, cx, |host, window, cx| {
         let mut page = FilesPage::new(host.clone(), window, cx);
-        // The window's one Files panel, on the other pages: a Files of its
+        // Files in the window's panel, on the other pages: a Files of its
         // own in one column, the list or the file opened from it.
         let panel = gpui::AppContext::new(cx, |cx| FilesPage::panel(host, window, cx));
         page.panel = Some(panel);
-        page.lend_panel(cx);
         page
     })
 }

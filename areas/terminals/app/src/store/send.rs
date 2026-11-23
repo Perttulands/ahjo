@@ -8,7 +8,6 @@
 
 use crate::store::sessions::Key;
 use crate::store::sessions::Running;
-use crate::theme::size;
 use ahjo_terminals_contract::{Outcome, Session};
 
 /// The message as the session receives it: the reference, the note, then
@@ -183,17 +182,6 @@ pub fn launch_paste(all: &[Session], node: &str, sid: &str) -> Option<(Key, bool
 pub fn first_target(all: &[Session], named: Option<&Key>, focused: Option<&Key>) -> Option<Key> {
     let live = |k: &&Key| crate::store::sessions::find(all, k).is_some();
     named.filter(live).or(focused.filter(live)).cloned()
-}
-
-/// The drawer's width: the one remembered on this device, else the
-/// default; never under the least, and never so wide that it leaves less
-/// of `room` uncovered than its share.
-pub fn width(remembered: Option<f32>, room: f32) -> f32 {
-    let wanted = remembered
-        .filter(|w| w.is_finite())
-        .unwrap_or(size::DRAWER)
-        .max(size::DRAWER_MIN);
-    wanted.min((room - size::DRAWER_ROOM).max(size::DRAWER_MIN))
 }
 
 /// An attachment's size in 1024s: B, KB, MB, GB, TB; one decimal below 10.
@@ -409,16 +397,5 @@ mod tests {
             Some((Key::of(&new), false))
         );
         assert_eq!(launch_paste(&[new], "rig", "$8"), None);
-    }
-
-    #[test]
-    fn a_remembered_width_is_kept_within_the_room() {
-        assert_eq!(width(None, 2000.), size::DRAWER);
-        assert_eq!(width(Some(600.), 2000.), 600.);
-        assert_eq!(width(Some(100.), 2000.), size::DRAWER_MIN);
-        assert_eq!(width(Some(f32::NAN), 2000.), size::DRAWER);
-        assert_eq!(width(Some(900.), 1000.), 520.);
-        assert_eq!(width(Some(900.), 700.), size::DRAWER_MIN);
-        assert_eq!(width(Some(700.), 1100.), 620.);
     }
 }

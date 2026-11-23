@@ -33,19 +33,16 @@ pub const AWAY_W: f32 = 120.;
 /// The facets column beside the list.
 pub const FACETS_W: f32 = 184.;
 /// The list's width until its edge is dragged, and the least and most a
-/// drag gives it; the grip at its edge.
+/// drag gives it.
 pub const LIST_W: f32 = 520.;
 pub const LIST_MIN: f32 = 320.;
 pub const LIST_MAX: f32 = 960.;
-pub const GRIP: f32 = 6.;
-/// The most of its row the list takes, and the grip's ink when the mouse
-/// is on it.
+/// The most of its row the list takes.
 pub const LIST_SHARE: f32 = 0.6;
 /// The list's share of the room beside the facets until its edge is
 /// dragged, at least [`LIST_W`] and at most this.
 pub const LIST_SHARE_OPEN: f32 = 0.4;
 pub const LIST_OPEN_MAX: f32 = 760.;
-pub const GRIP_INK: f32 = 0.5;
 
 /// The time strip over the list: its height, and the room its axis
 /// labels take on the left (counts), right (open count) and below (days);

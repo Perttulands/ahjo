@@ -22,10 +22,6 @@ pub struct Settings {
     pub copy_on_select: bool,
     pub collapsed_groups: Vec<String>,
     pub recent_targets: Vec<String>,
-    /// The Send drawer's width, as last dragged on this device.
-    pub send_width: Option<f32>,
-    /// The width of a view beside the windows, as last dragged here.
-    pub beside_width: Option<f32>,
     pub last_harness: Option<String>,
     /// The folders launched in, the latest first, by node and user
     /// ([`launched_in`]).
@@ -105,8 +101,6 @@ impl Default for Settings {
             copy_on_select: true,
             collapsed_groups: vec![],
             recent_targets: vec![],
-            send_width: None,
-            beside_width: None,
             last_harness: None,
             launched_folders: Default::default(),
             flags: Default::default(),
@@ -133,7 +127,7 @@ impl Settings {
     /// Both startup and live settings reloads use the same, one-time rewrite.
     pub fn load(host: &Host, cx: &mut App) -> Result<Self, Error> {
         let mut section: Map<String, Value> = host.setting(cx)?;
-        let migrated = migrate_completion_hooks(&mut section);
+        let migrated = migrate_completion_hooks(&mut section) | retire_widths(&mut section);
         let settings = Self::deserialize(Value::Object(section.clone())).map_err(|error| {
             Error::new("settings_unreadable", format!("Sessions settings: {error}"))
         })?;
@@ -203,6 +197,13 @@ fn migrate_completion_hooks(section: &mut Map<String, Value>) -> bool {
         }
     }
     migrated
+}
+
+/// Send's and the view beside's own widths went with them into the
+/// window's panel, whose width the app keeps.
+fn retire_widths(section: &mut Map<String, Value>) -> bool {
+    let send = section.remove("send_width").is_some();
+    section.remove("beside_width").is_some() || send
 }
 
 /// Where [`Settings::launched_folders`] keeps a node's folders for `user`
@@ -292,5 +293,19 @@ mod tests {
         // A settings file that is not an object does not read; the app's
         // settings, which hold this section, are where that is decided.
         assert!(ahjo_app_kit::settings::Settings::parse("[1]").is_none());
+    }
+
+    #[test]
+    fn widths_kept_before_the_panel_are_dropped_and_the_rest_reads() {
+        let mut section = serde_json::json!({
+            "font_size": 15.,
+            "send_width": 420.,
+            "beside_width": 514.,
+        });
+        let section = section.as_object_mut().unwrap();
+        assert!(retire_widths(section));
+        let read = Settings::deserialize(Value::Object(section.clone())).unwrap();
+        assert_eq!(read.font_size, 15.);
+        assert!(!retire_widths(section), "nothing left to drop");
     }
 }

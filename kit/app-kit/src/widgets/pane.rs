@@ -136,7 +136,7 @@ pub fn detail(t: &Theme, id: impl Into<ElementId>, head: Div, body: impl IntoEle
 /// [`detail`] whose body uses the detail's whole width: for what is
 /// read as lines that are long by nature (paths, addresses), not prose.
 pub fn detail_wide(t: &Theme, id: impl Into<ElementId>, head: Div, body: impl IntoElement) -> Div {
-    framed(t, head, div().id(id), body, None)
+    framed(t, Some(head), div().id(id), body, None)
 }
 
 /// [`detail`] whose scroll the page holds, to go back to the top or to a
@@ -167,7 +167,7 @@ pub fn detail_beside(
 ) -> Div {
     framed(
         t,
-        head,
+        Some(head),
         div().id(id),
         beside(body, aside, narrow),
         Some(size::MEASURE + size::ASIDE_GAP + size::ASIDE_MAX),
@@ -222,14 +222,31 @@ pub enum Narrow {
 }
 
 fn reading(t: &Theme, head: Div, scroller: Stateful<Div>, body: impl IntoElement) -> Div {
-    framed(t, head, scroller, body, Some(size::READING))
+    framed(t, Some(head), scroller, body, Some(size::READING))
+}
+
+/// [`detail`] in the window's panel, whose header carries the detail's
+/// head ([`crate::panel::PanelView::head`]); its scroll held by the page
+/// when it names one.
+pub fn panel_detail(
+    t: &Theme,
+    id: impl Into<ElementId>,
+    scroll: Option<&ScrollHandle>,
+    body: impl IntoElement,
+) -> Div {
+    let scroller = div().id(id);
+    let scroller = match scroll {
+        Some(scroll) => scroller.track_scroll(scroll),
+        None => scroller,
+    };
+    framed(t, None, scroller, body, Some(size::READING))
 }
 
 /// The detail's head across the detail, over its scrolling body, `widest`
 /// at most and starting at the detail's left.
 fn framed(
     t: &Theme,
-    head: Div,
+    head: Option<Div>,
     scroller: Stateful<Div>,
     body: impl IntoElement,
     widest: Option<f32>,
@@ -240,15 +257,15 @@ fn framed(
         .h_full()
         .flex()
         .flex_col()
-        .child(
+        .children(head.map(|head| {
             div()
                 .flex_none()
                 .w_full()
                 .h(px(size::TAB_BAR))
                 .border_b_1()
                 .border_color(t.divider)
-                .child(head.border_0().h_full().w_full().px(px(size::PAD))),
-        )
+                .child(head.border_0().h_full().w_full().px(px(size::PAD)))
+        }))
         .child(
             scroller.flex_1().min_h_0().overflow_y_scroll().child(
                 div()
@@ -330,7 +347,7 @@ pub fn act(t: &Theme, id: impl Into<ElementId>, text: impl Into<SharedString>) -
 /// Send: hands `reference` to a session (the focused one, as Send to
 /// Session aims) through [`Ask::Send`]. The same words in the same place
 /// on every page: last before a head's own actions, or at a row's end.
-/// The page stays shown, with Send over it ([`Host::ask_over`]).
+/// The page stays shown, with Send in the panel beside it.
 pub fn send(t: &Theme, id: impl Into<ElementId>, host: &Host, reference: String) -> Stateful<Div> {
     let host = host.clone();
     act(t, id, "Send")
@@ -340,7 +357,7 @@ pub fn send(t: &Theme, id: impl Into<ElementId>, host: &Host, reference: String)
                 reference: reference.clone(),
                 target: None,
             };
-            if let Err(e) = host.ask_over(ask, cx) {
+            if let Err(e) = host.ask(ask, cx) {
                 host.report(Status::failure(format!("Not sent: {}", e.message)), cx);
             }
         })

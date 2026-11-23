@@ -74,9 +74,9 @@ belongs.
 throws a note onto the wall without choosing where it belongs. Nothing forces
 him into a form, a fixed set of options, or a structure he did not ask for.
 
-**Never disturb the work.** What he is working in stays as it was: nothing
-opened beside a terminal resizes it, takes its keys, or moves it. Things open
-beside, not over.
+**Never disturb the work.** What opens beside the work makes room for
+itself (the windows squeeze), never covers it, takes no keys and moves
+nothing.
 
 **Act where it is.** An action opened from a thing happens at that thing:
 a rename edits the name where it is shown, and a small form opens beside

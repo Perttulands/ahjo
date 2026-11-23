@@ -247,7 +247,9 @@ impl FilesPage {
     /// the room when a percentage makes it bigger.
     pub(super) fn picture(&self, image: &Arc<RenderImage>, natural: Px, cx: &App) -> AnyElement {
         let room = self.room.clone();
-        let mut picture = img(image.clone()).flex_none();
+        let mut picture = img(image.clone())
+            .flex_none()
+            .debug_selector(|| "files-picture".into());
         // The stage is the room, or the picture where it is bigger, so a
         // small picture is centred and a big one scrolls from its top left.
         let mut stage = div().p(px(MARGIN)).flex().items_center().justify_center();

@@ -1,6 +1,6 @@
-//! Send to Session, the one hand-off (CHROTE's `SendDrawer`): a drawer at
-//! the right of the windows, which make room for it, so it never covers a
-//! session. Opened from a session (its window's Send, Peek's, its menu's,
+//! Send to Session, the one hand-off (CHROTE's `SendDrawer`): in the
+//! window's panel, beside whatever page asked for it, which makes room for
+//! it, so it never covers a session. Opened from a session (its window's Send, Peek's, its menu's,
 //! Alt+S in its terminal) it is aimed at that session, listed with the
 //! others; the line naming it goes only to another session picked instead.
 //! Another page opens it through [`Terminals::handoff`] with a reference to
@@ -15,23 +15,20 @@
 //! agent…" launches one and pastes the message into it without
 //! submitting, once the node finds it ready for a paste.
 //!
-//! It lies beside the windows and never traps the keyboard: a click on a
-//! terminal gives that terminal every key, Escape included, while the
-//! drawer stays open with its draft, and a click back in the drawer goes
-//! on with it (`Layer::beside`).
+//! It never traps the keyboard: a click on a terminal gives that terminal
+//! every key, Escape included, while Send stays open with its draft, and a
+//! click back in it goes on with it.
 //!
 //! A send that arrived everywhere closes the drawer; where one failed the
 //! drawer stays, keeps only the sessions it did not reach and says why for
 //! each. Where the reason is a rule rather than a failure (a shell would
 //! run the line naming a session; an outcome unknown might have arrived),
 //! the operator can send anyway, by the button beside the line or Alt+Enter
-//! from anywhere in the drawer. Closing gives the focus back to what had
-//! it, and the width dragged at the inner edge is remembered on this
-//! device. The rules are `store::send`'s.
+//! from anywhere in the drawer. The rules are `store::send`'s.
 
 use super::launcher::SEND;
 use super::page::Terminals;
-use super::surface::{self, Surface};
+use super::surface;
 use crate::http;
 use crate::store::send;
 use crate::store::sessions::{self, Key};
@@ -44,7 +41,7 @@ use ahjo_core::NodeId;
 use ahjo_terminals_contract::Outcome;
 use gpui::{
     AnyElement, AsyncApp, ClickEvent, Context, ExternalPaths, FontWeight, KeyDownEvent,
-    MouseButton, MouseMoveEvent, SharedString, WeakEntity, Window, div, prelude::*, px,
+    MouseButton, SharedString, WeakEntity, Window, div, prelude::*, px,
 };
 use std::path::PathBuf;
 
@@ -97,11 +94,6 @@ pub struct Draft {
     pub uploading: bool,
     /// The focused window's grid as the drawer opened, for its launch.
     pub launch_grid: Option<super::page::Grid>,
-    /// The inner edge is being dragged: from where, and the width then.
-    pub resizing: Option<(f32, f32)>,
-    /// What had the keyboard as the drawer opened, given it back on close
-    /// while it is still drawn in the view beside.
-    pub back: Option<gpui::WeakFocusHandle>,
 }
 
 /// A local file, a clipboard image kept in memory until sent, or a file
@@ -223,15 +215,15 @@ impl Terminals {
     ) {
         if self.busy() {
             // The last one is still on its way: its draft stays until it lands.
-            self.open(Surface::Send, window, cx);
+            self.show_in_panel(surface::SEND, window, cx);
             return;
         }
         // Opened again while open, it keeps what the operator wrote and
-        // attached, and where the keyboard was before it first opened.
-        let open = self.is_open(surface::SEND);
-        let (files, back) = match open {
-            true => (std::mem::take(&mut self.send.files), self.send.back.take()),
-            false => (vec![], window.focused(cx).map(|f| f.downgrade())),
+        // attached.
+        let open = self.in_panel(surface::SEND, cx);
+        let files = match open {
+            true => std::mem::take(&mut self.send.files),
+            false => vec![],
         };
         let launch_grid = self.launch_grids.borrow()[self.settings.workspace.focus];
         self.send = Draft {
@@ -240,7 +232,6 @@ impl Terminals {
             names_a_session,
             files,
             launch_grid,
-            back,
             ..Default::default()
         };
         self.send_targets = target.into_iter().collect();
@@ -248,13 +239,13 @@ impl Terminals {
         if !open {
             self.send_note.update(cx, |f, cx| f.set("", false, cx));
         }
-        self.open(Surface::Send, window, cx);
+        self.show_in_panel(surface::SEND, window, cx);
     }
 
     /// The operator came back to the drawer: the keyboard goes to the
     /// message, or to the sessions while none is picked.
     pub(super) fn send_resume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.is_open(surface::SEND) {
+        if !self.in_panel(surface::SEND, cx) {
             return;
         }
         if self.send_targets.is_empty() && !self.send.new_agent {
@@ -262,23 +253,6 @@ impl Terminals {
         } else {
             ahjo_app_kit::widgets::field::focus(&self.send_note, window, cx);
         }
-    }
-
-    /// The drawer closed: the keyboard goes back to the view beside the
-    /// terminals that had it as Send opened (the Brain panel's field, a
-    /// file beside) while that view is still drawn; otherwise to the
-    /// terminal, whichever page Send came from.
-    pub(super) fn send_closed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.surfaces.is_empty() {
-            return;
-        }
-        let back = self
-            .send
-            .back
-            .take()
-            .and_then(|f| f.upgrade())
-            .filter(|f| self.beside_focus.contains(f, window));
-        window.focus(back.as_ref().unwrap_or(&self.term_focus), cx);
     }
 
     /// What the finder heard: a session taken goes alone unless others are
@@ -506,7 +480,7 @@ impl Terminals {
             }
             self.send.files.clear();
             self.send_note.update(cx, |f, cx| f.set("", false, cx));
-            self.close(surface::SEND, cx);
+            self.host.close_panel(surface::SEND, cx);
             self.report(&send::arrived_all(&reached, enter), false, None);
             self.save(cx);
         } else {
@@ -557,7 +531,7 @@ impl Terminals {
             None if launched => {
                 self.send.files.clear();
                 self.send_note.update(cx, |f, cx| f.set("", false, cx));
-                self.close(surface::SEND, cx);
+                self.host.close_panel(surface::SEND, cx);
                 self.report(&send::arrived(&k.name, launched, enter), false, None);
                 self.save(cx);
                 cx.notify();
@@ -672,24 +646,8 @@ impl Terminals {
         );
     }
 
-    /// The width the drawer takes from the windows while it is open, its
-    /// edge included; nothing while it is closed.
-    pub(super) fn send_room(&self, window: &Window, cx: &gpui::App) -> f32 {
-        if !self.surfaces.iter().any(|s| matches!(s, Surface::Send)) {
-            return 0.;
-        }
-        let room = window.viewport_size().width / px(1.) - self.host.side_room(cx);
-        send::width(self.settings.send_width, room)
-    }
-
-    pub(super) fn render_send(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    pub(super) fn render_send(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let t = theme(cx).clone();
-        // The windows made room for it at the right (`send_room`).
-        let width = self.send_room(window, cx);
         let busy = self.busy();
         self.offer_send_targets(cx);
         let mut body = div()
@@ -809,87 +767,34 @@ impl Terminals {
                         })),
                 ),
         );
-        let drawer = surface::at_edge(div().id("send").debug_selector(|| "send-drawer".into()), 0.)
-            .bottom_0()
-            .border_l_1()
-            .w(px(width))
+        div()
+            .id("send")
+            .debug_selector(|| "send-drawer".into())
+            .size_full()
             .flex()
+            .flex_col()
             .bg(t.surface)
-            .border_color(t.divider)
-            // A click back in the drawer goes on with the draft, where the
-            // click itself gave the keyboard to nothing in it.
+            // A click back in Send goes on with the draft, where the click
+            // itself gave the keyboard to nothing in it.
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|s, _, window, cx| {
-                    cx.stop_propagation();
                     if !s.send_area.contains_focused(window, cx) {
                         s.send_resume(window, cx);
+                        // Send's own focus would take the keyboard back.
+                        window.prevent_default();
                     }
                 }),
             )
-            .on_key_down(cx.listener(|s, e: &KeyDownEvent, _, cx| s.anyway_key(e, cx)))
             .track_focus(&self.send_area)
+            .on_key_down(cx.listener(|s, e: &KeyDownEvent, _, cx| s.anyway_key(e, cx)))
             .drag_over::<ExternalPaths>(move |d, _, _, _| d.bg(alpha(t.accent, 0.08)))
             .drag_over::<NodeFile>(move |d, _, _, _| d.bg(alpha(t.accent, 0.08)))
             .on_drop(
                 cx.listener(|s, paths: &ExternalPaths, _, cx| s.send_attach(paths.paths(), cx)),
             )
             .on_drop(cx.listener(|s, file: &NodeFile, _, cx| s.send_attach_node(file, cx)))
-            .child(
-                div()
-                    .id("send-grip")
-                    .debug_selector(|| "send-grip".into())
-                    .flex_none()
-                    .w(px(size::DRAWER_GRIP))
-                    .h_full()
-                    .cursor_col_resize()
-                    .hover(|d| d.bg(t.accent_soft()))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |s, e: &gpui::MouseDownEvent, _, cx| {
-                            s.send.resizing = Some((e.position.x / px(1.), width));
-                            cx.stop_propagation();
-                        }),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(self.render_send_head(&t, cx))
-                    .child(body),
-            );
-        // Nothing lies over the windows: they made room, and stay at hand
-        // to read or type in while the drawer is open.
-        let room = window.viewport_size().width / px(1.) - self.host.side_room(cx);
-        div()
-            .absolute()
-            .inset_0()
-            .child(drawer)
-            .when_some(self.send.resizing, |d, (from, was)| {
-                d.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .occlude()
-                        .cursor_col_resize()
-                        .on_mouse_move(cx.listener(move |s, e: &MouseMoveEvent, _, cx| {
-                            let w = was + from - e.position.x / px(1.);
-                            s.settings.send_width = Some(send::width(Some(w), room));
-                            cx.notify();
-                        }))
-                        .on_mouse_up(
-                            MouseButton::Left,
-                            cx.listener(|s, _, _, cx| {
-                                s.send.resizing = None;
-                                s.save(cx);
-                                cx.notify();
-                            }),
-                        ),
-                )
-            })
+            .child(body)
             .into_any_element()
     }
 
@@ -1159,27 +1064,6 @@ impl Terminals {
             );
         }
         line
-    }
-
-    fn render_send_head(&self, t: &crate::theme::Theme, cx: &mut Context<Self>) -> gpui::Div {
-        div()
-            .h(px(size::STRIP))
-            .px(px(12.))
-            .flex()
-            .items_center()
-            .border_b_1()
-            .border_color(t.divider)
-            .child(
-                div()
-                    .flex_1()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Send to sessions"),
-            )
-            .child(
-                kit::button(t, "send-close", "Close", Kind::Quiet)
-                    .tooltip(kit::tip("Esc"))
-                    .on_click(cx.listener(|s, _, _, cx| s.close(surface::SEND, cx))),
-            )
     }
 
     /// The attached files, each with a way to take it off again.

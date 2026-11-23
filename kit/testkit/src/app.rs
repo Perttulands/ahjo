@@ -119,7 +119,9 @@ impl<T> Drop for Served<T> {
 }
 
 /// Waits until `ok` holds, letting the app run between looks, and fails
-/// naming `what` after [`UNTIL`] (scaled).
+/// naming `what` after [`UNTIL`] (scaled). Each look delivers the window a
+/// frame, as a platform does, so what animates (a panel sliding) moves on
+/// in real time.
 pub fn until(
     cx: &mut VisualTestContext,
     what: &str,
@@ -127,6 +129,11 @@ pub fn until(
 ) {
     let deadline = Instant::now() + timeout(UNTIL);
     loop {
+        cx.update(|window, cx| {
+            if window.simulate_next_frame(cx) > 0 {
+                window.refresh();
+            }
+        });
         cx.run_until_parked();
         if ok(cx) {
             return;
@@ -136,13 +143,27 @@ pub fn until(
     }
 }
 
-/// Clicks the middle of the element drawn with `selector`, which must be
-/// on screen now.
+/// Clicks the middle of the element drawn with `selector` once it is on
+/// screen and holds still (a panel may be sliding in).
 pub fn click(cx: &mut VisualTestContext, selector: &str) {
-    let at = bounds(cx, selector)
-        .unwrap_or_else(|| panic!("{selector} is not on screen"))
-        .center();
-    cx.simulate_click(at, Modifiers::none());
+    let at = held_still(cx, selector);
+    cx.simulate_click(at.center(), Modifiers::none());
+}
+
+/// Where the element drawn with `selector` is, once it is on screen and
+/// stands in the same place over two frames.
+pub fn held_still(cx: &mut VisualTestContext, selector: &str) -> gpui::Bounds<gpui::Pixels> {
+    let mut at = None;
+    let mut still = 0;
+    until(cx, &format!("{selector} on screen, holding still"), |cx| {
+        let now = bounds(cx, selector);
+        still = match now.is_some() && std::mem::replace(&mut at, now) == now {
+            true => still + 1,
+            false => 0,
+        };
+        still >= 2
+    });
+    at.expect("on screen")
 }
 
 /// Where the element drawn with `selector` is, if it is on screen.
