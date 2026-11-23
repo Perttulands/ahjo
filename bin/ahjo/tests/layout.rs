@@ -305,7 +305,7 @@ const ALLOWED: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// Every interaction is the kit's element (AGENTS.md, Code;
+/// Every interaction is the kit's element (CODING_STANDARDS.md, Interactions;
 /// ARCHITECTURE.md, Kit): its hand-rolled forms stand only in the kit's
 /// own files. A scroll area built by hand in a row measured nothing past
 /// its height, as Desk's document once did; a popup placed by hand had

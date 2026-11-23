@@ -5,9 +5,9 @@ description: Change Ahjo itself, in its repository at /srv/ahjo, and put the cha
 
 # Change Ahjo
 
-`AGENTS.md` holds the rules and the checks, `ARCHITECTURE.md` the areas and the
-boundaries the build holds, `DESIGN.md` what good looks like in the app. Read
-all three before you change anything.
+`AGENTS.md` holds the constraints, the stop conditions and the checks,
+`ARCHITECTURE.md` the areas and the boundaries the build holds, `DESIGN.md`
+what good looks like in the app. Read all three before you change anything.
 
 ## Where a change lives
 

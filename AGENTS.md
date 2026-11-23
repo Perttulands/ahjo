@@ -4,8 +4,10 @@ Ahjo is three apps on one app kit. Ahjo Swarm is the operator's agent
 workspace: terminals, files, work, host and missions in one Rust binary, used
 through a native app and the `ahjo` CLI, which also reaches the brain. Ahjo
 Brain and Ahjo Desk are standalone apps. `VISION.md` says what Swarm is for,
-`DESIGN.md` what good looks like in the app and `ARCHITECTURE.md` how it is
-built.
+`DESIGN.md` what good looks like in the app, `ARCHITECTURE.md` how it is built
+(its boundaries, Words and Kit) and `CODING_STANDARDS.md` what a review holds a
+change to. `skills/change-ahjo` says where a change lives, how to build and
+check it, and how it reaches the operator's machine.
 
 ## The operator works on this machine while you do
 
@@ -15,6 +17,18 @@ built.
   tmux: any other program (`bd`, `gh`, a harness) is a fake the test writes.
 - Other agents run at the same time. Pick unique scratch names and ports.
 - Build and test through `heavy run --memory <GiB>`.
+
+## Stop before building
+
+Three cases mean the decision is not yours to make in code. Stop and get it
+from whoever leads the work, and from the operator when it changes how
+something feels to use:
+
+- The change would break a boundary `ARCHITECTURE.md` lists.
+- The work needs an interaction shape no kit element has (`ARCHITECTURE.md`,
+  Kit). Extending an element that has the shape is ordinary work in `kit/`.
+- The work reverses a behaviour that `DESIGN.md`, `ARCHITECTURE.md` or an ADR
+  states.
 
 ## Owning a piece
 
@@ -28,43 +42,6 @@ you will not finish yourself.
 For anything on screen, run the app against a node of your own on a private
 display and look at the screenshot. A passing test does not show that a page
 is good.
-
-## Code
-
-- `ARCHITECTURE.md` lists the boundaries the build holds. If a change needs to
-  break one, the design is wrong: stop and say so.
-- In the native app every visual value is a token, and stores stay apart from
-  views.
-- Every interaction (popup, menu, confirm, side panel, resize grip, scroll
-  area, rename, search, notice, settings file) is the kit's element, as
-  `ARCHITECTURE.md` (Kit) lists them. Where one falls short, extend it in
-  `kit/`; a page-local copy is a defect, and the source checks in
-  `bin/ahjo/tests` refuse the known ones.
-- Land a rename or reshape whole: no shims, aliases or dead code.
-- Errors carry a code and a message in the one shape `kit/core` defines.
-
-## Names
-
-`ARCHITECTURE.md` (Words) is the vocabulary. Names follow these rules:
-
-1. One meaning per domain word on every layer; only casing changes. Before:
-   `--role` was stored as `agentId` and shown as role. After: a seat's `agent`
-   is an agent in the CLI, the file and the board.
-2. Name an id after what it identifies: `step_id` for a step, `card_id` where
-   it may be a gate or end, never `node_id`.
-3. A name states only what is true: a value that is something else is renamed
-   or removed (`session_stem` held a role id; the real session name replaced it).
-4. Output carries derived values: a seat shows its session's name, so no
-   reader needs the rule that builds it.
-5. A boolean reads as a question or names its effect: `is_open`, not `open`;
-   `install_completion_hooks`, not `notify`.
-6. Shared types carry their domain: `ScheduledTarget`, `LimitScope`, not
-   `Target` in a contract or engine crate; a page's private type may be short.
-7. A name that lives through a long function is a word (`mission`, not `m`);
-   one letter is for a closure or a few lines, plus `cx` and `t: &Theme`.
-   Rename when you touch the code, not as a campaign.
-8. One verb per action across nouns: `list`, `show`, `create`, `edit`,
-   `delete` (not `new`, `inspect`, `retire`).
 
 ## Checks
 
