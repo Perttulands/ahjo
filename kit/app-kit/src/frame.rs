@@ -14,9 +14,9 @@ use crate::popup::{self, Content, Outside, Popup, PopupId, Spot};
 use crate::theme::{Theme, alpha, motion, size, theme};
 use crate::widgets::{kit, pane};
 use gpui::{
-    Animation, AnimationExt, AnyElement, AnyView, App, Context, ElementId, Entity, EventEmitter,
-    FocusHandle, KeyDownEvent, MouseButton, Pixels, Point, Task, Window, deferred, div,
-    ease_out_quint, prelude::*, px,
+    Animation, AnimationExt, AnyElement, AnyView, App, Context, Div, ElementId, Entity,
+    EventEmitter, ExternalPaths, FocusHandle, KeyDownEvent, MouseButton, Pixels, Point, Task,
+    Window, deferred, div, ease_out_quint, prelude::*, px,
 };
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
@@ -112,7 +112,12 @@ pub struct Layer {
     /// Escape is its content's (a terminal's program), so it does not
     /// close it; it says on screen how it closes.
     pub keeps_escape: bool,
+    /// Files dropped anywhere in its room, the card and beside it.
+    pub drops: Option<Drops>,
 }
+
+/// What a layer does with files dropped in its room.
+pub type Drops = Rc<dyn Fn(&ExternalPaths, &mut Window, &mut App)>;
 
 impl Layer {
     pub fn new(name: impl Into<String>, view: impl Into<AnyView>) -> Self {
@@ -124,6 +129,7 @@ impl Layer {
             focus: None,
             dismiss: None,
             keeps_escape: false,
+            drops: None,
         }
     }
 
@@ -165,6 +171,15 @@ impl Layer {
         if let Shape::Card { closes_outside, .. } = &mut self.shape {
             *closes_outside = true;
         }
+        self
+    }
+
+    /// Takes files dropped anywhere in its room, not only on its card.
+    pub fn takes_drops(
+        mut self,
+        dropped: impl Fn(&ExternalPaths, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.drops = Some(Rc::new(dropped));
         self
     }
 
@@ -760,22 +775,31 @@ pub fn stack(
 /// A layer as its [`Shape`] says, with the close control the shell draws
 /// on it. The control closes it through the stack, as Escape does, so its
 /// dismiss runs and the keyboard settles the same way.
-fn render_layer(frame: &Entity<AppFrame>, l: Layer, cx: &mut App) -> AnyElement {
+fn render_layer(frame: &Entity<AppFrame>, layer: Layer, cx: &mut App) -> AnyElement {
     let t = theme(cx).clone();
     // Named as its page names it: `peek-close` for `terminals/peek`.
-    let short = l.name.rsplit('/').next().unwrap_or(&l.name).to_string();
+    let short = layer
+        .name
+        .rsplit('/')
+        .next()
+        .unwrap_or(&layer.name)
+        .to_string();
     let close = {
         let frame = frame.clone();
-        let name = l.name.clone();
+        let name = layer.name.clone();
         kit::close(&t, format!("{short}-close"), None)
             .on_click(move |_, _, cx| frame.update(cx, |f, cx| f.close(&name, cx)))
     };
-    match l.shape {
-        Shape::InPlace => l.view.into_any_element(),
-        Shape::Cover => div()
-            .absolute()
-            .inset_0()
-            .child(l.view)
+    let drops = |d: Div| match layer.drops.clone() {
+        Some(dropped) => {
+            d.on_drop(move |paths: &ExternalPaths, window, cx| dropped(paths, window, cx))
+        }
+        None => d,
+    };
+    match layer.shape {
+        Shape::InPlace => layer.view.into_any_element(),
+        Shape::Cover => drops(div().absolute().inset_0())
+            .child(layer.view)
             .child(
                 close
                     .absolute()
@@ -787,39 +811,50 @@ fn render_layer(frame: &Entity<AppFrame>, l: Layer, cx: &mut App) -> AnyElement 
             middle,
             closes_outside,
         } => {
-            let top = match l.cover {
-                Cover::Page => size::CARD_TOP,
-                // Clear of a window's own bar.
-                Cover::Window => size::TAB_BAR + size::CARD_TOP,
-            };
-            let mut room = div()
+            let mut room = drops(div())
                 .absolute()
                 .inset_0()
                 .flex()
                 .justify_center()
                 .when(middle, |d| d.items_center())
-                .when(!middle, |d| d.items_start().pt(px(top)));
+                .when(!middle, |d| d.items_start().pt(px(card_top(layer.cover))));
             if closes_outside {
                 let frame = frame.clone();
-                let name = l.name.clone();
+                let name = layer.name.clone();
                 room = room.on_mouse_down(MouseButton::Left, move |_, _, cx| {
                     frame.update(cx, |f, cx| f.close(&name, cx))
                 });
             }
+            // The card occludes the room under it, so it takes drops too.
             room.child(
-                kit::panel(&t)
+                drops(kit::panel(&t))
                     .id(ElementId::Name(format!("{short}-card").into()))
                     .debug_selector(move || format!("{short}-card"))
                     .occlude()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .flex()
                     .items_start()
-                    .child(div().min_w_0().child(l.view))
+                    .child(div().min_w_0().child(layer.view))
                     .child(close.m(px(CLOSE_INSET))),
             )
             .into_any_element()
         }
     }
+}
+
+/// How far below its room's top a card not in the middle stands: clear of
+/// a window's own bar when it covers the window.
+fn card_top(cover: Cover) -> f32 {
+    match cover {
+        Cover::Page => size::CARD_TOP,
+        Cover::Window => size::TAB_BAR + size::CARD_TOP,
+    }
+}
+
+/// The tallest a card at the top of a room `room` high may grow: what the
+/// room leaves under the card's top, with as much clear at its foot.
+pub fn card_tallest(cover: Cover, room: Pixels) -> Pixels {
+    room - px(2. * card_top(cover))
 }
 
 /// A popup beside what it was opened from ([`popup::beside`]), over a

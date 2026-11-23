@@ -4,6 +4,7 @@
 
 use ahjo_app_kit::Host;
 use ahjo_app_kit::chords::{self, Chord, Row};
+use ahjo_app_kit::frame::{self, Cover};
 use ahjo_app_kit::theme::{size, theme};
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::{kit, pane};
@@ -138,9 +139,8 @@ impl KeysPanel {
 impl Render for KeysPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
-        // Where the shell's card stands over the window.
-        let top = px(size::TAB_BAR + size::CARD_TOP);
-        let tallest = window.viewport_size().height - top - px(size::TAB_BAR);
+        // As tall as the kit lets a card over the window grow.
+        let tallest = frame::card_tallest(Cover::Window, window.viewport_size().height);
         let rows = self.rows(cx);
         let cursor = self.cursor.min(rows.len().saturating_sub(1));
         let mut list = pane::scroll("keys-list")

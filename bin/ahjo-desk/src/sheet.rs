@@ -758,7 +758,7 @@ impl DeskApp {
                 // The writing is a surface of its own: its close lifts the
                 // pen and keeps the paper open.
                 .child(
-                    kit::close(&on_paper(t, k), "pen-writing-close", Some("Esc"))
+                    kit::close(&on_paper(t, k), "pen-writing-close", None)
                         .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.lift_pen(cx))),
                 );
         }

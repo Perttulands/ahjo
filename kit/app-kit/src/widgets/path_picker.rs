@@ -5,8 +5,8 @@ use crate::theme::{board, size, theme};
 use crate::widgets::field::{FieldEvent, TextField};
 use crate::widgets::kit::{self, Kind};
 use gpui::{
-    App, AppContext, Context, Entity, ExternalPaths, Focusable, PathPromptOptions, Render, Window,
-    div, prelude::*, px,
+    App, AppContext, Context, Entity, Focusable, PathPromptOptions, Render, Window, div,
+    prelude::*, px,
 };
 use std::path::{Path, PathBuf};
 
@@ -110,9 +110,16 @@ fn open(
     let opener = window.focused(cx);
     let view = cx.new(|cx| Picker::new(host.clone(), prompt, folders, picked, window, cx));
     let focus = view.read(cx).field.focus_handle(cx);
+    let dropped_on = view.downgrade();
     host.layer(
         Layer::new(LAYER, view)
             .card()
+            // A file dropped anywhere over the window is picked, as on the
+            // card itself.
+            .takes_drops(move |paths, _, cx| {
+                let _ =
+                    dropped_on.update(cx, |picker, cx| picker.finish(paths.paths().to_vec(), cx));
+            })
             .focus(focus.clone())
             .on_dismiss(move |window, cx| {
                 if let Some(opener) = &opener {
@@ -249,54 +256,50 @@ fn complete(input: &str) -> Option<String> {
 impl Render for Picker {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx).clone();
-        // In the shell's card, which draws its frame and close control.
-        div()
-            .on_drop(cx.listener(|picker, paths: &ExternalPaths, _, cx| {
-                picker.finish(paths.paths().to_vec(), cx)
-            }))
-            .child(
-                div()
-                    .id("path-picker")
-                    .debug_selector(|| "path-picker".into())
-                    .w(px(size::KEYS))
-                    .p(px(board::PAD))
-                    .flex()
-                    .flex_col()
-                    .gap(px(board::GAP))
-                    .child(kit::label(&t, self.title))
-                    .child(kit::note(
-                        &t,
-                        if self.folders {
-                            "Enter a folder path, or drop a folder here. Tab completes."
-                        } else {
-                            "Enter a file path, or drop files here. Tab completes."
-                        },
-                        Some(t.dim),
-                    ))
-                    .child(
-                        div()
-                            .debug_selector(|| "path-picker-field".into())
-                            .child(self.field.clone()),
-                    )
-                    .when_some(self.error.clone(), |d, error| {
-                        d.child(kit::note(&t, error, Some(t.error)))
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(board::GAP))
-                            .child(
-                                kit::button(&t, "path-picker-select", "Select", Kind::Primary)
-                                    .on_click(cx.listener(|picker, _, _, cx| picker.submit(cx))),
-                            )
-                            .child(
-                                kit::button(&t, "path-picker-cancel", "Cancel", Kind::Quiet)
-                                    .on_click(cx.listener(|picker, _, _, cx| {
-                                        picker.host.close_layer(LAYER, cx)
-                                    })),
+        // In the shell's card, which draws its frame and close control and
+        // takes what is dropped.
+        div().child(
+            div()
+                .id("path-picker")
+                .debug_selector(|| "path-picker".into())
+                .w(px(size::KEYS))
+                .p(px(board::PAD))
+                .flex()
+                .flex_col()
+                .gap(px(board::GAP))
+                .child(kit::label(&t, self.title))
+                .child(kit::note(
+                    &t,
+                    if self.folders {
+                        "Enter a folder path, or drop a folder here. Tab completes."
+                    } else {
+                        "Enter a file path, or drop files here. Tab completes."
+                    },
+                    Some(t.dim),
+                ))
+                .child(
+                    div()
+                        .debug_selector(|| "path-picker-field".into())
+                        .child(self.field.clone()),
+                )
+                .when_some(self.error.clone(), |d, error| {
+                    d.child(kit::note(&t, error, Some(t.error)))
+                })
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(board::GAP))
+                        .child(
+                            kit::button(&t, "path-picker-select", "Select", Kind::Primary)
+                                .on_click(cx.listener(|picker, _, _, cx| picker.submit(cx))),
+                        )
+                        .child(
+                            kit::button(&t, "path-picker-cancel", "Cancel", Kind::Quiet).on_click(
+                                cx.listener(|picker, _, _, cx| picker.host.close_layer(LAYER, cx)),
                             ),
-                    ),
-            )
+                        ),
+                ),
+        )
     }
 }
 

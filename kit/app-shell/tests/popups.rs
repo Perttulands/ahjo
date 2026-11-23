@@ -557,3 +557,43 @@ fn a_layers_close_control_closes_that_layer_only_and_the_keys_go_back(cx: &mut T
     );
     assert!(cx.update(|window, _| term.is_focused(window)));
 }
+
+/// A file dropped anywhere over the path picker's room is picked, beside
+/// its card as on it, as it was before the kit drew the card.
+#[gpui::test]
+fn a_file_dropped_beside_the_pickers_card_is_picked(cx: &mut TestAppContext) {
+    let (_, cx, pad) = start(cx);
+    let picked: std::rc::Rc<std::cell::RefCell<Vec<std::path::PathBuf>>> = Default::default();
+    for beside in [true, false] {
+        let into = picked.clone();
+        pad.update_in(cx, |p, window, cx| {
+            ahjo_app_kit::widgets::path_picker::field(
+                p.host.clone(),
+                "Attach",
+                window,
+                cx,
+                move |_, paths, _| into.borrow_mut().extend(paths),
+            )
+        });
+        let card = drawn(cx, "path-picker-card").expect("the picker in the shell's card");
+        let at = if beside {
+            gpui::point(card.left() - px(40.), card.center().y)
+        } else {
+            card.center()
+        };
+        let file = std::path::PathBuf::from(format!("/tmp/dropped-{beside}.txt"));
+        cx.simulate_event(gpui::FileDropEvent::Entered {
+            position: at,
+            paths: gpui::ExternalPaths(std::iter::once(file.clone()).collect()),
+        });
+        cx.simulate_event(gpui::FileDropEvent::Submit { position: at });
+        cx.run_until_parked();
+        assert_eq!(
+            picked.borrow().last(),
+            Some(&file),
+            "dropped {} the card, it is picked",
+            if beside { "beside" } else { "on" }
+        );
+        assert!(drawn(cx, "path-picker").is_none(), "and the picker closes");
+    }
+}
