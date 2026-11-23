@@ -25,7 +25,7 @@ ahjo mission apply post.toml
 
 Give a new mission its own `slug` and `id`, or omit its `id` to assign one. Keep the exported `rev` when editing an existing mission. If apply reports a conflict, export again and merge your edits into that copy. Apply saves drafts and reports validation. Fix the errors before using its run command. Reply to open notes before removing their cards. Over MCP, give `mission_apply` the TOML text in `document`.
 
-Mission files use schema 5 and layout files use schema 3. Existing mission files are upgraded when the node loads them. The mission file uses `[[input_card]]`, `[[step]]`, `[[gate]]`, `[[end]]`, `[[limit]]`, and `[[connection]]`. Each step specifies its formation as `solo`, `peer`, or `orchestrated`. A step nests `input`, `output`, and `seat` tables. Use saved ids in `from` and `to` as `card:port`, and give every card you connect an id. `ahjo mission export --json` uses the same keys.
+Mission files use schema 6 and layout files use schema 3. Existing mission files are upgraded when the node loads them. The mission file uses `[[input_card]]`, `[[step]]`, `[[gate]]`, `[[end]]`, `[[limit]]`, and `[[connection]]`. Each step specifies its formation as `solo`, `peer`, or `orchestrated`. A step nests `input`, `output`, and `seat` tables. Use saved ids in `from` and `to` as `card:port`, and give every card you connect an id. `ahjo mission export --json` uses the same keys.
 
 ### Individual changes
 
