@@ -626,6 +626,7 @@ dependencies = [
  "ahjo-missions-contract",
  "ahjo-node-kit",
  "ahjo-term",
+ "ahjo-terminals-contract",
  "ahjo-testkit",
  "anyhow",
  "axum",

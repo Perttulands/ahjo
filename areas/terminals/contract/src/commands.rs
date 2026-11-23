@@ -463,6 +463,14 @@ pub struct SessionWindowsListed {
     pub windows: Vec<TerminalWindow>,
 }
 
+impl ahjo_core::TypedCommand for SessionRead {
+    const NAME: &'static str = "session_read";
+    type Output = SessionReadout;
+}
+impl ahjo_core::TypedCommand for SessionSend {
+    const NAME: &'static str = "session_send";
+    type Output = SessionSent;
+}
 impl ahjo_core::TypedCommand for SessionListLaunchFlags {
     const NAME: &'static str = "session_list_launch_flags";
     type Output = SessionLaunchFlagsListed;

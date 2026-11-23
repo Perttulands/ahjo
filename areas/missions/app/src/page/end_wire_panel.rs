@@ -195,6 +195,7 @@ impl MissionsPage {
         } else {
             self.editor = None;
             self.run.inspect = None;
+            self.follow_seats(false, cx);
             self.canvas.wire = Some(id);
         }
         cx.notify();

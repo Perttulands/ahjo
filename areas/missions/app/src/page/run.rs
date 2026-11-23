@@ -19,6 +19,9 @@ pub(super) struct RunUi {
     pub(super) selected: Option<String>,
     /// The card whose read-only panel is open on the run's board.
     pub(super) inspect: Option<String>,
+    /// The open step's live seats, their screens and what is written to
+    /// them.
+    pub(super) seats: super::run_step::SeatFollow,
     pub(super) reveal_step: Option<String>,
     pub(super) frozen: Option<Mission>,
     pub(super) starting: bool,
@@ -83,6 +86,7 @@ impl RunUi {
         Self {
             selected: None,
             inspect: None,
+            seats: Default::default(),
             reveal_step: None,
             frozen: None,
             starting: false,
@@ -270,6 +274,7 @@ impl MissionsPage {
         if self.run.attempts_at.is_some_and(|at| at < run.event_count) {
             self.attempts(cx);
         }
+        self.follow_seats(true, cx);
         let mut pending = Vec::new();
         for gate in run.waiting_gates {
             if !self.run.gates.contains_key(&gate.gate_id) {
@@ -1184,9 +1189,9 @@ impl MissionsPage {
         })
         .detach();
     }
-    /// A running canvas card opens the selected step's attempts, as the
-    /// Flow and gate views do; retain the run/node identity across the read.
-    pub(super) fn open_canvas_attempts(
+    /// The steps table's tries open the step's attempts window, as a
+    /// gate's Compare does; retain the run/node identity across the read.
+    pub(super) fn show_step_attempts(
         &mut self,
         step: &str,
         window: &mut Window,

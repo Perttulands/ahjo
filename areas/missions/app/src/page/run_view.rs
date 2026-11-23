@@ -690,7 +690,7 @@ impl MissionsPage {
                     .debug_selector(move || selector.clone())
                     .tooltip(kit::tip("What each attempt made"))
                     .on_click(cx.listener(move |page, _, window, cx| {
-                        page.open_canvas_attempts(&step_id, window, cx)
+                        page.show_step_attempts(&step_id, window, cx)
                     })),
                 );
             }

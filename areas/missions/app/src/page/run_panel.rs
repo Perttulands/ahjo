@@ -11,6 +11,16 @@ impl MissionsPage {
         self.editor = None;
         self.canvas.wire = None;
         self.run.inspect = Some(id.to_owned());
+        // A step's panel shows its attempts and follows its live seats.
+        if self
+            .state
+            .mission
+            .as_ref()
+            .is_some_and(|m| m.steps.iter().any(|s| s.id == id))
+        {
+            self.attempts(cx);
+        }
+        self.follow_seats(true, cx);
         cx.notify();
     }
 
@@ -109,6 +119,8 @@ impl MissionsPage {
                 },
             };
             body = body.child(fact("When it fails", fails));
+        } else if mission.steps.iter().any(|s| s.id == id) {
+            body = body.children(self.step_run_part(&t, id, cx));
         } else if let Some(end) = mission.end(id) {
             let reached = project(&run.events).states.contains_key(id);
             body = body

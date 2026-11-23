@@ -11,6 +11,7 @@ mod navigator;
 mod notes;
 mod run;
 mod run_panel;
+mod run_step;
 mod run_view;
 mod staffing;
 mod validation;
@@ -93,6 +94,9 @@ pub struct MissionsPage {
     history: undo::History,
     writing: bool,
     agents: Option<ahjo_harness_contract::agents::ListedAgents>,
+    /// The sessions the Sessions page hears, so an open seat's screen is
+    /// read while its session writes.
+    sessions: Option<Entity<ahjo_terminals_contract::SessionList>>,
     /// The repositories the node's config names, for a step's Repository.
     repositories: Option<Vec<String>>,
     agent: Entity<TextField>,
@@ -224,6 +228,7 @@ impl MissionsPage {
             history: undo::History::default(),
             writing: false,
             agents: None,
+            sessions: None,
             repositories: None,
             agent: cx.new(|cx| TextField::new(cx, "Agent id")),
             harness: cx.new(|cx| TextField::new(cx, "Harness")),
@@ -300,6 +305,8 @@ impl MissionsPage {
         .detach();
         page.host.channel(WATCH_RUNS, true, cx);
         host_guard(&page.host, cx);
+        let mut page = page;
+        page.watch_sessions(cx);
         page
     }
     fn report_new_asks(
@@ -2028,6 +2035,7 @@ impl MissionsPage {
             self.editor = None;
             self.canvas.wire = None;
             self.run.inspect = None;
+            self.follow_seats(false, cx);
             self.resolve_wanted(cx);
             window.focus(&self.focus, cx);
         } else {

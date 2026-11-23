@@ -14,6 +14,7 @@ ahjo-core = { path = "../../../kit/core" }
 ahjo-files-contract = { path = "../../files/contract" }
 ahjo-missions-contract = { path = "../contract" }
 ahjo-harness-contract = { path = "../../harness/contract" }
+ahjo-terminals-contract = { path = "../../terminals/contract" }
 gpui = { package = "gpui-pre", version = "=0.3.12" }
 serde_json = "1"
 log = "0.4"
