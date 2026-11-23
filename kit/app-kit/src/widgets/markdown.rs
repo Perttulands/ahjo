@@ -404,12 +404,14 @@ fn text(
     look: &Look,
     text: String,
     highlights: Vec<(Range<usize>, HighlightStyle)>,
+    mono: Vec<Range<usize>>,
     sep: &'static str,
 ) -> StyledText {
-    match &look.select {
+    let styled = match &look.select {
         Some(s) => s.borrow_mut().text(text, highlights, sep, look.t.selection),
         None => StyledText::new(SharedString::from(text)).with_highlights(highlights),
-    }
+    };
+    styled.with_font_family_overrides(mono.into_iter().map(|r| (r, SharedString::from(FAMILY))))
 }
 
 fn styled(
@@ -423,13 +425,17 @@ fn styled(
     let Runs { text, spans, links } = inline(src, look.refs);
     let mut highlights = vec![];
     let mut clickable = vec![];
+    let mut mono = vec![];
     for (r, s) in spans {
         let style = match s {
-            Span::Code => HighlightStyle {
-                background_color: Some(alpha(t.text, 0.08)),
-                color: Some(t.text),
-                ..Default::default()
-            },
+            Span::Code => {
+                mono.push(r.clone());
+                HighlightStyle {
+                    background_color: Some(alpha(t.text, 0.08)),
+                    color: Some(t.text),
+                    ..Default::default()
+                }
+            }
             Span::Bold => HighlightStyle {
                 font_weight: Some(FontWeight::BOLD),
                 ..Default::default()
@@ -453,11 +459,8 @@ fn styled(
         };
         highlights.push((r, style));
     }
-    if base != HighlightStyle::default() && !text.is_empty() {
-        highlights.insert(0, (0..text.len(), base));
-    }
-    let highlights = merge(highlights);
-    let st = self::text(look, text, highlights, sep);
+    let highlights = merge(base, text.len(), highlights);
+    let st = self::text(look, text, highlights, mono, sep);
     match &look.on_link {
         Some(on) if !links.is_empty() => {
             let on = on.clone();
@@ -481,27 +484,27 @@ fn styled(
     }
 }
 
-/// Highlights must not overlap: a base style is split around the others,
-/// which take it on.
-fn merge(mut h: Vec<(Range<usize>, HighlightStyle)>) -> Vec<(Range<usize>, HighlightStyle)> {
-    if h.len() < 2 || h[0].0.start != 0 {
-        return h;
-    }
-    let (all, base) = h.remove(0);
-    if h.is_empty() {
-        return vec![(all, base)];
+/// Highlights must not overlap: the base style is laid under the whole text
+/// and split around the others, which take it on.
+pub fn merge(
+    base: HighlightStyle,
+    len: usize,
+    highlights: Vec<(Range<usize>, HighlightStyle)>,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    if base == HighlightStyle::default() || len == 0 {
+        return highlights;
     }
     let mut out = vec![];
     let mut at = 0;
-    for (r, s) in h {
+    for (r, s) in highlights {
         if r.start > at {
             out.push((at..r.start, base));
         }
         out.push((r.clone(), base.highlight(s)));
         at = r.end;
     }
-    if at < all.end {
-        out.push((at..all.end, base));
+    if at < len {
+        out.push((at..len, base));
     }
     out
 }
@@ -643,7 +646,7 @@ pub fn render_pictured(
                     .rounded(px(size::RADIUS))
                     .font_family(FAMILY)
                     .text_size(px(size::SMALL + 1.))
-                    .child(text(look, c, colours, BLOCK))
+                    .child(text(look, c, colours, vec![], BLOCK))
             }
             Block::FrontMatter(fields) => {
                 // A small table of what the file says of itself, quiet
@@ -672,6 +675,7 @@ pub fn render_pictured(
                             .child(div().flex_1().min_w_0().text_color(t.text2).child(text(
                                 look,
                                 value.clone(),
+                                vec![],
                                 vec![],
                                 if k == 0 { BLOCK } else { LINE },
                             ))),
@@ -929,8 +933,29 @@ mod tests {
             fade_out: Some(0.5),
             ..Default::default()
         };
-        let m = merge(vec![(0..10, base), (2..4, bold)]);
+        let m = merge(base, 10, vec![(2..4, bold)]);
         let ranges: Vec<_> = m.iter().map(|(r, _)| r.clone()).collect();
         assert_eq!(ranges, [0..2, 2..4, 4..10]);
+    }
+
+    #[test]
+    fn a_paragraph_starting_with_code_keeps_its_prose_plain() {
+        let base = HighlightStyle {
+            fade_out: Some(0.5),
+            ..Default::default()
+        };
+        let Runs { text, spans, .. } = inline("`ahjo` copies both binaries.", false);
+        assert_eq!(spans, [(0..4, Span::Code)]);
+        let code = HighlightStyle {
+            background_color: Some(gpui::black()),
+            ..Default::default()
+        };
+        let m = merge(base, text.len(), vec![(0..4, code)]);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0].1.background_color, code.background_color);
+        assert_eq!(m[1], (4..text.len(), base));
+        // Without a base the code run alone is styled, nothing is made up.
+        let plain = merge(HighlightStyle::default(), text.len(), vec![(0..4, code)]);
+        assert_eq!(plain, [(0..4, code)]);
     }
 }

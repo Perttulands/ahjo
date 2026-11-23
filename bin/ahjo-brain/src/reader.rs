@@ -12,7 +12,7 @@ use crate::corpus;
 use crate::tokens::reader as r;
 use ahjo_app_kit::Error;
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, theme};
-use ahjo_app_kit::widgets::markdown::{Block, Span, inline, parse};
+use ahjo_app_kit::widgets::markdown::{Block, Span, inline, merge, parse};
 use ahjo_app_kit::widgets::{kit, pane};
 use gpui::{
     AnyElement, Context, Div, ElementId, FontStyle, FontWeight, HighlightStyle, Hsla,
@@ -359,13 +359,17 @@ impl Reader {
         let mut highlights: Vec<(Range<usize>, HighlightStyle)> = vec![];
         let mut ranges = vec![];
         let mut targets = vec![];
+        let mut mono = vec![];
         for (range, span) in &runs.spans {
             let style = match span {
-                Span::Code => HighlightStyle {
-                    background_color: Some(alpha(t.text, 0.07)),
-                    color: Some(t.text),
-                    ..Default::default()
-                },
+                Span::Code => {
+                    mono.push((range.clone(), SharedString::from(FAMILY)));
+                    HighlightStyle {
+                        background_color: Some(alpha(t.text, 0.07)),
+                        color: Some(t.text),
+                        ..Default::default()
+                    }
+                }
                 Span::Bold => HighlightStyle {
                     font_weight: Some(FontWeight::BOLD),
                     color: Some(t.text),
@@ -398,7 +402,9 @@ impl Reader {
             highlights.push((range.clone(), style));
         }
         let highlights = merge(base, runs.text.len(), highlights);
-        let text = StyledText::new(SharedString::from(runs.text)).with_highlights(highlights);
+        let text = StyledText::new(SharedString::from(runs.text))
+            .with_highlights(highlights)
+            .with_font_family_overrides(mono);
         if ranges.is_empty() {
             return text.into_any_element();
         }
@@ -658,30 +664,6 @@ impl Reader {
         let _ = cx;
         col
     }
-}
-
-/// A base style under the marks, split so highlights never overlap.
-fn merge(
-    base: HighlightStyle,
-    len: usize,
-    marks: Vec<(Range<usize>, HighlightStyle)>,
-) -> Vec<(Range<usize>, HighlightStyle)> {
-    if base == HighlightStyle::default() || len == 0 {
-        return marks;
-    }
-    let mut out = vec![];
-    let mut at = 0;
-    for (range, style) in marks {
-        if range.start > at {
-            out.push((at..range.start, base));
-        }
-        at = range.end;
-        out.push((range, base.highlight(style)));
-    }
-    if at < len {
-        out.push((at..len, base));
-    }
-    out
 }
 
 impl Render for Reader {
