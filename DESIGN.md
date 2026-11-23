@@ -76,8 +76,9 @@ him into a form, a fixed set of options, or a structure he did not ask for.
 
 **Never disturb the work.** What opens beside the work makes room for
 itself (the windows squeeze), never covers it and moves nothing. It takes
-the keyboard only when the operator opens it to type there (Alt+L's
-search), and never holds it: a click on the work takes the keyboard back,
+the keyboard only when the operator opens it, into what he came for (Alt+L
+gives it to the search when the list opens, to the reader when a page
+reopens), and never holds it: a click on the work takes the keyboard back,
 and closing it returns the keyboard to the work.
 
 **Act where it is.** An action opened from a thing happens at that thing:
