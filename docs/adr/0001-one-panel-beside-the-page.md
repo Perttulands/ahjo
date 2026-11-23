@@ -51,5 +51,6 @@ put the output search in the panel too. It removed `lend_panel`, `take_panel`,
 added `kit::grip` as the one edge drag. 6b31fa25 (ahjo-egr) set the panel's
 first width to 480.
 
-**Not recorded:** why Peek alone stays over the page. 6d9c62dc says only "Only
-Peek stays over".
+**Why Peek stays over the page** (the operator, 2026-11-23): Peek is a glance,
+and over the page is right for a glance. Squeezing the windows earns its cost
+only for something kept open while working in a terminal (ADR 0003).

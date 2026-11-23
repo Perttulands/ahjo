@@ -54,6 +54,11 @@ stays the page's. Only a decision about the whole window is centred.
 - a0b65e5c (11-23 17:08) added `popup::form`, so a popup form keeps its actions
   in view when the window is short. Before, New mission hid Create at 1366x768.
 
-**Not recorded:** why Escape closes only the top surface rather than everything
-open, and why a press outside never reaches the page underneath. 4a79cf95 and
-e6e53c2d state both rules without a reason.
+**Why Escape closes only the top** (the operator, 2026-11-23): closing closes
+the thing the operator is trying to close, and nothing else. Escape also
+matters to a terminal program, which is why a layer over a terminal (Peek)
+keeps it; so Escape is not the only way to close: every surface that opens
+also shows a small close button.
+
+**Not recorded:** why a press outside never reaches the page underneath.
+4a79cf95 and e6e53c2d state the rule without a reason.

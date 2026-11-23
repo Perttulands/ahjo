@@ -48,6 +48,8 @@ could not send to the session it came from.
 
 ADR 0001 covers the separate changes to where Send stands.
 
-**Not recorded:** why 7f23c74b dropped "the terminal the asking view sits
-beside" and "the last one sent to" on the same afternoon 367a2c38 brought them
-in (15:17, then 16:38).
+**Why 7f23c74b dropped two fallbacks** (the operator, 2026-11-23): "the
+terminal the asking view sits beside" and "the last one sent to" did not work
+in use, and the rule should be simple. Send is used from many pages (Files,
+Issues, Harness, the Brain and the terminals), so its rule has to be one the
+operator can predict from any of them.

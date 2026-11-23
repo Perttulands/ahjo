@@ -4,7 +4,7 @@ Sessions are tmux sessions shared with other clients (the phone, CHROTE, other
 apps), and a resize reflows their programs for every client. The windows change
 size only for the operator's own act, and what opens beside them makes room
 rather than covering them. The recorded reasons cover Send and the operator's
-own act. The reason for the rest is not recorded (below).
+own act. The rest of the panel squeezes for the same reason as Send (below).
 
 ## Decision
 
@@ -43,7 +43,8 @@ The rule flipped from "nothing resizes" to "the windows squeeze" in steps:
 - 11-23, 6d9c62dc: everything beside a page moved into the one panel (ADR
   0001), and DESIGN.md became "makes room for itself (the windows squeeze)".
 
-**Not recorded:** why the reason of 8afca65a and ff649000 no longer outweighs
-covering for the rest of what the panel shows (a file, an issue's card, the
-Brain, a diagram). That reason was that a resize reflows the session for every
-other client.
+**Why the whole panel squeezes** (the operator, 2026-11-23): what the panel
+shows is something needed while working in a terminal. Covering the windows
+would mean it cannot be open while the terminal is used, so the windows
+squeeze. That outweighs the reflow for other clients (8afca65a, ff649000),
+which happens only when the operator opens or puts away the panel.
