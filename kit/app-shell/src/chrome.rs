@@ -459,6 +459,9 @@ impl Shell {
             size::SIDE_SHUT
         };
         let most = size::PANEL_MAX.min(room - side - size::PANEL_PAGE_MIN);
+        // A window too narrow for the width kept still leaves the page its
+        // least: the panel gives way, the kept width stays for a wider window.
+        let width = width.min(most);
         let shell = cx.entity().downgrade();
         let (back_to, close) = (shell.clone(), shell);
         let hub = self.hub.clone();
@@ -466,7 +469,7 @@ impl Shell {
             id: "panel",
             left: edge == Edge::Left,
             width,
-            range: (size::PANEL_MIN, most),
+            range: (size::PANEL_MIN.min(most), most),
             first_width: size::PANEL,
             head: top.head(window, cx),
             content: top.view.clone().into_any_element(),

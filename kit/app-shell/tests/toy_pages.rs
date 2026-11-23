@@ -12,6 +12,7 @@ use ahjo_app_kit::host::Request;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::link::socket::Tap;
 use ahjo_app_kit::menu::MenuRow;
+use ahjo_app_kit::theme::size;
 use ahjo_app_kit::{Answers, Ask, Build, Host, Mounted, Page, Setting, mount};
 use ahjo_app_shell::Shell;
 use ahjo_core::NodeId;
@@ -1024,7 +1025,10 @@ fn the_panel_shows_one_content_beside_the_page_and_never_keeps_the_keys(cx: &mut
         cx.debug_bounds(name).map(|b| f32::from(b.size.width))
     };
     let whole = width(cx, "toy-a-page").expect("Alpha drawn");
-    let panel_width = cx.update(|_, cx| alpha_host.panel_width(cx));
+    // The panel opens at the width kept, less what the page must keep.
+    let panel_width = cx
+        .update(|_, cx| alpha_host.panel_width(cx))
+        .min(whole - size::PANEL_PAGE_MIN);
     let settled = |cx: &mut VisualTestContext, open: bool| {
         until(cx, "the panel to settle", |cx| {
             let page = width(cx, "toy-a-page").unwrap_or_default();
@@ -1050,6 +1054,10 @@ fn the_panel_shows_one_content_beside_the_page_and_never_keeps_the_keys(cx: &mut
         window.focus(&focus, cx);
     });
     settled(cx, true);
+    assert!(
+        width(cx, "toy-a-page").expect("Alpha drawn") >= size::PANEL_PAGE_MIN,
+        "the page keeps its least beside the panel"
+    );
     assert!(
         cx.debug_bounds("note-1-head").is_some(),
         "its head in the header"

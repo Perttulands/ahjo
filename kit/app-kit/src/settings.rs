@@ -116,9 +116,18 @@ pub fn swarm() -> Option<Settings> {
     Settings::parse(&std::fs::read_to_string(path()?).ok()?)
 }
 
+/// The panel's first width before it opened wide enough to read a file.
+const OLD_PANEL: f32 = 300.;
+
 impl Settings {
     pub fn parse(text: &str) -> Option<Self> {
-        serde_json::from_str(text).ok()
+        let mut settings: Self = serde_json::from_str(text).ok()?;
+        // Every save wrote the panel's first width, so a file that holds the
+        // old one (300) was never dragged: it takes the new first width.
+        if settings.panel_width == OLD_PANEL {
+            settings.panel_width = crate::theme::size::PANEL;
+        }
+        Some(settings)
     }
 
     /// Page `id`'s section: its defaults while it has none.
@@ -193,6 +202,14 @@ mod tests {
         assert_eq!(
             back.section::<String>("toy").unwrap_err().code,
             "settings_unreadable"
+        );
+        // A kept width wins; the old first width was never a choice.
+        let kept = |w: f32| Settings::parse(&format!(r#"{{"panel_width":{w}}}"#)).unwrap();
+        assert_eq!(kept(300.).panel_width, crate::theme::size::PANEL);
+        assert_eq!(kept(640.).panel_width, 640.);
+        assert_eq!(
+            Settings::parse("{}").unwrap().panel_width,
+            crate::theme::size::PANEL
         );
         // What an older app wrote, and a page not built here, stays.
         let old = r#"{"node":"http://rig:7300","font_size":16,"places":{"n":{"device":"rig","environment":"wsl","sessions":[{"name":"a"}]}}}"#;

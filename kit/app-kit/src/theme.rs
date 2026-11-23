@@ -59,7 +59,7 @@ pub mod size {
     pub const SIDE_SHUT: f32 = 36.;
     /// A page's panel (Files, which reads a file in it as well as its
     /// folders): as it first opens, and the least and most it is dragged to.
-    pub const PANEL: f32 = 300.;
+    pub const PANEL: f32 = 480.;
     pub const PANEL_MIN: f32 = 200.;
     pub const PANEL_MAX: f32 = 960.;
     /// The least a page keeps beside a panel dragged wide.
