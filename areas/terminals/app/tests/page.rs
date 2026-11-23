@@ -2471,6 +2471,95 @@ fn peek_keyboard_dismisses_and_restores_focus_after_a_leader_action(cx: &mut Tes
 }
 
 #[gpui::test]
+fn a_mouse_down_anywhere_outside_peek_closes_it(cx: &mut TestAppContext) {
+    let Some(running) = start("peek-click-outside") else {
+        return;
+    };
+    let (_shell, cx, settings) = open_with_alpha(&running, "peek-click-outside", cx);
+    let page = PAGE.with(|p| p.borrow().clone()).unwrap();
+    let (alpha, beta) = (
+        format!("row-{}::alpha", running.node),
+        format!("row-{}::beta", running.node),
+    );
+    let peeked = |cx: &mut VisualTestContext| {
+        page.read_with(cx, |p, _| p.peek.as_ref().map(|p| p.key.name.clone()))
+    };
+    until(cx, "beta in the rail", |cx| {
+        page.read_with(cx, |p, _| p.fleet.all.iter().any(|s| s.name == "beta"))
+    });
+    click(cx, beta.clone());
+    until(cx, "beta peeked", |cx| {
+        cx.debug_bounds("peek-body").is_some()
+    });
+
+    // What is done inside stays inside: a click, a selection dragged out
+    // of the card, a menu opened in its terminal and its item picked.
+    let card = cx.debug_bounds("peek").expect("Peek");
+    let body = cx.debug_bounds("peek-body").expect("Peek's terminal");
+    click(cx, "peek-body".into());
+    let from = body.center();
+    cx.simulate_mouse_down(from, gpui::MouseButton::Left, Modifiers::none());
+    let out = gpui::point(card.left() - px(20.), from.y);
+    cx.simulate_mouse_move(out, gpui::MouseButton::Left, Modifiers::none());
+    cx.simulate_mouse_up(out, gpui::MouseButton::Left, Modifiers::none());
+    cx.run_until_parked();
+    assert_eq!(peeked(cx).as_deref(), Some("beta"), "a drag out keeps Peek");
+    cx.simulate_mouse_down(from, gpui::MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(from, gpui::MouseButton::Right, Modifiers::none());
+    until(cx, "Peek's terminal menu", |cx| {
+        cx.debug_bounds("menu-label-Scroll back").is_some()
+    });
+    click(cx, "menu-label-Scroll back".into());
+    until(cx, "the menu to close", |cx| {
+        cx.debug_bounds("menu-label-Scroll back").is_none()
+    });
+    assert_eq!(peeked(cx).as_deref(), Some("beta"), "its menu keeps Peek");
+
+    // Another session in the rail switches Peek to it; the one peeked
+    // closes it.
+    click(cx, alpha.clone());
+    until(cx, "alpha peeked", |cx| {
+        peeked(cx).as_deref() == Some("alpha")
+    });
+    click(cx, alpha.clone());
+    until(cx, "a click on the peeked row closes Peek", |cx| {
+        peeked(cx).is_none() && cx.debug_bounds("peek").is_none()
+    });
+
+    // The app's top bar, outside the page, closes it too, and a right
+    // click outside does.
+    click(cx, beta.clone());
+    until(cx, "beta peeked again", |cx| {
+        cx.debug_bounds("peek").is_some()
+    });
+    click(cx, "app-mark".into());
+    until(cx, "the top bar closes Peek", |cx| {
+        cx.debug_bounds("peek").is_none()
+    });
+    click(cx, beta.clone());
+    until(cx, "beta peeked again", |cx| {
+        cx.debug_bounds("peek").is_some()
+    });
+    let mark = cx.debug_bounds("app-mark").expect("the mark").center();
+    cx.simulate_mouse_down(mark, gpui::MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(mark, gpui::MouseButton::Right, Modifiers::none());
+    until(cx, "a right click outside closes Peek", |cx| {
+        cx.debug_bounds("peek").is_none()
+    });
+
+    // What the click lands on still does its thing: a page's tab shows it.
+    click(cx, beta);
+    until(cx, "beta peeked again", |cx| {
+        cx.debug_bounds("peek").is_some()
+    });
+    click(cx, "tab-toy".into());
+    until(cx, "the toy shown and Peek closed", |cx| {
+        cx.debug_bounds("toy-send").is_some() && cx.debug_bounds("peek").is_none()
+    });
+    let _ = std::fs::remove_dir_all(settings.parent().unwrap());
+}
+
+#[gpui::test]
 fn overview_keyboard_dismisses_selects_and_routes_leader(cx: &mut TestAppContext) {
     let Some(running) = start("terminals-overview-keys") else {
         return;

@@ -487,7 +487,11 @@ impl Terminals {
                     ),
             )
             .on_click(cx.listener(move |sh, e: &gpui::ClickEvent, window, cx| {
-                sh.rail_click(&k2, Gesture::of(&e.modifiers()), window, cx)
+                let down = match e {
+                    gpui::ClickEvent::Mouse(m) => Some(m.down.position),
+                    _ => None,
+                };
+                sh.rail_click(&k2, Gesture::of(&e.modifiers()), down, window, cx)
             }))
             .on_mouse_down(
                 MouseButton::Right,
@@ -556,7 +560,8 @@ impl Terminals {
     /// Peek: the session in a terminal over the page, used as in a window
     /// (typed into, pasted, scrolled back, selected, clicked) without
     /// sizing it. Escape is its program's; Shift+Escape, Close or a click
-    /// outside closes it.
+    /// anywhere outside its card closes it (the rail, the top bar, the
+    /// page under it).
     pub fn render_peek(
         &mut self,
         _window: &mut Window,
@@ -688,10 +693,6 @@ impl Terminals {
                 .items_center()
                 .justify_center()
                 .bg(crate::theme::alpha(t.bg, 0.5))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|s, _, _, cx| s.close(super::surface::PEEK, cx)),
-                )
                 .child(
                     div()
                         .id("peek")
@@ -704,6 +705,11 @@ impl Terminals {
                         .border_1()
                         .border_color(t.accent)
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        // The scrim covers only the page; a down anywhere
+                        // else in the window closes Peek as well.
+                        .on_mouse_down_out(
+                            cx.listener(|s, e: &MouseDownEvent, _, cx| s.peek_down_outside(e, cx)),
+                        )
                         .on_mouse_move(cx.listener(Self::term_mouse_move))
                         .on_mouse_up(MouseButton::Left, cx.listener(Self::term_mouse_up))
                         .on_mouse_up_out(MouseButton::Left, cx.listener(Self::term_mouse_up))

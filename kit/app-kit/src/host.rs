@@ -437,6 +437,18 @@ impl Host {
         self.read(cx, |h| h.stack.is_open(&kind)).unwrap_or(false)
     }
 
+    /// This page's layer `name` is on top of the stack: nothing, not even
+    /// a menu, opened over it.
+    pub fn is_top(&self, name: &str, cx: &App) -> bool {
+        let kind = self.layer_name(name);
+        self.read(cx, |h| {
+            h.stack
+                .top()
+                .is_some_and(|s| crate::layers::Layer::kind(s) == kind)
+        })
+        .unwrap_or(false)
+    }
+
     fn layer_name(&self, name: &str) -> String {
         format!("{}/{name}", self.page)
     }

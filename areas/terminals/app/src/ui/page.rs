@@ -24,7 +24,7 @@ use ahjo_core::frame::Kinds;
 use ahjo_terminals_contract::{Launch, SessionList, decode_down};
 use gpui::{
     AnyElement, App, AppContext, Bounds, Context, Entity, FocusHandle, Focusable, IntoElement,
-    Pixels, Point, Render, ScrollHandle, Task, WeakEntity, Window,
+    MouseDownEvent, Pixels, Point, Render, ScrollHandle, Task, WeakEntity, Window,
 };
 use parking_lot::Mutex;
 use std::cell::{Cell, RefCell};
@@ -329,6 +329,10 @@ pub struct Terminals {
     /// History requests in flight: request id → window, or Peek.
     pub history_wanted: HashMap<u32, HistoryTarget>,
     pub peek: Option<Peek>,
+    /// The session Peek showed when a mouse-down outside closed it, and
+    /// where: a click on that session's row, from that down, leaves Peek
+    /// closed instead of opening it again.
+    pub peek_left: Option<(Key, Point<Pixels>)>,
     pub launchers: Vec<Entity<Launcher>>,
     pub rail_search: Entity<TextField>,
     pub send_note: Entity<TextField>,
@@ -497,6 +501,7 @@ impl Terminals {
             resize_seq: 0,
             history_wanted: HashMap::new(),
             peek: None,
+            peek_left: None,
             launchers,
             rail_search,
             send_note,
@@ -1673,6 +1678,16 @@ impl Terminals {
         self.host.show(cx);
         window.focus(&self.term_focus, cx);
         cx.notify();
+    }
+
+    /// A mouse-down outside Peek's card, anywhere in the window, closes it
+    /// while it is on top; whatever the down lands on still takes it.
+    pub fn peek_down_outside(&mut self, e: &MouseDownEvent, cx: &mut Context<Self>) {
+        if !self.host.is_top(surface::PEEK, cx) {
+            return;
+        }
+        self.peek_left = self.peek.as_ref().map(|p| (p.key.clone(), e.position));
+        self.close(surface::PEEK, cx);
     }
 
     pub fn open_peek(&mut self, k: Key, window: &mut Window, cx: &mut Context<Self>) {

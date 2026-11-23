@@ -9,7 +9,7 @@ use crate::store::selection::{Receipt, Sent};
 use crate::store::sessions::Key;
 use crate::store::{launch, session_copy};
 use ahjo_core::NodeId;
-use gpui::{Context, KeyDownEvent, Window};
+use gpui::{Context, KeyDownEvent, Pixels, Point, Window};
 
 /// How a click on a rail row changes the pick: Ctrl (or Cmd) flips it,
 /// Shift adds a range, a plain click empties it and peeks.
@@ -238,15 +238,22 @@ impl Terminals {
         vec![MenuItem::new(format!("Kill {what}"), Act::KillPicked).danger()]
     }
 
-    /// A click on a rail row: the pick changes, and a plain click peeks.
+    /// A click on a rail row: the pick changes, and a plain click peeks,
+    /// or closes Peek on the session it showed (the click's `down` closed
+    /// it).
     pub fn rail_click(
         &mut self,
         k: &Key,
         gesture: Gesture,
+        down: Option<Point<Pixels>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let key = k.text();
+        let closed_here = self
+            .peek_left
+            .take()
+            .is_some_and(|(left, at)| left == *k && Some(at) == down);
         // From another page a click goes to the session here, as a reveal
         // of it does.
         if !self.shown {
@@ -259,7 +266,9 @@ impl Terminals {
         match gesture {
             Gesture::Plain => {
                 self.pick.plain(&key);
-                self.open_peek(k.clone(), window, cx);
+                if !closed_here {
+                    self.open_peek(k.clone(), window, cx);
+                }
             }
             Gesture::Toggle => self.pick.toggle(&key),
             Gesture::Range => {
