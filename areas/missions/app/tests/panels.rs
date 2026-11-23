@@ -7,7 +7,7 @@
 use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::app::{Served, Started, bounds, click, serve, until};
 use ahjo_testkit::{node::Node, sessions};
-use gpui::{TestAppContext, VisualTestContext};
+use gpui::{TestAppContext, VisualTestContext, px, size};
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -140,6 +140,9 @@ fn open<'a>(cx: &'a mut TestAppContext, running: &Served<Fixture>) -> &'a mut Vi
             cx,
         )
     });
+    // A laptop's width: the board, the side panel and a card's panel (480
+    // wide) all fit, as the cards the tests click must be on the page.
+    cx.simulate_resize(size(px(1366.), px(768.)));
     cx
 }
 
@@ -296,15 +299,21 @@ fn a_click_on_a_wire_opens_its_panel_where_it_comes_off(cx: &mut TestAppContext)
     let cx = open(cx, &running);
     open_mission(cx, &running);
     // Just short of the end's way in, on the wire from the gate's pass.
-    let port = bounds(cx, "mission-port-end_done:in").unwrap();
-    let on_wire = gpui::point(port.left() - gpui::px(8.), port.center().y);
-    cx.simulate_click(on_wire, gpui::Modifiers::none());
+    // The board moves when a panel opens beside it, so the wire is found
+    // again each time.
+    let on_wire = |cx: &mut VisualTestContext| {
+        let port = bounds(cx, "mission-port-end_done:in").unwrap();
+        gpui::point(port.left() - gpui::px(8.), port.center().y)
+    };
+    let at = on_wire(cx);
+    cx.simulate_click(at, gpui::Modifiers::none());
     until(cx, "the wire's panel", |cx| has(cx, "wire-from"));
     assert!(has(cx, "wire-to"));
     // Each end opens its card's panel in its place.
     click(cx, "wire-from");
     until(cx, "the gate's panel", |cx| has(cx, "decider-human"));
-    cx.simulate_click(on_wire, gpui::Modifiers::none());
+    let at = on_wire(cx);
+    cx.simulate_click(at, gpui::Modifiers::none());
     until(cx, "the wire's panel again", |cx| has(cx, "wire-delete"));
     click(cx, "wire-delete");
     until(cx, "the wire gone", |_| {
