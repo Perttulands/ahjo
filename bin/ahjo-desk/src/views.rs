@@ -33,34 +33,29 @@ impl Render for DeskApp {
         self.keep_drafts(cx);
         let t = theme(cx).clone();
         let wide = f32::from(window.viewport_size().width);
-        let (list_w, talk_w) = self.columns(wide);
+        let (_, talk_w) = self.columns(wide);
         let lines = tokens::words_lines(f32::from(window.viewport_size().height), t.ty.read);
         self.words.update(cx, |f, _| f.set_max_lines(lines));
         let shown = self.current_ask().cloned();
         let looked = shown.is_some() && !self.items().is_empty();
         let settings = self.settings_open(cx);
         let full = self.full && looked && !settings;
-        // Where a notice stands: over the answer, which nothing covers (a
-        // page shown inside the window lies over the surface).
-        let notice_over = if full || settings {
-            (0., wide)
-        } else if looked {
-            (list_w, talk_w)
-        } else {
-            (list_w, wide - list_w)
-        };
         let body = if settings {
             // Settings stand over the window: nothing of the surface is
             // drawn under them, as a page shown inside it would show
             // through.
             div().size_full().into_any_element()
         } else if self.desks.is_empty() {
-            no_desks(&t)
+            with_notices(self.notices(cx), no_desks(&t))
         } else if full {
-            self.stage(window, cx)
+            let stage = self.stage(window, cx);
+            with_notices(self.notices(cx), stage)
         } else {
             let main = match shown {
-                None => self.all_clear(&t, cx),
+                None => {
+                    let clear = self.all_clear(&t, cx);
+                    with_notices(self.notices(cx), clear)
+                }
                 Some(ask) if !looked => div()
                     .size_full()
                     .flex()
@@ -122,12 +117,6 @@ impl Render for DeskApp {
             .relative()
             .child(body)
             .children(frame::stack(&frame, Cover::Window, window, cx))
-            .children(frame::notices_over(
-                &frame,
-                notice_over,
-                tokens::TOOLS + GAP_SMALL,
-                cx,
-            ))
             // Ctrl+wheel a picture did not take sizes the whole app.
             .child(ahjo_app_kit::zoom::app_catch(self.app_wheel_handle(), {
                 let me = cx.entity().downgrade();
@@ -693,6 +682,21 @@ impl DeskApp {
 
     // ---- The conversation ----
 
+    /// What the Desk has to say (an error until he closes it, a word that
+    /// something happened), in the flow at the top of the answer: it
+    /// pushes the answer down, never covering the list or the question.
+    fn notices(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let notices = frame::notices_in(&self.frame, cx)?;
+        Some(
+            div()
+                .flex_none()
+                .px(px(tokens::COLUMN_PAD))
+                .pt(px(GAP_SMALL))
+                .child(notices)
+                .into_any_element(),
+        )
+    }
+
     fn conversation(
         &mut self,
         t: &Theme,
@@ -802,6 +806,7 @@ impl DeskApp {
             .flex_col()
             .bg(t.bg)
             .child(head)
+            .children(self.notices(cx))
             .child(
                 // The answer follows the question rather than waiting at
                 // the window's foot; a long conversation scrolls above it,
@@ -1584,4 +1589,15 @@ fn age(at: &str) -> String {
         m if m < 60 * 48 => format!("{} h ago", m / 60),
         m => format!("{} d ago", m / (60 * 24)),
     }
+}
+
+/// `below` under the notices, which push it down.
+fn with_notices(notices: Option<AnyElement>, below: AnyElement) -> AnyElement {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .children(notices)
+        .child(div().flex_1().min_h_0().child(below))
+        .into_any_element()
 }

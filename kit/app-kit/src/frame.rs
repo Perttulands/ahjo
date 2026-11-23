@@ -568,29 +568,13 @@ pub fn notices(frame: &Entity<AppFrame>, cx: &mut App) -> Option<AnyElement> {
     Some(deferred(column).with_priority(NOTICES).into_any_element())
 }
 
-/// The same notices at the top of the strip of the window from `left`,
-/// `width` wide, `top` down: for an app whose corner something drawn
-/// outside the window can cover (Desk's page, shown in a view of its own).
-pub fn notices_over(
-    frame: &Entity<AppFrame>,
-    (left, width): (f32, f32),
-    top: f32,
-    cx: &mut App,
-) -> Option<AnyElement> {
-    // Within the strip, however narrow: its words wrap rather than run
-    // over what is beside it.
-    let most = size::NOTICE.min(width - 2. * size::HEAD_PAD).max(0.);
-    let column = notice_column(frame, most, cx)?.items_center();
-    let strip = div()
-        .absolute()
-        .top(px(top))
-        .left(px(left))
-        .w(px(width))
-        .px(px(size::HEAD_PAD))
-        .flex()
-        .justify_center()
-        .child(column);
-    Some(deferred(strip).with_priority(NOTICES).into_any_element())
+/// The same notices in the flow of what holds them, as wide as it: for
+/// an app that gives them a place of their own, pushing what is under them
+/// down rather than covering it (Desk's, at the top of the answer, where
+/// nothing drawn outside the window can cover them).
+pub fn notices_in(frame: &Entity<AppFrame>, cx: &mut App) -> Option<AnyElement> {
+    let column = notice_column(frame, f32::INFINITY, cx)?;
+    Some(column.w_full().into_any_element())
 }
 
 /// The notices, each at most `most` wide.
@@ -613,6 +597,7 @@ fn notice_column(frame: &Entity<AppFrame>, most: f32, cx: &mut App) -> Option<gp
         let mut notice = kit::panel(&t)
             .max_w(px(most))
             .id("status")
+            .debug_selector(|| "status".into())
             .px(px(size::HEAD_PAD))
             .py(px(size::HEAD_GAP))
             .flex()
@@ -622,6 +607,7 @@ fn notice_column(frame: &Entity<AppFrame>, most: f32, cx: &mut App) -> Option<gp
                 div()
                     .id("status-text")
                     .debug_selector(|| "status-text".into())
+                    .flex_grow(1.)
                     .min_w_0()
                     .text_color(if failure { t.error } else { t.text })
                     .child(text),

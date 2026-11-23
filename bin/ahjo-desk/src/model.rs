@@ -227,6 +227,15 @@ impl Ask {
         self.status == "open"
     }
 
+    /// A document to grade, answered as the web desk answers it: move
+    /// on, or another round on what he marked and wrote.
+    pub fn is_paper(&self) -> bool {
+        self.form() == Form::Open
+            && self.doc.is_some()
+            && self.options.is_empty()
+            && self.kind != "do"
+    }
+
     pub fn form(&self) -> Form {
         if !self.questions.is_empty() {
             Form::Grill

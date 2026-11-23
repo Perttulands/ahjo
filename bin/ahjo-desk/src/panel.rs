@@ -393,10 +393,7 @@ impl DeskApp {
         let form = ask.form();
         let grill = form == Form::Grill;
         let hands = form == Form::Hands;
-        // A document to grade is answered as the web desk answers it: move
-        // on, or another round on what he marked and wrote.
-        let paper =
-            form == Form::Open && ask.doc.is_some() && ask.options.is_empty() && ask.kind != "do";
+        let paper = ask.is_paper();
         let elsewhere_q = grill && draft.at.is_some();
         let focused = self.words.read(cx).is_focused(window);
         let key = if self.config.enter_sends {
@@ -539,22 +536,26 @@ impl DeskApp {
                 .child(self.words.clone())
                 .into_any_element()
         };
+        // Read from the right, the way he answers: the main way first at
+        // the right, the others beside it, and in a narrow column what
+        // does not fit wraps to the line under it, at the right too. The
+        // main way never moves.
         let foot = div()
             .flex()
+            .flex_row_reverse()
             .flex_wrap()
             .items_center()
             .gap(px(GAP_SMALL))
             .px(px(tokens::FOOT_PAD))
             .pb(px(tokens::FOOT_PAD))
-            .child(div().flex_1())
-            .children(rest)
             .map(|d| {
                 if paper {
-                    d.child(send).children(again).children(good)
+                    d.children(good).children(again).child(send)
                 } else {
-                    d.children(good).children(done).child(send)
+                    d.child(send).children(done).children(good)
                 }
-            });
+            })
+            .children(rest);
         div()
             .flex_none()
             .flex()

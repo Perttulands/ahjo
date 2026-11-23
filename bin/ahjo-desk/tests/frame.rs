@@ -86,6 +86,21 @@ fn an_error_stays_until_closed(cx: &mut gpui::TestAppContext) {
         words.contains("Not sent") && words.contains("restarting"),
         "{words}"
     );
+    // In the answer's flow: beside the list, above the question, over
+    // neither.
+    let (status, list, turns) = (
+        bounds(cx, "status").unwrap(),
+        bounds(cx, "list-left").unwrap(),
+        bounds(cx, "turns").unwrap(),
+    );
+    assert!(
+        status.left() >= list.right(),
+        "{status:?} over the list {list:?}"
+    );
+    assert!(
+        status.bottom() <= turns.top(),
+        "{status:?} over the question {turns:?}"
+    );
     cx.executor().advance_clock(Duration::from_secs(60));
     until(cx, "a frame", |_| true);
     assert!(

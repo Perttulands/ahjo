@@ -694,8 +694,12 @@ impl DeskApp {
                 draft.words,
                 "What stops the job, or a note on how it went".into(),
             ),
-            // The card and its Send say what the field is for.
-            _ => (draft.words, String::new()),
+            // A document: his words go with his marks, or alone.
+            (Some(a), _) if a.is_paper() => (
+                draft.words,
+                "Words for the agent, with your marks or alone".into(),
+            ),
+            _ => (draft.words, "Your words for the agent".into()),
         };
         self.words.update(cx, |f, cx| {
             f.set_placeholder(&hint);
