@@ -51,13 +51,18 @@ impl Executor for Cycle {
                     "A done".to_owned()
                 }
                 "fmn_b" => {
-                    if request.attempt == 1 {
-                        std::fs::write(request.cwd.join("value"), "B")
-                            .map_err(|error| error.to_string())?;
-                    }
+                    let value = if request.attempt == 1 { "B" } else { "B again" };
+                    std::fs::write(request.cwd.join("value"), value)
+                        .map_err(|error| error.to_string())?;
                     "B done".to_owned()
                 }
                 "fmn_judge" => {
+                    let value = std::fs::read_to_string(request.cwd.join("value"))
+                        .map_err(|error| error.to_string())?;
+                    let expected = if request.attempt == 1 { "B" } else { "B again" };
+                    if value != expected {
+                        return Err(format!("judge saw {value:?}, expected {expected:?}"));
+                    }
                     let verdict = if request.attempt == 1 { "fail" } else { "pass" };
                     format!(
                         "```ahjo-verdict\n{}\n```",
@@ -260,6 +265,6 @@ fn returning_to_a_step_keeps_later_steps_changes() {
     assert_eq!(paths[0], paths[1]);
     assert_eq!(
         std::fs::read_to_string(workspace.join("value")).unwrap(),
-        "B"
+        "B again"
     );
 }
