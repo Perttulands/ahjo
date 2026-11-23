@@ -17,13 +17,16 @@
 //!   `$XDG_CACHE_HOME/ahjo-brain` (or `~/.cache/ahjo-brain`) elsewhere;
 //!   `AHJO_BRAIN_CACHE` moves it. It holds the brain's titles and summaries,
 //!   so it stays on this machine.
-//! - The app's own settings (its theme): `settings.json` in
-//!   `%APPDATA%\ahjo-brain` on Windows and `$XDG_CONFIG_HOME/ahjo-brain` (or
-//!   `~/.config/ahjo-brain`) elsewhere; `AHJO_BRAIN_CONFIG` names the file.
-//!   Until a theme is chosen here, the one chosen in Ahjo Swarm is drawn.
+//! - The app's own settings (its theme): `brain.json` beside Swarm's
+//!   `app.json` and Desk's `desk.json`, in `%APPDATA%\Ahjo` on Windows and
+//!   `$XDG_CONFIG_HOME/ahjo` (or `~/.config/ahjo`) elsewhere;
+//!   `AHJO_BRAIN_CONFIG` names the file. The first start after the move
+//!   carries over the old `ahjo-brain/settings.json`. Until a theme is
+//!   chosen here, the one chosen in Ahjo Swarm is drawn.
 
 use crate::corpus::Entry;
 use crate::mirror::{self, Remote};
+use ahjo_app_kit::Error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -243,10 +246,19 @@ pub struct Settings {
     pub rest: serde_json::Map<String, serde_json::Value>,
 }
 
+/// `AHJO_BRAIN_CONFIG`, else `brain.json` in the folder of Ahjo Swarm's
+/// `app.json` and Desk's `desk.json` (`%APPDATA%\Ahjo`, or
+/// `$XDG_CONFIG_HOME/ahjo`).
 pub fn settings_path() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("AHJO_BRAIN_CONFIG") {
         return Some(p.into());
     }
+    ahjo_app_kit::settings::path().map(|p| p.with_file_name("brain.json"))
+}
+
+/// Where Brain kept its settings before they moved beside Swarm's and
+/// Desk's: `settings.json` in its own `ahjo-brain` folder.
+fn former_settings_path() -> Option<PathBuf> {
     let base = if cfg!(windows) {
         std::env::var_os("APPDATA").map(PathBuf::from)
     } else {
@@ -255,6 +267,56 @@ pub fn settings_path() -> Option<PathBuf> {
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
     };
     base.map(|b| b.join("ahjo-brain").join("settings.json"))
+}
+
+/// The settings file to use now. A file at the former place moves to the
+/// new one once: read, written whole, and only then removed. Nothing is
+/// moved over a file already at the new place, or when `AHJO_BRAIN_CONFIG`
+/// names the file. A move that fails leaves the old file in use for this
+/// launch, and the error says why; the next launch tries again.
+pub fn settings_path_moved() -> (Option<PathBuf>, Option<Error>) {
+    let path = settings_path();
+    if std::env::var_os("AHJO_BRAIN_CONFIG").is_some() {
+        return (path, None);
+    }
+    let (Some(new), Some(old)) = (path.clone(), former_settings_path()) else {
+        return (path, None);
+    };
+    match move_settings(&old, &new) {
+        Ok(_) => (path, None),
+        Err(e) => (Some(old), Some(e)),
+    }
+}
+
+/// Moves the settings at `old` to `new` unless `new` exists or `old` does
+/// not; whether it did.
+fn move_settings(old: &Path, new: &Path) -> Result<bool, Error> {
+    let fail = |what: &str, at: &Path, e: std::io::Error| {
+        Error::new(
+            "settings_not_moved",
+            format!(
+                "Brain's settings could not be moved to {}: {what} {}: {e}",
+                new.display(),
+                at.display()
+            ),
+        )
+    };
+    if new.exists() || !old.exists() {
+        return Ok(false);
+    }
+    let text = std::fs::read(old).map_err(|e| fail("reading", old, e))?;
+    if let Some(dir) = new.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| fail("making", dir, e))?;
+    }
+    let part = new.with_extension("json.part");
+    std::fs::write(&part, &text).map_err(|e| fail("writing", &part, e))?;
+    std::fs::rename(&part, new).map_err(|e| fail("writing", new, e))?;
+    std::fs::remove_file(old).map_err(|e| fail("removing", old, e))?;
+    // The old folder goes with it when nothing else is in it.
+    if let Some(dir) = old.parent() {
+        let _ = std::fs::remove_dir(dir);
+    }
+    Ok(true)
 }
 
 /// A cheap sign that the brain changed: its Git index moves with every
@@ -268,6 +330,54 @@ pub fn marker(root: &Path) -> Option<std::time::SystemTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ahjo-brain-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn settings_move_beside_swarms_once_and_the_old_file_goes_after_the_write() {
+        let home = scratch("moves");
+        let (old, new) = (
+            home.join("ahjo-brain").join("settings.json"),
+            home.join("Ahjo").join("brain.json"),
+        );
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, r#"{"from":"http://rig:7300","theme":"night"}"#).unwrap();
+        assert!(move_settings(&old, &new).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&new).unwrap(),
+            r#"{"from":"http://rig:7300","theme":"night"}"#
+        );
+        assert!(!old.exists(), "the old file is gone");
+        assert!(!old.parent().unwrap().exists(), "so is its empty folder");
+        // A second start finds nothing to move, and moves nothing over a file.
+        assert!(!move_settings(&old, &new).unwrap());
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, "{}").unwrap();
+        assert!(!move_settings(&old, &new).unwrap());
+        assert!(old.exists(), "an old file beside a new one stays untouched");
+        assert!(std::fs::read_to_string(&new).unwrap().contains("rig"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn a_move_that_cannot_write_keeps_the_old_file_and_says_so() {
+        let home = scratch("keeps");
+        let old = home.join("ahjo-brain").join("settings.json");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::write(&old, "{}").unwrap();
+        // The new place's folder is a file: nothing can be written there.
+        let blocked = home.join("Ahjo");
+        std::fs::write(&blocked, "").unwrap();
+        let err = move_settings(&old, &blocked.join("brain.json")).unwrap_err();
+        assert_eq!(err.code, "settings_not_moved");
+        assert!(old.exists(), "the old file is removed only after the write");
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn another_machine_is_named_by_its_host() {

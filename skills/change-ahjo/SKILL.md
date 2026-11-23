@@ -208,9 +208,11 @@ menu and a taskbar pin start the same app the same way. `install.json` beside th
 an upgrade with `--windows-apps`, each app shows Update in its top bar when the
 node hands out another build, and the operator presses it. Do not copy builds
 over them or close his windows to deploy. Their settings are in `%APPDATA%\Ahjo`: `app.json`
-(Swarm, naming the node `http://127.0.0.1:7310`) and `desk.json` (Desk);
-Brain's are in `%APPDATA%\ahjo-brain\settings.json`. Each app keeps its log
-beside its settings (`app.log`, `desk.log`), with every panic's message,
+(Swarm, naming the node `http://127.0.0.1:7310`) and `desk.json` (Desk) and `brain.json` (Brain, which kept them in
+`%APPDATA%\ahjo-brain\settings.json` until ahjo-ctz: its first start, or
+the install script, carries that file over and removes it once the new one is
+written; `AHJO_BRAIN_CONFIG` names the file). Each app keeps its log
+beside its settings (`app.log`, `desk.log`, `brain.log`), with every panic's message,
 place and backtrace; the `.pdb` files in `C:\Users\pertt\ahjo-build\target\release` name the frames. A node whose protocol changed (`protocol` in
 `/api/health`) needs the app built from the same commit.
 

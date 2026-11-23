@@ -92,7 +92,7 @@ cleanup() {
   set +e
   if ls "$RUN"/*.pid >/dev/null 2>&1; then (step stop) || say "the apps may still run: see $RUNW"; fi
   $W/schtasks.exe /Delete /F /TN $TASK >/dev/null 2>&1
-  for f in "$RUN"/appdata/Ahjo/*.log "$RUN"/appdata/ahjo-brain/*.log; do
+  for f in "$RUN"/appdata/Ahjo/*.log; do
     [ -e "$f" ] && cp "$f" "$out/"
   done
   [ ${#pids[@]} -gt 0 ] && kill "${pids[@]}" 2>/dev/null && wait "${pids[@]}" 2>/dev/null

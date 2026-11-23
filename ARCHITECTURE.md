@@ -334,7 +334,7 @@ reserves, or whose `everywhere` chords share a key, naming both;
   `settings_changed`; the app's own writes are not edits, and a file that
   does not read is reported while the last good settings stay. That file
   is a `SettingsFile`, the kit's, as Desk's `desk.json` and Brain's
-  `settings.json` are: one way to read, write, set aside a broken file and
+  `brain.json` are: one way to read, write, set aside a broken file and
   pick up an outside edit, whichever app holds it (`KeepsSettings`).
 - **Read models.** What one page knows that others show (the Sessions page's session
   list) is a plain type in its area's `contract`, published by that page

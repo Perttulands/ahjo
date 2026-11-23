@@ -42,7 +42,7 @@ pub fn run() {
         println!("{USAGE}");
         return;
     }
-    let path = source::settings_path();
+    let (path, moved) = source::settings_path_moved();
     if args.iter().any(|a| a == "--where") {
         // Read only: a file that does not read is left where it is.
         let settings = path
@@ -76,9 +76,10 @@ pub fn run() {
     };
     ahjo_app_kit::app_log::install(
         "ahjo-brain",
-        path.as_ref().map(|p| p.with_file_name("app.log")),
+        path.as_ref().map(|p| p.with_file_name("brain.log")),
     );
     let (settings, notice) = SettingsFile::<source::Settings>::load(path);
+    let notice = moved.or(notice);
     // The theme: as asked, else as chosen here, else as chosen in Ahjo Swarm.
     let direction = flag.or_else(|| Direction::from_key(&settings.theme));
     let start = Start {

@@ -1,5 +1,5 @@
 //! One JSON settings file an app keeps (Swarm's `app.json`, Desk's
-//! `desk.json`, Brain's `settings.json`), the same way in each: read at
+//! `desk.json`, Brain's `brain.json`), the same way in each: read at
 //! start (a missing file is the defaults; one that does not read is set
 //! aside beside itself, named in the notice, never silently replaced),
 //! written whole through a temporary file a moment after a burst of

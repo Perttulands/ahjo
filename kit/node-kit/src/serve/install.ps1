@@ -9,7 +9,7 @@
 # from the node (Update, at the top of each window).
 #
 # For a trial run elsewhere, AHJO_INSTALL_DIR (the apps), AHJO_CONFIG_DIR
-# (their settings, %APPDATA%\Ahjo, with Brain's in its ahjo-brain folder)
+# (their settings, %APPDATA%\Ahjo)
 # and AHJO_START_MENU (the shortcuts) move what it writes, and then it
 # opens nothing.
 #
@@ -88,18 +88,27 @@ if ($settings.node -ne $node) {
 }
 
 # Ahjo Brain reads the brain through the same node. It is kept in Brain's
-# settings, not on its shortcut, so a taskbar pin of the bare exe starts the
-# same app as the Start menu.
-$brainDir = if ($env:AHJO_CONFIG_DIR) { Join-Path $config 'ahjo-brain' } else { Join-Path $env:APPDATA 'ahjo-brain' }
-New-Item -ItemType Directory -Force -Path $brainDir | Out-Null
-$brainJson = Join-Path $brainDir 'settings.json'
-if (Test-Path -LiteralPath $brainJson) {
-  try { $brain = [IO.File]::ReadAllText($brainJson) | ConvertFrom-Json }
-  catch { throw "The apps are installed, but $brainJson does not read as JSON; fix or remove it and run the line again." }
+# settings (brain.json, beside app.json), not on its shortcut, so a taskbar
+# pin of the bare exe starts the same app as the Start menu. Brain used to
+# keep them in its own folder: they are carried over here, and the old file
+# removed once the new one is written.
+$brainJson = Join-Path $config 'brain.json'
+$brainOld = Join-Path (Join-Path $(if ($env:AHJO_CONFIG_DIR) { $config } else { $env:APPDATA }) 'ahjo-brain') 'settings.json'
+$brainFrom = $null
+if (Test-Path -LiteralPath $brainJson) { $brainFrom = $brainJson }
+elseif (Test-Path -LiteralPath $brainOld) { $brainFrom = $brainOld }
+if ($brainFrom) {
+  try { $brain = [IO.File]::ReadAllText($brainFrom) | ConvertFrom-Json }
+  catch { throw "The apps are installed, but $brainFrom does not read as JSON; fix or remove it and run the line again." }
 } else { $brain = New-Object PSObject }
+$brainWrite = ($brainFrom -ne $brainJson) -or ($brain.from -ne $node)
 if ($brain.from -ne $node) {
   $brain | Add-Member -Force -NotePropertyName from -NotePropertyValue $node
-  Write-Text $brainJson ($brain | ConvertTo-Json -Depth 32)
+}
+if ($brainWrite) { Write-Text $brainJson ($brain | ConvertTo-Json -Depth 32) }
+if (Test-Path -LiteralPath $brainOld) {
+  Remove-Item -LiteralPath $brainOld -Force
+  Remove-Item -LiteralPath (Split-Path $brainOld) -ErrorAction SilentlyContinue
 }
 
 # Ahjo Desk's first desk, unless it already has its own.
