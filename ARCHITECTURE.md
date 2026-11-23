@@ -80,6 +80,14 @@ what each is for the operator; this is what each word may name in code.
 | scheduled prompt | a prompt sent into sessions on a timer (the noun `scheduled`) | task (alone) |
 | run | one time a mission is carried out | |
 | reason | the operator's words given with an approval, pick, abort or resume | response |
+| panel | the shell's one column at the window's edge, where what a page opens beside another stands (`Host::show_panel`, a `PanelView`) | dock, beside view, view beside, beside panel, edge panel, drawer, side panel |
+| side section | a page's part of the shell's left column, lent on every page (`Host::lend_side`), as Sessions lends its rail | side panel |
+| popup | a menu, confirm or small form on the dismissal stack, standing beside what was clicked (`Host::popup`) | popover |
+| layer | a page-wide surface on the dismissal stack, over the page or the window (Overview, Peek, a rename holding the keyboard) | overlay |
+| Peek | a session's terminal over the page, used as in a window, without sizing the session | |
+| Overview | a layer showing every session as a card of its screen | |
+| beside | next to a thing without covering it: a beside ask's answer in the panel, a popup at what was clicked | beside for what lies over (the views beside of 2026-11-13 to 11-23) |
+| Send | Send to Session: a reference and a note handed to one or more sessions, from the panel | drawer, Send drawer |
 
 Words in the Not column are retired. Leftovers in the code are renamed whole
 when touched; new code, schema fields and command names use only the left
@@ -273,9 +281,7 @@ reserves, or whose `everywhere` chords share a key, naming both;
   Back, Close, grip, slide) is `panel::EdgeColumn`, which Desk's list of
   asks uses too. Only Peek still opens
   over the page, a glance that any click outside closes. Why one panel:
-  four kinds of side surface (a view over the terminals, a drawer that
-  held the keyboard, a squeezing Files panel, a page's own column) each
-  had its own look, keys and bugs; one panel has one of each.
+  [ADR 0001](docs/adr/0001-one-panel-beside-the-page.md).
 - **Popups.** Every menu, confirm and small form a page opens over itself
   is a popup on the dismissal stack (`Host::popup`, `app-kit`'s `popup`),
   and the shell does everything but its content, the same on every page.
