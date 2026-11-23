@@ -2,7 +2,7 @@
 //! ends; a wire says the two cards it joins, each one click away, and can
 //! be taken off the board.
 use super::*;
-use ahjo_missions_contract::{EndOutcome, EndUpdate, HumanChannel, InputCardUpdate, Mission};
+use ahjo_missions_contract::{EndOutcome, EndUpdate, HumanChannel, InputCardUpdate};
 use gpui::SharedString;
 
 /// How a run that reaches an end ends, as the panel offers it.
@@ -119,9 +119,9 @@ impl MissionsPage {
         let (from, route) = wire.from.split_once(':').unwrap_or((&wire.from, ""));
         let to = wire.to.split(':').next().unwrap_or(&wire.to);
         let from_words = match route {
-            "pass" => format!("{}, when it passes", card_title(mission, from)),
-            "fail" => format!("{}, when it fails", card_title(mission, from)),
-            _ => card_title(mission, from),
+            "pass" => format!("{}, when it passes", mission.card_name(from)),
+            "fail" => format!("{}, when it fails", mission.card_name(from)),
+            _ => mission.card_name(from).to_owned(),
         };
         let running = self.selected_run().is_some();
         let end = |selector: &'static str, words: String, card: &str| {
@@ -178,7 +178,7 @@ impl MissionsPage {
             .child(kit::label(&t, "From"))
             .child(end("wire-from", from_words, from))
             .child(kit::label(&t, "To"))
-            .child(end("wire-to", card_title(mission, to), to));
+            .child(end("wire-to", mission.card_name(to).to_owned(), to));
         Some(
             div()
                 .size_full()
@@ -197,26 +197,9 @@ impl MissionsPage {
             self.state.error = Some("Save or discard the current draft first.".into());
         } else {
             self.editor = None;
+            self.run.inspect = None;
             self.canvas.wire = Some(id);
         }
         cx.notify();
-    }
-}
-
-/// A card's title as the board shows it, or its id when it has none.
-fn card_title(mission: &Mission, id: &str) -> String {
-    let title = (mission.steps.iter().find(|c| c.id == id).map(|c| &c.title))
-        .or_else(|| {
-            mission
-                .input_cards
-                .iter()
-                .find(|c| c.id == id)
-                .map(|c| &c.title)
-        })
-        .or_else(|| mission.gates.iter().find(|c| c.id == id).map(|c| &c.title))
-        .or_else(|| mission.ends.iter().find(|c| c.id == id).map(|c| &c.title));
-    match title {
-        Some(t) if !t.trim().is_empty() => t.clone(),
-        _ => id.to_owned(),
     }
 }

@@ -173,17 +173,7 @@ impl MissionsPage {
                 .children(self.run.responses.get(gate).map(|f| div().child(f.clone())))
                 .child(actions);
         }
-        Some(
-            part.child(
-                div()
-                    .text_size(px(size::SMALL))
-                    .text_color(t.dim)
-                    .child("Changes below apply to the next run."),
-            )
-            .pb(px(TAB_GAP))
-            .border_b_1()
-            .border_color(t.divider),
-        )
+        Some(part.pb(px(TAB_GAP)).border_b_1().border_color(t.divider))
     }
 
     /// Who decides the gate, and what it takes from each kind of decider.

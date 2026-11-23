@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 
 pub(super) struct RunUi {
     pub(super) selected: Option<String>,
+    /// The card whose read-only panel is open on the run's board.
+    pub(super) inspect: Option<String>,
     pub(super) reveal_step: Option<String>,
     pub(super) frozen: Option<Mission>,
     pub(super) starting: bool,
@@ -69,6 +71,7 @@ impl RunUi {
         cx.observe(&cwd, |_, _, cx| cx.notify()).detach();
         Self {
             selected: None,
+            inspect: None,
             reveal_step: None,
             frozen: None,
             starting: false,

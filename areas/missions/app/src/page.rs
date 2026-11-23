@@ -10,6 +10,7 @@ mod manage;
 mod navigator;
 mod notes;
 mod run;
+mod run_panel;
 mod run_view;
 mod staffing;
 mod validation;
@@ -1376,6 +1377,14 @@ impl MissionsPage {
     /// The open card's panel, the page's column of the window's edge
     /// panel: one header with its title, Delete, Done and Close.
     pub(crate) fn editor_column(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if let Some(card) = self
+            .run
+            .inspect
+            .clone()
+            .filter(|_| self.selected_run().is_some())
+        {
+            return self.run_card_column(&card, cx);
+        }
         if let Some(wire) = self.canvas.wire.clone() {
             return self.wire_column(&wire, cx);
         }
@@ -1969,10 +1978,18 @@ impl MissionsPage {
         )
     }
 
+    /// Whether a card's or a wire's panel is open: an editor, a wire, or
+    /// a card on the run's board.
+    fn is_card_panel_open(&self) -> bool {
+        self.editor.is_some()
+            || self.canvas.wire.is_some()
+            || (self.run.inspect.is_some() && self.selected_run().is_some())
+    }
+
     /// Lends the open card's panel to the window's edge panel while a card
     /// is open, opening the edge panel for it, and takes it back after.
     fn lend_card_panel(&mut self, cx: &mut Context<Self>) {
-        let is_open = self.editor.is_some() || self.canvas.wire.is_some();
+        let is_open = self.is_card_panel_open();
         if is_open == self.is_panel_lent {
             return;
         }
@@ -2004,6 +2021,7 @@ impl MissionsPage {
         if self.unsaved(cx).is_none() {
             self.editor = None;
             self.canvas.wire = None;
+            self.run.inspect = None;
             self.resolve_wanted(cx);
             window.focus(&self.focus, cx);
         } else {
@@ -2235,9 +2253,8 @@ impl Render for MissionsPage {
             // stands beside it when there is room, or behind its toggle.
             // One panel at a time: an open card's or wire's takes its place.
             let empty = m.input_cards.is_empty() && m.steps.is_empty();
-            let flow_shown = self.editor.is_none()
-                && self.canvas.wire.is_none()
-                && self.flow_open.unwrap_or(room >= FLOW_AT && !empty);
+            let flow_shown =
+                !self.is_card_panel_open() && self.flow_open.unwrap_or(room >= FLOW_AT && !empty);
             let head = self.mission_head(&t, &m, flow_shown, cx);
             let todo = self.todo_band(&t, &m).filter(|_| self.todo_open);
             let board = div()
@@ -2392,7 +2409,7 @@ impl Render for MissionsPage {
                     } else if page.note_paper.open.is_some() {
                         page.close_canvas_note(cx);
                     } else if page.escape_run(cx) {
-                    } else if page.editor.is_some() || page.canvas.wire.is_some() {
+                    } else if page.is_card_panel_open() {
                         page.close_editor(window, cx);
                     }
                     cx.stop_propagation();

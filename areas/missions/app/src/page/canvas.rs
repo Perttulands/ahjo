@@ -1037,9 +1037,9 @@ impl MissionsPage {
         if running {
             let open = card.id.clone();
             return match card.kind {
-                board::Kind::Gate => rendered
+                board::Kind::Gate | board::Kind::End | board::Kind::Input => rendered
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |p, _, _, cx| p.edit_step(&open, cx))),
+                    .on_click(cx.listener(move |p, _, _, cx| p.open_run_card(&open, cx))),
                 board::Kind::Step => rendered
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |p, _, window, cx| {

@@ -2,7 +2,8 @@
 //! Every element on the board opens its panel in the window's edge panel:
 //! a gate's sets its loop's tries and, in a run, says which try the work
 //! is on; an end's says how a run ends there; an input's starts a run; a
-//! wire's names its two cards and takes it off the board.
+//! wire's names its two cards and takes it off the board. On a run's
+//! board each reads what the card did and is, and takes only answers.
 use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_testkit::app::{Served, Started, bounds, click, serve, until};
 use ahjo_testkit::{node::Node, sessions};
@@ -220,10 +221,27 @@ fn a_runs_gate_says_which_try_the_work_is_on(cx: &mut TestAppContext) {
     until(cx, "send back on the gate's panel", |cx| {
         has(cx, "panel-gate-fail")
     });
+    // The run's panel reads the plan and takes only the operator's answer.
+    assert!(has(
+        cx,
+        "run-fact: Goes back to Fix, up to 3 tries; then the run fails"
+    ));
+    assert!(!has(cx, "tries-more") && !has(cx, "step-save"));
     click(cx, "panel-gate-fail");
     until(cx, "the second try", |cx| {
         has(cx, "gate-tries-gate_review: ↺ try 2 of 3")
     });
+    // The input says what the run was given; the end, whether it ended there.
+    click(cx, "mission-card-inp_bug");
+    until(cx, "what the run was given", |cx| {
+        has(cx, "run-given-report: it breaks")
+    });
+    click(cx, "mission-card-end_done");
+    until(cx, "the end's panel", |cx| {
+        has(cx, "run-fact: Has not ended here")
+    });
+    click(cx, "panel-close");
+    until(cx, "put away", |cx| !has(cx, "card-panel"));
 }
 
 #[gpui::test]
