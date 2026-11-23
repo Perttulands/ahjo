@@ -1,0 +1,289 @@
+#!/usr/bin/env bash
+# try-windows: shows how a commit looks in the real Windows apps on this
+# machine, before it is deployed. Builds the commit's Windows apps and node
+# in try checkouts of their own, starts a scratch node in WSL with scratch
+# tmux sessions, files and brain, a fake desk, and the Windows apps on the
+# operator's desktop with scratch settings, opens the asked pages, captures
+# each window, and stops everything it started.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+usage: try-windows [<commit>] [--page <page>]... [--app swarm|desk|brain]... [--out <dir>]
+
+  <commit>  any commit /srv/ahjo knows (default origin/main, fetched first)
+  --page    a Swarm page to capture, as `ahjo view open` takes it: the page
+            (sessions, files, harness, agents, issue, missions, scheduled,
+            host, settings) and what to reveal on it, e.g.
+            --page 'files --path README.md' (default 'sessions --session agent')
+  --app     which apps to start (default all three)
+  --out     where the screenshots go (default
+            ~/.cache/ahjo-dev/try-shots/<commit>-<time>)
+
+Prints the folder with swarm-<page>.png, desk.png and brain.png, the apps'
+logs and the node's log.
+EOF
+}
+
+commit=origin/main pages=() apps=() out=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --page) pages+=("$2"); shift 2 ;;
+    --app) apps+=("$2"); shift 2 ;;
+    --out) out=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) usage >&2; exit 2 ;;
+    *) commit=$1; shift ;;
+  esac
+done
+[ ${#pages[@]} -gt 0 ] || pages=("sessions --session agent")
+[ ${#apps[@]} -gt 0 ] || apps=(swarm desk brain)
+wants() { local a; for a in "${apps[@]}"; do [ "$a" = "$1" ] && return 0; done; return 1; }
+
+REPO=/srv/ahjo
+LINUX=$HOME/.cache/ahjo-dev/try            # worktree of $REPO: the node's build
+WIN=/mnt/c/Users/pertt/ahjo-try            # Windows clone: the apps' build
+CARGO_EXE=/mnt/c/Users/pertt/.cargo/bin/cargo.exe
+W=/mnt/c/Windows/System32
+TMUX_BIN=${AHJO_TMUX:-/home/linuxbrew/.linuxbrew/bin/tmux}
+HERE=$(cd "$(dirname "$0")" && pwd)
+started=$(date +%s)
+say() { printf '[%3ss] %s\n' $(( $(date +%s) - started )) "$*" >&2; }
+die() { say "error: $*"; exit 1; }
+
+mkdir -p "$HOME/.cache/ahjo-dev"
+exec 9>"$HOME/.cache/ahjo-dev/try.lock"
+flock -n 9 || die "another try-windows is running"
+
+git -C $REPO fetch -q origin
+sha=$(git -C $REPO rev-parse --verify "$commit^{commit}") || die "no commit $commit"
+short=${sha:0:7}
+stamp=$(date +%Y%m%d-%H%M%S)
+out=${out:-$HOME/.cache/ahjo-dev/try-shots/$short-$stamp}
+mkdir -p "$out"
+
+# Scratch places: $S in WSL for the node, $RUN on Windows for the apps.
+S=$(mktemp -d /tmp/ahjo-try.XXXXXX)
+RUN=/mnt/c/Users/pertt/AppData/Local/Temp/ahjo-try/$stamp-$$
+mkdir -p "$RUN"
+RUNW=$(wslpath -w "$RUN")
+TASK=ahjo-try-$$
+pids=()
+
+# One step of try-windows.ps1 in the operator's desktop session: WSL runs in
+# session 0, where a window never shows, so the step goes through a one-off
+# scheduled task with /IT, run by a headless console (no window of its own).
+step() {
+  rm -f "$RUN/done.txt" "$RUN/failed.txt"
+  (IFS=$'\t'; printf '%s' "$*") > "$RUN/job.txt"
+  $W/schtasks.exe /Create /F /TN $TASK /SC ONCE /ST 23:59 /IT \
+    /TR "conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUNW\\try-windows.ps1 -Run $RUNW" >/dev/null
+  $W/schtasks.exe /Run /TN $TASK >/dev/null
+  local i
+  for i in $(seq 1 400); do
+    [ -e "$RUN/done.txt" ] || [ -e "$RUN/failed.txt" ] && break
+    sleep 0.25
+  done
+  $W/schtasks.exe /Delete /F /TN $TASK >/dev/null
+  [ -e "$RUN/done.txt" ] || die "Windows step '$1': $(cat "$RUN/failed.txt" 2>/dev/null || echo 'no answer in 100 s')"
+}
+
+cleanup() {
+  set +e
+  if ls "$RUN"/*.pid >/dev/null 2>&1; then (step stop) || say "the apps may still run: see $RUNW"; fi
+  $W/schtasks.exe /Delete /F /TN $TASK >/dev/null 2>&1
+  for f in "$RUN"/appdata/Ahjo/*.log "$RUN"/appdata/ahjo-brain/*.log; do
+    [ -e "$f" ] && cp "$f" "$out/"
+  done
+  [ ${#pids[@]} -gt 0 ] && kill "${pids[@]}" 2>/dev/null && wait "${pids[@]}" 2>/dev/null
+  "$TMUX_BIN" -S "$S/tmux.sock" kill-server 2>/dev/null
+  rm -rf "$S" "$RUN"
+  say "stopped everything it started"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# --- Build: the node in WSL and the apps on Windows, side by side ---------
+[ -d "$LINUX" ] || git -C $REPO worktree add -q --detach "$LINUX" "$sha"
+git -C "$LINUX" checkout -q --detach "$sha"
+if [ ! -d "$WIN/.git" ]; then
+  git clone -q --no-checkout $REPO "$WIN"
+fi
+# Any commit $REPO knows, a lane's branch too, not only what GitHub has.
+git -C "$WIN" fetch -q $REPO '+refs/heads/*:refs/try/heads/*' '+refs/remotes/origin/*:refs/try/origin/*'
+git -C "$WIN" checkout -q --detach "$sha"
+
+say "building $short: node in $LINUX, apps in $WIN"
+win_crates=()
+for a in "${apps[@]}"; do win_crates+=(-p "ahjo-app-$a"); done
+(cd "$LINUX" && heavy run --memory 8 --note "try-windows node $short" -- \
+  env PKG_CONFIG=/usr/bin/pkg-config cargo build --release -p ahjo) > "$out/build-node.log" 2>&1 &
+node_build=$!
+(cd "$WIN" && heavy run --memory 8 --note "try-windows apps $short" -- \
+  "$CARGO_EXE" build --release "${win_crates[@]}") > "$out/build-apps.log" 2>&1 &
+apps_build=$!
+wait $node_build || die "node build failed: $out/build-node.log"
+wait $apps_build || die "apps build failed: $out/build-apps.log"
+say "built"
+AHJO=$LINUX/target/release/ahjo
+
+free_port() {
+  python3 - "$1" <<'EOF'
+import socket, sys
+for port in range(int(sys.argv[1]), int(sys.argv[1]) + 50):
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", port)); print(port); break
+        except OSError:
+            pass
+EOF
+}
+
+# --- The scratch node: its own tmux server, files and brain ---------------
+port=$(free_port 7350)
+node=http://127.0.0.1:$port
+mkdir -p "$S/xdg/ahjo" "$S/files" "$S/brain/knowledge/try"
+git -C "$LINUX" archive "$sha" README.md VISION.md DESIGN.md ARCHITECTURE.md kit/core | tar -x -C "$S/files"
+cat > "$S/brain/knowledge/try/windows.md" <<'EOF'
+---
+title: Trying a build on Windows
+summary: A scratch page the try-windows brain holds.
+---
+# Trying a build on Windows
+
+The lead looks at every screen before the operator does.
+EOF
+cat > "$S/brain/knowledge/try/scratch.md" <<'EOF'
+---
+title: Scratch brain
+summary: Nothing here is the operator's.
+---
+# Scratch brain
+
+Pages for the screenshot, written by try-windows.
+EOF
+git -C "$S/brain" init -q && git -C "$S/brain" add -A &&
+  git -C "$S/brain" -c user.name=try -c user.email=try@localhost commit -qm "scratch brain"
+cat > "$S/xdg/ahjo/config.toml" <<EOF
+[node]
+listen = "127.0.0.1:$port"
+[terminals]
+socket = "$S/tmux.sock"
+[files]
+roots = ["$S/files"]
+[brain]
+corpus = "$S/brain"
+EOF
+HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s build -c "$S/files" \
+  "for i in \$(seq 1 40); do echo \"   Compiling ahjo-crate-\$i v0.0.1\"; done; exec bash --norc"
+HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s agent -c "$S/files" \
+  "printf '%s\n' '# Plan' '' '1. Read DESIGN.md' '2. Change the page' '3. Look at it on Windows'; exec bash --norc"
+HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s shell -c "$S/files" "ls -la; exec bash --norc"
+HOME=$S XDG_CONFIG_HOME=$S/xdg "$AHJO" serve > "$out/node.log" 2>&1 &
+pids+=($!)
+for i in $(seq 1 100); do "$AHJO" version --node $node >/dev/null 2>&1 && break; sleep 0.2; done
+"$AHJO" version --node $node >/dev/null 2>&1 || die "the scratch node did not answer: $out/node.log"
+say "scratch node on $node"
+
+# --- A fake desk for the Desk ----------------------------------------------
+if wants desk; then
+  dport=$(free_port $((port + 1)))
+  python3 - "$dport" > "$out/desk-server.log" 2>&1 <<'EOF' &
+import json, sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+at = "2026-11-23T09:00:00+00:00"
+def ask(id, kind, title, question, **more):
+    a = {"id": id, "bead": "ahjo-try", "kind": kind, "title": title, "question": question,
+         "status": "open", "round": 1, "revision": 1, "media": [], "options": [],
+         "comments": [], "marks": [], "answer": None, "created_at": at, "updated_at": at}
+    a.update(more)
+    return a
+asks = [
+    ask("try-pick", "decide", "Which panel edge?", "Where should the side panel stand?",
+        options=[{"name": "Right", "why": "Where it is today"},
+                 {"name": "Left", "why": "Nearer the page list"}], recommend="Right: where it is today"),
+    ask("try-doc", "look", "The try-windows step", "Mark what is wrong.",
+        doc={"name": "try.md", "text": "# Try it on Windows\n\nThe lead runs it and looks before every upgrade.\n"}),
+]
+class Desk(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+    def reply(self, code, body):
+        data = json.dumps(body).encode()
+        self.send_response(code)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+    def do_GET(self):
+        path = self.path.split("?")[0]
+        if path == "/api/asks": self.reply(200, asks)
+        elif path == "/api/desks": self.reply(200, [])
+        else: self.reply(404, {"error": "not found"})
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("content-length") or 0))
+        self.reply(503, {"error": "This is try-windows' fake desk; it keeps nothing"})
+class Server(ThreadingHTTPServer):
+    def handle_error(self, request, address):
+        pass  # the Desk stopping mid-request
+Server(("127.0.0.1", int(sys.argv[1])), Desk).serve_forever()
+EOF
+  pids+=($!)
+fi
+
+# --- The Windows apps, with scratch settings, off screen ------------------
+cp "$HERE/try-windows.ps1" "$RUN/"
+mkdir -p "$RUN/appdata/Ahjo" "$RUN/localappdata"
+# His theme and size, read and never written, so the shots look as his do.
+his=/mnt/c/Users/pertt/AppData/Roaming/Ahjo/app.json
+theme=$(jq -r '.theme // empty' "$his" 2>/dev/null || true)
+size=$(jq -r '.size // empty' "$his" 2>/dev/null || true)
+jq -n --arg node "$node" --arg theme "${theme:-}" --arg size "${size:-}" \
+  '{node: $node} + (if $theme != "" then {theme: $theme} else {} end)
+   + (if $size != "" then {size: ($size | tonumber)} else {} end)' > "$RUN/appdata/Ahjo/app.json"
+# APPDATA and LOCALAPPDATA point every file the apps keep (settings, logs,
+# the Desk's web view, Brain's cache) into the run.
+printf 'APPDATA=%s\r\nLOCALAPPDATA=%s\r\n' "$RUNW\\appdata" "$RUNW\\localappdata" > "$RUN/env.txt"
+exe() { printf '%s\\target\\release\\ahjo-%s.exe' "$(wslpath -w "$WIN")" "$1"; }
+
+if wants swarm; then
+  step start swarm "$(exe swarm)" --node "$node"
+  say "swarm: $(cat "$RUN/swarm.start.txt")"
+fi
+if wants desk; then
+  step start desk "$(exe desk)" --desk "Try=http://127.0.0.1:$dport"
+  say "desk: $(cat "$RUN/desk.start.txt")"
+fi
+if wants brain; then
+  step start brain "$(exe brain)" --from "$node"
+  say "brain: $(cat "$RUN/brain.start.txt")"
+fi
+
+if wants swarm; then
+  for i in $(seq 1 100); do
+    [ "$("$AHJO" view show --json --node $node 2>/dev/null | jq '.apps | length')" -gt 0 ] 2>/dev/null && break
+    sleep 0.2
+  done
+  for page in "${pages[@]}"; do
+    read -ra words <<< "$page"
+    # Paths in a reveal are the scratch node's: relative to its files root.
+    for i in "${!words[@]}"; do
+      [ "${words[$i]}" = --path ] && [ "${words[$((i + 1))]:0:1}" != / ] && words[$((i + 1))]=$S/files/${words[$((i + 1))]}
+    done
+    name=swarm-$(printf '%s' "$page" | tr -c 'A-Za-z0-9.' '-' | sed 's/--*/-/g; s/-$//')
+    "$AHJO" view open "${words[@]}" --node $node >/dev/null || die "view open $page refused"
+    sleep 2
+    step shot swarm "$RUNW\\$name.png"
+    mv "$RUN/$name.png" "$out/"
+  done
+fi
+# The Desk and Brain have been loading while Swarm was captured.
+sleep 2
+for a in desk brain; do
+  wants $a || continue
+  step shot $a "$RUNW\\$a.png"
+  mv "$RUN/$a.png" "$out/"
+done
+
+say "done in $(( $(date +%s) - started )) s"
+echo "$out"

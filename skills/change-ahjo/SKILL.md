@@ -93,8 +93,37 @@ end. A lane's brief stands on its own and names:
 
 Pick the model by the work: the strongest for design, hard bugs and review;
 a cheaper one for mechanical moves across many files. The lead reads each
-lane's screenshots before deploying, and deploys in batches, once or twice
-a day or when the operator asks, with one short note of what to try.
+lane's screenshots and tries the batch on Windows before deploying, and
+deploys in batches, once or twice a day or when the operator asks, with one
+short note of what to try.
+
+## Try it on Windows
+
+Before every upgrade the lead runs the commit's Windows apps on this machine
+and looks at every screenshot: Xvfb on Linux is not what the operator sees.
+
+```sh
+skills/change-ahjo/try-windows <commit> --page 'sessions --session agent' \
+  --page 'files --path README.md' --page missions
+```
+
+It builds the commit's node (in `~/.cache/ahjo-dev/try`) and Windows apps
+(in `C:\Users\pertt\ahjo-try`), never the deploy builds, starts a scratch
+node on a free port from 7350 with its own tmux server (sessions `shell`,
+`agent`, `build`), files and brain, and a fake desk, then Swarm, Desk and
+Brain on his desktop with settings, logs and caches in a scratch
+`%APPDATA%` and `%LOCALAPPDATA%` (his theme and size are copied, nothing of
+his is written). Each `--page` is what `ahjo view open` takes, a `--path`
+relative to the scratch files; `--app` limits the apps. The screenshots,
+`swarm-<page>.png`, `desk.png` and `brain.png`, go to the folder it prints,
+with the build and node logs. It stops only what it started, by process
+id, on any exit. A try takes about a minute when the try builds are warm;
+a commit far from the last one tried adds its compile time.
+
+His desktop sees little: each window shows on his main screen for about
+30 ms before it is moved right of every screen, without taking focus, and
+has a taskbar button while the try runs. A second Swarm beside his is
+fine: the apps hold no lock or single-instance check.
 
 ## Upgrade the operator's node
 
@@ -169,17 +198,10 @@ sessions, `~/.config/ahjo` and the tunnel stay. Never run it, `install` or
 that against a stand-in `systemctl` with a unit, root and config of their own,
 and are where a change to them is tried.
 
-## Build and install the Windows app
+## The Windows apps
 
-The Windows Swarm app is built on Windows from the checkout `C:\Users\pertt\ahjo-build`,
-whose origin is GitHub, so push first:
-
-```sh
-cd /mnt/c/Users/pertt/ahjo-build && git pull --ff-only
-heavy run --memory 8 -- /mnt/c/Users/pertt/.cargo/bin/cargo.exe build --release -p ahjo-app-swarm
-```
-
-The apps are installed as any machine's are, by the node's install script, in
+They are built with the node, as the upgrade above does, in the checkout
+`C:\Users\pertt\ahjo-build`, whose origin is GitHub. The apps are installed as any machine's are, by the node's install script, in
 `%LOCALAPPDATA%\Ahjo` with Start-menu entries, each started bare, so the Start
 menu and a taskbar pin start the same app the same way. `install.json` beside them names the local node
 (`http://127.0.0.1:7310/`), so they update themselves like the laptop's: after
