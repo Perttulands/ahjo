@@ -107,8 +107,10 @@ column.
    area that needs another uses that area's `contract` or an interface it
    provides, never its `node` or `app` crate (tests may). Standalone apps
    under `bin/` can use `app-kit` and area contracts. `kit/` and `engine/` use
-   no area. Node crates never depend on the GUI toolkit, and app crates never
-   depend on the web server. `bin/ahjo/tests/layout.rs` holds this.
+   no area. Node crates never depend on the GUI toolkit (`gpui`, `gpui-pre`,
+   `gpui-pre-platform`), app crates never on the web server (`axum`), and
+   contracts on neither, on any target and under any rename; their tests
+   may. `bin/ahjo/tests/layout.rs` holds this.
 
 ## Node areas
 

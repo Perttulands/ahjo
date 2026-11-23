@@ -35,25 +35,90 @@ fn package_name(dir: &Path) -> String {
         .to_string()
 }
 
-/// The workspace paths a crate's normal and build dependencies point at,
-/// relative to the root (`areas/terminals/contract`).
-fn uses(dir: &Path) -> Vec<String> {
-    uses_in(dir, &["dependencies", "build-dependencies"])
+/// One dependency of a crate, as its manifest names it.
+struct Dependency {
+    /// The table that names it, such as `dependencies` or
+    /// `target.'cfg(windows)'.build-dependencies`.
+    table: String,
+    /// The key it stands under there, which the crate's code uses.
+    key: String,
+    /// The package behind any rename (`gpui = { package = "gpui-pre" }`).
+    package: String,
+    /// The workspace path it points at, relative to the root
+    /// (`areas/terminals/contract`), when it is a crate of the workspace.
+    path: Option<String>,
 }
 
-fn uses_in(dir: &Path, tables: &[&str]) -> Vec<String> {
-    let manifest = manifest(dir);
+/// A crate's normal and build dependencies, on every target.
+fn dependencies(dir: &Path) -> Vec<Dependency> {
+    dependencies_in(dir, &["dependencies", "build-dependencies"])
+}
+
+/// The dependencies a crate names in the `kinds` tables, at the top level
+/// and under every `target`, with workspace inheritance resolved.
+fn dependencies_in(dir: &Path, kinds: &[&str]) -> Vec<Dependency> {
     let root = fs::canonicalize(root()).unwrap();
-    tables
-        .iter()
-        .filter_map(|table| manifest.get(*table).and_then(|deps| deps.as_table()))
-        .flat_map(|deps| deps.values())
-        .filter_map(|dep| dep.get("path").and_then(|path| path.as_str()))
-        .map(|path| {
-            let target = fs::canonicalize(dir.join(path)).unwrap();
-            let relative = target.strip_prefix(&root).unwrap();
-            relative.to_string_lossy().replace('\\', "/")
-        })
+    let workspace = manifest(&root);
+    let manifest = manifest(dir);
+    let inherited = workspace["workspace"]
+        .get("dependencies")
+        .and_then(|deps| deps.as_table());
+    let mut scopes = vec![(String::new(), &manifest)];
+    if let Some(targets) = manifest
+        .get("target")
+        .and_then(|targets| targets.as_table())
+    {
+        for (target, table) in targets {
+            scopes.push((format!("target.'{target}'."), table.as_table().unwrap()));
+        }
+    }
+    let mut found = Vec::new();
+    for (scope, table) in scopes {
+        for kind in kinds {
+            let Some(deps) = table.get(*kind).and_then(|deps| deps.as_table()) else {
+                continue;
+            };
+            for (alias, spec) in deps {
+                // An inherited dependency takes its package and path from
+                // the root manifest, where the path is relative to the root.
+                let is_inherited = spec.get("workspace").and_then(|w| w.as_bool()) == Some(true);
+                let (spec, base) = if is_inherited {
+                    let spec = inherited.and_then(|deps| deps.get(alias));
+                    let spec = spec.unwrap_or_else(|| {
+                        panic!(
+                            "{} inherits {alias}, which the workspace lacks",
+                            dir.display()
+                        )
+                    });
+                    (spec, root.as_path())
+                } else {
+                    (spec, dir)
+                };
+                let package = spec.get("package").and_then(|p| p.as_str());
+                // A path outside the workspace, such as another checkout,
+                // is no workspace crate: only its package counts.
+                let path = spec.get("path").and_then(|p| p.as_str()).and_then(|path| {
+                    let target = fs::canonicalize(base.join(path)).unwrap();
+                    let relative = target.strip_prefix(&root).ok()?;
+                    Some(relative.to_string_lossy().replace('\\', "/"))
+                });
+                found.push(Dependency {
+                    table: format!("{scope}{kind}"),
+                    key: alias.clone(),
+                    package: package.unwrap_or(alias).to_string(),
+                    path,
+                });
+            }
+        }
+    }
+    found
+}
+
+/// The workspace paths a crate's normal and build dependencies point at.
+fn uses(dir: &Path) -> Vec<String> {
+    dependencies(dir)
+        .into_iter()
+        .filter_map(|dep| dep.path)
         .collect()
 }
 
@@ -102,15 +167,11 @@ fn crates_of_areas() -> Vec<(String, PathBuf)> {
 /// using it still does no I/O.
 fn is_plain_engine_crate(path: &str) -> bool {
     const MISSION_MODEL_USES: [&str; 5] = ["ahjo-core", "schemars", "serde", "serde_json", "toml"];
-    let dir = root().join(path);
-    let manifest = manifest(&dir);
-    let deps: Vec<&str> = manifest
-        .get("dependencies")
-        .and_then(|deps| deps.as_table())
-        .map(|deps| deps.keys().map(String::as_str).collect())
-        .unwrap_or_default();
+    let deps = dependencies(&root().join(path));
     match path {
-        "engine/mission-model" => deps.iter().all(|dep| MISSION_MODEL_USES.contains(dep)),
+        "engine/mission-model" => deps
+            .iter()
+            .all(|dep| MISSION_MODEL_USES.contains(&dep.package.as_str())),
         _ => path.starts_with("engine/") && deps.is_empty(),
     }
 }
@@ -151,6 +212,37 @@ fn dependencies_point_one_way() {
     }
 }
 
+/// The GUI toolkit's packages, vendored forms included.
+const GUI_TOOLKIT: [&str; 3] = ["gpui", "gpui-pre", "gpui-pre-platform"];
+/// The web server's package.
+const WEB_SERVER: &str = "axum";
+
+/// Node crates never build the GUI toolkit and app crates never the web
+/// server; a contract builds neither. Their tests may use both.
+#[test]
+fn the_gui_toolkit_and_the_web_server_stay_on_their_sides() {
+    for (area, dir) in crates_of_areas() {
+        for (side, crate_dir) in crates(&dir) {
+            for dep in dependencies(&crate_dir) {
+                let is_gui = GUI_TOOLKIT.contains(&dep.package.as_str());
+                let is_web = dep.package == WEB_SERVER;
+                let rule = match side.as_str() {
+                    "node" if is_gui => "a node crate never uses the GUI toolkit",
+                    "app" if is_web => "an app crate never uses the web server",
+                    "contract" if is_gui || is_web => {
+                        "a contract uses neither the GUI toolkit nor the web server"
+                    }
+                    _ => continue,
+                };
+                panic!(
+                    "areas/{area}/{side} uses {} as `{}` in [{}]: {rule}",
+                    dep.package, dep.key, dep.table
+                );
+            }
+        }
+    }
+}
+
 /// Standalone apps share the app kit and may use an area's wire types.
 #[test]
 fn a_standalone_app_uses_the_app_kit_and_contracts() {
@@ -175,7 +267,8 @@ fn a_standalone_app_uses_the_app_kit_and_contracts() {
 fn an_areas_tests_build_no_binary() {
     for (area, dir) in crates_of_areas() {
         for (side, crate_dir) in crates(&dir) {
-            for used in uses_in(&crate_dir, &["dev-dependencies"]) {
+            let tests_use = dependencies_in(&crate_dir, &["dev-dependencies"]);
+            for used in tests_use.into_iter().filter_map(|dep| dep.path) {
                 assert!(
                     !used.starts_with("bin/"),
                     "areas/{area}/{side}'s tests use {used}"
