@@ -2719,11 +2719,14 @@ impl Render for BrainApp {
             .as_ref()
             .filter(|_| self.status.is_none())
             .map(|d| {
+                let count = |n: usize, one: &str, many: &str| {
+                    format!("{n} {}", if n == 1 { one } else { many })
+                };
                 format!(
-                    "{} pages · {} subjects · {} links",
-                    d.corpus.pages.len(),
-                    d.corpus.subjects.len(),
-                    d.corpus.links.len()
+                    "{} · {} · {}",
+                    count(d.corpus.pages.len(), "page", "pages"),
+                    count(d.corpus.subjects.len(), "subject", "subjects"),
+                    count(d.corpus.links.len(), "link", "links")
                 )
             });
         let switch = self.place.from.is_some() || !self.others.is_empty();
