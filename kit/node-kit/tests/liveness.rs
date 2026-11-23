@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ahjo_core::frame::Kinds;
 use ahjo_node_kit::{Area, BoxFuture, Built, Channel, Client, Config, Listing, Options, Setup};
@@ -42,6 +42,27 @@ impl Channel for Hold {
     }
 }
 
+/// What the `n`th client to connect holds, once the node has made its
+/// channel. Panics if another client connects: the holdings would not be
+/// told apart.
+async fn held_by(n: usize) -> Arc<AtomicBool> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        {
+            let held = HELD.lock().unwrap();
+            assert!(held.len() <= n, "a client this test did not open connected");
+            if held.len() == n {
+                return held[n - 1].clone();
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the node made no channel for client {n}"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
 const KINDS: Kinds = &[0x70..=0x70];
 
 fn holding(_: &Setup) -> anyhow::Result<Built> {
@@ -74,19 +95,26 @@ async fn a_silent_client_is_let_go_and_an_answering_one_kept() {
     // Silent: read its hello, then never read again, so never answer.
     let (mut silent, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     silent.next().await.unwrap().unwrap();
+    // The node makes a client's channels after sending its hello, so which
+    // holding is whose is known only once each is there.
+    let silent_holds = held_by(1).await;
     // Answering: keeps reading, which answers each ping.
     let (mut answering, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
     let reading = tokio::spawn(async move { while let Some(Ok(_)) = answering.next().await {} });
+    let answering_holds = held_by(2).await;
 
-    let given_back = |i: usize| !HELD.lock().unwrap()[i].load(Ordering::SeqCst);
-    for _ in 0..100 {
-        if given_back(0) {
-            break;
-        }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while silent_holds.load(Ordering::SeqCst) {
+        assert!(
+            Instant::now() < deadline,
+            "the silent client still holds what it held"
+        );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(given_back(0), "the silent client still holds what it held");
-    assert!(!given_back(1), "the client answering pings was let go");
+    assert!(
+        answering_holds.load(Ordering::SeqCst),
+        "the client answering pings was let go"
+    );
     reading.abort();
     drop(silent);
     node.stop().await.unwrap();
