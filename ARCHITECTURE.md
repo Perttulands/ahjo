@@ -52,8 +52,8 @@ app's package is `ahjo-app-<name>` (`ahjo-app-swarm`, `ahjo-app-brain`,
 `ahjo-app-desk`), since `ahjo-brain` is the brain area's node crate; its
 binary is the name the operator runs. The areas are terminals, files, issue,
 brain, host, scheduled, harness and missions; fleet becomes one after the first
-release. The brain area's only part in Swarm is its Alt+L panel over the
-terminals, a page without a tab: Ahjo Brain is where the brain is read at
+release. The brain area's only part in Swarm is its Alt+L Brain in the
+window's one panel, beside the terminals, from a page without a tab: Ahjo Brain is where the brain is read at
 length and edited, and its node side serves the `ahjo brain` commands and the
 panel. Launching sessions and agent events live in terminals. Settings is not
 an area: the shell's Settings page lists what pages declare.

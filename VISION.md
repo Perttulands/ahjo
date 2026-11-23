@@ -68,5 +68,6 @@ each with one purpose: exploring what we know, and the shared surface where an
 agent publishes something (a picture, a video, a rendered page, a question) and
 the operator responds freely, in prose and by marking what he sees. They share
 Swarm's look and are not opened from it. Swarm has no Brain tab; its agents
-reach the brain through `ahjo brain`, and Alt+L lays a Brain panel over the
-terminals to search it, read a page and send it to a session.
+reach the brain through `ahjo brain`, and Alt+L opens a Brain panel at the
+window's edge, beside the terminals, to search it, read a page and send it to
+a session.
