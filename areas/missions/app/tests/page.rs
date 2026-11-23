@@ -2,75 +2,28 @@
 mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::app::{Served, Started, serve, until};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use serde_json::json;
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
     ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
-struct Running {
-    url: String,
-    id: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(AREAS, "").await.unwrap();
-                let folder = node.dir().join("missions/missions");
-                std::fs::create_dir_all(&folder).unwrap();
-                std::fs::write(
-                    folder.join("hello.mission.toml"),
-                    include_str!("fixtures/solo-lab.mission.toml"),
-                )
-                .unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            });
-    });
-    let (url, id) = wait.recv().unwrap();
-    Running {
-        url,
-        id,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+fn start() -> Served<()> {
+    serve(move || async move {
+        let node = Node::start(AREAS, "").await.unwrap();
+        let folder = node.dir().join("missions/missions");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(
+            folder.join("hello.mission.toml"),
+            include_str!("fixtures/solo-lab.mission.toml"),
+        )
+        .unwrap();
+        Started::new(node, ())
+    })
 }
 /// Show Flow in the panel, from the mission's "…" menu.
 fn show_flow(cx: &mut VisualTestContext) {
@@ -370,40 +323,11 @@ fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut
         std::fs::write(path, contents).unwrap();
     }
 
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
     let dir = root.clone();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let config = ahjo_node_kit::Config::parse("", dir.clone()).unwrap();
-                let node = ahjo_node_kit::start(
-                    ahjo_node_kit::Options {
-                        dir,
-                        config,
-                        listen: Some("127.0.0.1:0".into()),
-                    },
-                    AREAS,
-                )
-                .await
-                .unwrap();
-                ready
-                    .send((format!("http://{}", node.address), node.node.id.to_string()))
-                    .unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await.unwrap();
-            });
+    let running = serve(move || async move {
+        let node = Node::start_in(dir, AREAS, "").await.unwrap();
+        Started::new(node, ())
     });
-    let (url, id) = wait.recv().unwrap();
-    let running = Running {
-        url,
-        id,
-        stop,
-        thread: Some(thread),
-    };
 
     cx.executor().allow_parking();
     cx.update(ahjo_app_shell::prepare);
@@ -457,6 +381,6 @@ fn opens_a_mission_layout_notes_and_run_written_before_the_wire_upgrade(cx: &mut
     let replayed = std::fs::read_to_string(state.join("runs/run_legacy.ndjson")).unwrap();
     assert!(replayed.contains("\"run_id\":\"run_legacy\"") && !replayed.contains("runId"));
     assert!(replayed.contains("\"userPort\"") && replayed.contains("\"card_id\":\"fmn_work\""));
+    // The node removes its folder, `root`, as it stops.
     drop(running);
-    std::fs::remove_dir_all(root).unwrap();
 }

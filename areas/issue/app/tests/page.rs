@@ -6,12 +6,13 @@ use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::{Host, Mounted, Page, mount};
 use ahjo_node_kit::{Built, Listing, Setup};
 use ahjo_terminals_app::Terminals;
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::node::Node;
 use ahjo_testkit::tmux::Server;
 use gpui::{App, Context, IntoElement, Render, div, prelude::*};
 use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, Window};
 use std::cell::RefCell;
-use std::sync::{OnceLock, mpsc};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 static BD: OnceLock<String> = OnceLock::new();
@@ -56,95 +57,59 @@ impl Render for Toy {
 fn toy(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
     mount(host, window, cx, |host, _, _| Toy { host })
 }
-struct Running {
-    url: String,
-    node: String,
+struct Fixture {
     store: String,
     socket: std::path::PathBuf,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
-fn start() -> Option<Running> {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            let Some(tmux) = Server::start_in("issue-page-journey") else { ready.send(None).unwrap(); return; };
-            tmux.new_session("alpha", 100, 30);
-            let dir = ahjo_testkit::fresh_dir("issue-page-store");
-            std::fs::create_dir_all(dir.join(".beads")).unwrap();
-            let script = dir.join("fixture-bd");
-            ahjo_testkit::tmux::write_script(&script, "#!/bin/sh\nif [ \"$2\" = config ]; then echo '{\"value\":\"fixture\"}'; exit 0; fi\nif [ -f slow ]; then sleep 6; fi\nif [ -f fail ]; then echo 'tracker unavailable' >&2; exit 1; fi\ncat fixture.json\n");
-            std::fs::write(dir.join("fixture.json"), r#"[
-              {"id":"fixture-1","title":"Read the fixture","description":"Its words travel apart from the snapshot.","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","parent":"fixture-0","dependencies":[{"type":"blocks","depends_on_id":"fixture-3"}]},
-              {"id":"fixture-0","title":"Parent title","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z"},
-              {"id":"fixture-2","title":"Child title","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","parent":"fixture-1"},
-              {"id":"fixture-3","title":"Blocker title","status":"closed","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z"}
-            ]"#).unwrap();
-            BD.set(script.to_string_lossy().into_owned()).unwrap();
-            let gh = dir.join("fixture-gh");
-            let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../node/tests/fixtures/work");
-            ahjo_testkit::tmux::write_script(&gh, format!("#!/bin/sh\ncase \"$*\" in *number=51*) cat '{}';; *) cat '{}';; esac\n", base.join("item.json").display(), base.join("ahjo.json").display()));
-            GH.set(gh.to_string_lossy().into_owned()).unwrap();
-            let launch = dir.join("launch.conf");
-            std::fs::write(&launch, format!("folder {}\n", dir.display())).unwrap();
-            let config = format!("[terminals]\nsocket = {:?}\nlaunch = {:?}\n[issue]\nprojects = [{:?}, {:?}]\n", tmux.socket_path(), launch, format!("beads {}", dir.display()), "github example-owner/ahjo");
-            let node = Node::start(AREAS, &config).await.unwrap();
-            ready.send(Some((node.url(), node.id(), dir.display().to_string(), tmux.socket_path()))).unwrap();
-            while stopped.try_recv().is_err() { tokio::time::sleep(Duration::from_millis(50)).await; }
-            node.stop().await;
+fn start() -> Option<Served<Fixture>> {
+    let tmux = Server::start_in("issue-page-journey")?;
+    Some(serve(move || async move {
+        tmux.new_session("alpha", 100, 30);
+        let dir = ahjo_testkit::fresh_dir("issue-page-store");
+        std::fs::create_dir_all(dir.join(".beads")).unwrap();
+        let script = dir.join("fixture-bd");
+        ahjo_testkit::tmux::write_script(
+            &script,
+            "#!/bin/sh\nif [ \"$2\" = config ]; then echo '{\"value\":\"fixture\"}'; exit 0; fi\nif [ -f slow ]; then sleep 6; fi\nif [ -f fail ]; then echo 'tracker unavailable' >&2; exit 1; fi\ncat fixture.json\n",
+        );
+        std::fs::write(dir.join("fixture.json"), r#"[
+          {"id":"fixture-1","title":"Read the fixture","description":"Its words travel apart from the snapshot.","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","parent":"fixture-0","dependencies":[{"type":"blocks","depends_on_id":"fixture-3"}]},
+          {"id":"fixture-0","title":"Parent title","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z"},
+          {"id":"fixture-2","title":"Child title","status":"open","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z","parent":"fixture-1"},
+          {"id":"fixture-3","title":"Blocker title","status":"closed","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-01T00:00:00Z"}
+        ]"#).unwrap();
+        BD.set(script.to_string_lossy().into_owned()).unwrap();
+        let gh = dir.join("fixture-gh");
+        let base =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../node/tests/fixtures/work");
+        ahjo_testkit::tmux::write_script(
+            &gh,
+            format!(
+                "#!/bin/sh\ncase \"$*\" in *number=51*) cat '{}';; *) cat '{}';; esac\n",
+                base.join("item.json").display(),
+                base.join("ahjo.json").display()
+            ),
+        );
+        GH.set(gh.to_string_lossy().into_owned()).unwrap();
+        let launch = dir.join("launch.conf");
+        std::fs::write(&launch, format!("folder {}\n", dir.display())).unwrap();
+        let config = format!(
+            "[terminals]\nsocket = {:?}\nlaunch = {:?}\n[issue]\nprojects = [{:?}, {:?}]\n",
+            tmux.socket_path(),
+            launch,
+            format!("beads {}", dir.display()),
+            "github example-owner/ahjo"
+        );
+        let node = Node::start(AREAS, &config).await.unwrap();
+        let fixture = Fixture {
+            store: dir.display().to_string(),
+            socket: tmux.socket_path(),
+        };
+        Started::new(node, fixture).then(move || {
             std::fs::remove_dir_all(dir).unwrap();
-        });
-    });
-    match wait.recv().unwrap() {
-        Some((url, node, store, socket)) => Some(Running {
-            url,
-            node,
-            store,
-            socket,
-            stop,
-            thread: Some(thread),
-        }),
-        None => {
-            thread.join().unwrap();
-            assert!(
-                std::env::var_os("AHJO_REQUIRE_TMUX").is_none(),
-                "tmux is required"
-            );
-            None
-        }
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-fn click(cx: &mut VisualTestContext, selector: &str) {
-    let at = cx
-        .debug_bounds(Box::leak(selector.to_string().into_boxed_str()))
-        .expect(selector)
-        .center();
-    cx.simulate_click(at, Modifiers::none());
+            drop(tmux);
+        })
+    }))
 }
 fn shown(cx: &mut VisualTestContext) -> String {
     TERMINALS
@@ -181,7 +146,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
     let reveal = |id: &str, beside| Ask::Reveal {
         what: "item".into(),
         id: id.into(),
-        node: Some(ahjo_core::NodeId(running.node.clone())),
+        node: Some(ahjo_core::NodeId(running.id.clone())),
         part: None,
         beside,
     };
@@ -297,7 +262,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
     });
     cx.simulate_keystrokes("escape");
     cx.update(|window, cx| shell.update(cx, |shell, cx| shell.show_id("sessions", window, cx)));
-    let row = format!("row-{}::alpha", running.node);
+    let row = format!("row-{}::alpha", running.id);
     until(cx, "session", |cx| {
         cx.debug_bounds(Box::leak(row.clone().into_boxed_str()))
             .is_some()
@@ -403,7 +368,7 @@ fn work_column_and_terminal_links_open_cards_and_hand_off(cx: &mut TestAppContex
         let found = sessions.read_with(cx, |list, _| {
             list.sessions
                 .iter()
-                .any(|s| s.node == running.node && s.name == "fixture-1")
+                .any(|s| s.node == running.id && s.name == "fixture-1")
         });
         if found {
             break;

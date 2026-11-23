@@ -812,6 +812,7 @@ dependencies = [
  "ahjo-term",
  "anyhow",
  "axum",
+ "gpui-pre",
  "libc",
  "serde_json",
  "tokio",

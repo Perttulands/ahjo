@@ -2,86 +2,41 @@
 mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::app::{Served, Started, serve, until};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px};
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
     ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
-struct Running {
-    url: String,
-    id: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
+fn start() -> Served<()> {
+    serve(move || async move {
+        let node = Node::start(AREAS, "").await.unwrap();
+        let folder = node.dir().join("missions/missions");
+        std::fs::create_dir_all(&folder).unwrap();
+        let original = include_str!("fixtures/solo-lab.mission.toml");
+        let (prefix, rest) = original.split_once("[[step]]").unwrap();
+        let (step, suffix) = rest.split_once("[[end]]").unwrap();
+        let mut mission = prefix.to_owned();
+        for n in 1..=5 {
+            let step = step
+                .replace("fmn_work", &format!("fmn_{n}"))
+                .replace("seat_work", &format!("seat_{n}_opaque"))
+                .replace("title = \"Work\"", &format!("title = \"Step {n}\""));
+            mission.push_str("[[step]]");
+            mission.push_str(&step);
         }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(AREAS, "").await.unwrap();
-                let folder = node.dir().join("missions/missions");
-                std::fs::create_dir_all(&folder).unwrap();
-                let original = include_str!("fixtures/solo-lab.mission.toml");
-                let (prefix, rest) = original.split_once("[[step]]").unwrap();
-                let (step, suffix) = rest.split_once("[[end]]").unwrap();
-                let mut mission = prefix.to_owned();
-                for n in 1..=5 {
-                    let step = step.replace("fmn_work", &format!("fmn_{n}"))
-                        .replace("seat_work", &format!("seat_{n}_opaque"))
-                        .replace("title = \"Work\"", &format!("title = \"Step {n}\""));
-                    mission.push_str("[[step]]"); mission.push_str(&step);
-                }
-                mission.push_str("[[end]]");
-                mission.push_str(&suffix.replace("fmn_work", "fmn_1"));
-                mission = mission.replace("from = \"fmn_1:port_out\"", "from = \"fmn_5:port_out\"");
-                for n in 1..4 {
-                    mission.push_str(&format!("\n[[connection]]\nid = \"edge_{n}\"\nfrom = \"fmn_{n}:port_out\"\nto = \"fmn_{}:port_in\"\n", n + 1));
-                }
-                std::fs::write(folder.join("hello.mission.toml"), mission).unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            });
-    });
-    let (url, id) = wait.recv().unwrap();
-    Running {
-        url,
-        id,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            return;
+        mission.push_str("[[end]]");
+        mission.push_str(&suffix.replace("fmn_work", "fmn_1"));
+        mission = mission.replace("from = \"fmn_1:port_out\"", "from = \"fmn_5:port_out\"");
+        for n in 1..4 {
+            mission.push_str(&format!("\n[[connection]]\nid = \"edge_{n}\"\nfrom = \"fmn_{n}:port_out\"\nto = \"fmn_{}:port_in\"\n", n + 1));
         }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+        std::fs::write(folder.join("hello.mission.toml"), mission).unwrap();
+        Started::new(node, ())
+    })
 }
 #[gpui::test]
 fn five_step_canvas_can_pan_zoom_and_connect_visible_ports(cx: &mut TestAppContext) {

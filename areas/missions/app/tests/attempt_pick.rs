@@ -3,13 +3,11 @@ mod common;
 use ahjo_app_kit::{Ask, Host};
 use ahjo_core::NodeId;
 use ahjo_node_kit::{Built, Listing, NodeClient, Setup};
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::{node::Node, sessions};
-use gpui::{Modifiers, TestAppContext, VisualTestContext};
+use gpui::TestAppContext;
 use serde_json::json;
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 fn build(setup: &Setup) -> anyhow::Result<Built> {
     ahjo_missions::build_with_executor(setup, Some(Box::new(ahjo_mission_engine::LabExecutor)))
@@ -18,70 +16,20 @@ const MISSIONS: Listing = Listing {
     build,
     ..ahjo_missions::LISTING
 };
-struct Running {
-    url: String,
-    id: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, MISSIONS], "")
-                    .await
-                    .unwrap();
-                let dir = node.dir().join("missions/missions");
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(
-                    dir.join("pick.mission.toml"),
-                    include_str!("fixtures/pick.mission.toml"),
-                )
-                .unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            })
-    });
-    let (url, id) = wait.recv_timeout(Duration::from_secs(20)).unwrap();
-    Running {
-        url,
-        id,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut condition: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if condition(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-fn click(cx: &mut VisualTestContext, selector: &'static str) {
-    let point = cx.debug_bounds(selector).expect(selector).center();
-    cx.simulate_click(point, Modifiers::none());
+fn start() -> Served<()> {
+    serve(move || async move {
+        let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, MISSIONS], "")
+            .await
+            .unwrap();
+        let dir = node.dir().join("missions/missions");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("pick.mission.toml"),
+            include_str!("fixtures/pick.mission.toml"),
+        )
+        .unwrap();
+        Started::new(node, ())
+    })
 }
 #[gpui::test]
 fn comparing_and_picking_attempt_records_the_reason(cx: &mut TestAppContext) {

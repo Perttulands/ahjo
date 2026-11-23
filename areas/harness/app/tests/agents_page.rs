@@ -3,12 +3,13 @@
 
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_harness_contract::agents::ShownAgent;
+use ahjo_testkit::app::until;
 use ahjo_testkit::{fresh_dir, node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 struct Running {
     url: String,
@@ -95,21 +96,6 @@ agent = "custom"
         show,
         stop,
         thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
     }
 }
 fn click(cx: &mut VisualTestContext, selector: &'static str) {

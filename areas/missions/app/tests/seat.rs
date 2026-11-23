@@ -5,14 +5,12 @@ use ahjo_mission_engine::{
     ExecutionEvent, ExecutionSink, Executor, LabExecutor, StepExecution, StepResult,
 };
 use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::app::{click, until};
 use ahjo_testkit::{
     node::Node,
     sessions::{self, FakeSessions},
 };
-use gpui::{
-    App, Context, IntoElement, Modifiers, ParentElement, TestAppContext, VisualTestContext, Window,
-    div,
-};
+use gpui::{App, Context, IntoElement, ParentElement, TestAppContext, Window, div};
 use serde_json::json;
 use std::{
     sync::{Arc, Mutex, mpsc},
@@ -146,27 +144,6 @@ fn start() -> Running {
         stop,
         thread: Some(thread),
     }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            break;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-fn click(cx: &mut VisualTestContext, selector: &str) {
-    let bounds = cx
-        .debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
-        .expect(selector);
-    cx.simulate_click(bounds.center(), Modifiers::none());
 }
 #[gpui::test]
 fn step_and_run_bar_open_the_owned_session_and_disable_ended_seats(cx: &mut TestAppContext) {

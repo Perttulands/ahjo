@@ -1,90 +1,36 @@
 #![cfg(unix)]
 use ahjo_node_kit::Listing;
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::{node::Node, sessions};
-use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use std::{
-    path::PathBuf,
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use gpui::{TestAppContext, VisualTestContext};
+use std::path::PathBuf;
 const AREAS: &[Listing] = &[
     sessions::LISTING,
     ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
-struct Running {
-    url: String,
-    node: String,
+struct Fixture {
     bad: PathBuf,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
-        }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(AREAS, "").await.unwrap();
-                let root = node.dir().join("missions");
-                std::fs::create_dir_all(root.join("missions")).unwrap();
-                std::fs::create_dir_all(root.join("notes")).unwrap();
-                std::fs::write(
-                    root.join("missions/hello.mission.toml"),
-                    include_str!("fixtures/solo-lab.mission.toml"),
-                )
-                .unwrap();
-                let bad = root.join("notes/hello.notes.toml");
-                std::fs::write(&bad, "invalid = [").unwrap();
-                ready.send((node.url(), node.id(), bad)).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            })
-    });
-    let (url, node, bad) = wait.recv_timeout(Duration::from_secs(20)).unwrap();
-    Running {
-        url,
-        node,
-        bad,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            break;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+fn start() -> Served<Fixture> {
+    serve(move || async move {
+        let node = Node::start(AREAS, "").await.unwrap();
+        let root = node.dir().join("missions");
+        std::fs::create_dir_all(root.join("missions")).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(
+            root.join("missions/hello.mission.toml"),
+            include_str!("fixtures/solo-lab.mission.toml"),
+        )
+        .unwrap();
+        let bad = root.join("notes/hello.notes.toml");
+        std::fs::write(&bad, "invalid = [").unwrap();
+        Started::new(node, Fixture { bad })
+    })
 }
 fn has(cx: &mut VisualTestContext, id: &str) -> bool {
     cx.debug_bounds(Box::leak(id.to_owned().into_boxed_str()))
         .is_some()
-}
-fn click(cx: &mut VisualTestContext, id: &str) {
-    let b = cx
-        .debug_bounds(Box::leak(id.to_owned().into_boxed_str()))
-        .expect(id);
-    cx.simulate_click(b.center(), Modifiers::none());
 }
 #[gpui::test]
 fn failed_note_read_can_be_retried(cx: &mut TestAppContext) {
@@ -105,7 +51,7 @@ fn failed_note_read_can_be_retried(cx: &mut TestAppContext) {
             cx,
         )
     });
-    let mission = format!("mission-{}-hello", running.node);
+    let mission = format!("mission-{}-hello", running.id);
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
     until(cx, "notes read failure", |cx| {

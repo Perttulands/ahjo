@@ -1,68 +1,24 @@
 //! Both host pages render data from a testkit node.
 use ahjo_app_kit::link::client::LinkState;
+use ahjo_testkit::app::{Served, Started, serve, until};
 use ahjo_testkit::node::Node;
-use gpui::{TestAppContext, VisualTestContext};
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use gpui::TestAppContext;
 
-struct Running {
-    url: String,
-    node: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(&[ahjo_host::LISTING], "").await.unwrap();
-                // A read-only fixture with an invalid user is never sent to a real manager.
-                std::fs::write(node.dir().join("services.json"), serde_json::json!({"services": [
+fn start() -> Served<()> {
+    serve(move || async move {
+        let node = Node::start(&[ahjo_host::LISTING], "").await.unwrap();
+        // A read-only fixture with an invalid user is never sent to a real manager.
+        std::fs::write(
+            node.dir().join("services.json"),
+            serde_json::json!({"services": [
                 {"id":"fixture", "name":"Fixture service", "readOnly":true,
                  "components":[{"kind":"systemd-user", "user":"\u{0}", "unit":"fixture.service"}]}
-            ]}).to_string()).unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            });
-    });
-    let (url, node) = wait.recv().unwrap();
-    Running {
-        url,
-        node,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+            ]})
+            .to_string(),
+        )
+        .unwrap();
+        Started::new(node, ())
+    })
 }
 #[gpui::test]
 fn readings_and_services_render_node_data(cx: &mut TestAppContext) {
@@ -88,7 +44,7 @@ fn readings_and_services_render_node_data(cx: &mut TestAppContext) {
     until(cx, "a host reading", |cx| {
         cx.debug_bounds("host-chart").is_some()
     });
-    let row = Box::leak(format!("svc-row-{}-fixture", running.node).into_boxed_str());
+    let row = Box::leak(format!("svc-row-{}-fixture", running.id).into_boxed_str());
     until(cx, "the fixture service", |cx| {
         cx.debug_bounds(row).is_some()
     });
@@ -100,8 +56,8 @@ fn readings_and_services_render_node_data(cx: &mut TestAppContext) {
     });
     for verb in ["start", "stop", "restart"] {
         for control in [
-            format!("svc-{verb}-{}-fixture", running.node),
-            format!("svc-row-{verb}-{}-fixture", running.node),
+            format!("svc-{verb}-{}-fixture", running.id),
+            format!("svc-row-{verb}-{}-fixture", running.id),
         ] {
             let control = Box::leak(control.into_boxed_str());
             assert!(cx.debug_bounds(control).is_none(), "read-only: no {verb}");

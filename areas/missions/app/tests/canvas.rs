@@ -2,9 +2,9 @@
 mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::app::{Served, Started, serve, until};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, MouseButton, TestAppContext, VisualTestContext, point, px};
-use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const AREAS: &[Listing] = &[
@@ -12,65 +12,15 @@ const AREAS: &[Listing] = &[
     ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
-struct Running {
-    url: String,
-    id: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(AREAS, "").await.unwrap();
-                let folder = node.dir().join("missions/missions");
-                std::fs::create_dir_all(&folder).unwrap();
-                let mission = include_str!("fixtures/solo-lab.mission.toml").replace("[[step]]", "[[input_card]]\nid = \"inp_other\"\ntitle = \"Other input\"\ngoal = \"Alternative\"\ninputs = [{ name = \"second\", kind = \"text\", required = false }]\n\n[[step]]");
-                std::fs::write(
-                    folder.join("hello.mission.toml"),
-                    mission,
-                )
-                .unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            });
-    });
-    let (url, id) = wait.recv().unwrap();
-    Running {
-        url,
-        id,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+fn start() -> Served<()> {
+    serve(move || async move {
+        let node = Node::start(AREAS, "").await.unwrap();
+        let folder = node.dir().join("missions/missions");
+        std::fs::create_dir_all(&folder).unwrap();
+        let mission = include_str!("fixtures/solo-lab.mission.toml").replace("[[step]]", "[[input_card]]\nid = \"inp_other\"\ntitle = \"Other input\"\ngoal = \"Alternative\"\ninputs = [{ name = \"second\", kind = \"text\", required = false }]\n\n[[step]]");
+        std::fs::write(folder.join("hello.mission.toml"), mission).unwrap();
+        Started::new(node, ())
+    })
 }
 #[gpui::test]
 fn canvas_ports_drag_move_zoom_and_undo(cx: &mut TestAppContext) {

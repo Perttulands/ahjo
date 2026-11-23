@@ -5,13 +5,14 @@
 
 use ahjo_app_kit::{Host, Mounted, Page, mount, zoom};
 use ahjo_app_shell::Shell;
+use ahjo_testkit::app::until;
 use gpui::{
     Entity, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext, Window, div,
     point, prelude::*, px,
 };
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 thread_local! {
     /// The Ctrl+wheels the surface with its own zoom heard.
@@ -137,22 +138,6 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 fn on_disk(path: &std::path::Path) -> Option<u16> {
     let text = std::fs::read_to_string(path).ok()?;
     Some(ahjo_app_kit::settings::Settings::parse(&text)?.size)
-}
-
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 #[gpui::test]

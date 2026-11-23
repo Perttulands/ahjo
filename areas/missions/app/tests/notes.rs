@@ -1,86 +1,31 @@
 #![cfg(unix)]
 mod common;
 use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::{node::Node, sessions};
-use gpui::{Modifiers, TestAppContext, VisualTestContext};
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use gpui::{TestAppContext, VisualTestContext};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
     ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
-struct Running {
-    url: String,
-    node: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
-        }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(AREAS, "").await.unwrap();
-                let dir = node.dir().join("missions/missions");
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(
-                    dir.join("hello.mission.toml"),
-                    include_str!("fixtures/solo-lab.mission.toml"),
-                )
-                .unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            })
-    });
-    let (url, node) = wait.recv_timeout(Duration::from_secs(20)).unwrap();
-    Running {
-        url,
-        node,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            break;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+fn start() -> Served<()> {
+    serve(move || async move {
+        let node = Node::start(AREAS, "").await.unwrap();
+        let dir = node.dir().join("missions/missions");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("hello.mission.toml"),
+            include_str!("fixtures/solo-lab.mission.toml"),
+        )
+        .unwrap();
+        Started::new(node, ())
+    })
 }
 fn has(cx: &mut VisualTestContext, selector: &str) -> bool {
     cx.debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
         .is_some()
-}
-fn click(cx: &mut VisualTestContext, selector: &str) {
-    let bounds = cx
-        .debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
-        .expect(selector);
-    cx.simulate_click(bounds.center(), Modifiers::none());
 }
 /// Show Flow in the panel, from the mission's "…" menu.
 fn show_flow(cx: &mut VisualTestContext) {
@@ -108,7 +53,7 @@ fn canvas_note_pin_opens_thread_and_preserves_edits(cx: &mut TestAppContext) {
             cx,
         )
     });
-    let mission = format!("mission-{}-hello", running.node);
+    let mission = format!("mission-{}-hello", running.id);
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
     until(cx, "note pin", |cx| has(cx, "canvas-note-pin-fmn_work"));
@@ -247,7 +192,7 @@ fn a_note_is_written_in_flow_beside_its_step(cx: &mut TestAppContext) {
             cx,
         )
     });
-    let mission = format!("mission-{}-hello", running.node);
+    let mission = format!("mission-{}-hello", running.id);
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
     show_flow(cx);
@@ -310,7 +255,7 @@ fn a_note_on_a_wire_shows_in_activity_and_opens_on_the_board(cx: &mut TestAppCon
             cx,
         )
     });
-    let mission = format!("mission-{}-hello", running.node);
+    let mission = format!("mission-{}-hello", running.id);
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
     let doc = runtime
@@ -356,7 +301,7 @@ fn a_wide_window_shows_its_panel_beside_the_board_and_a_narrow_one_behind_its_to
         )
     });
     cx.simulate_resize(gpui::size(gpui::px(1920.), gpui::px(1080.)));
-    let mission = format!("mission-{}-hello", running.node);
+    let mission = format!("mission-{}-hello", running.id);
     until(cx, "mission", |cx| has(cx, &mission));
     click(cx, &mission);
     until(cx, "Activity beside the board", |cx| {

@@ -3,32 +3,15 @@ mod common;
 use ahjo_app_kit::{Ask, Host};
 use ahjo_core::NodeId;
 use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::app::{Served, Started, serve, until};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
     ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
-struct Running {
-    url: String,
-    node: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
 fn mission() -> String {
     let source = include_str!("fixtures/solo-lab.mission.toml")
         .replace(
@@ -40,46 +23,14 @@ fn mission() -> String {
         "{source}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"human\"]\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_feedback\"\nfrom = \"gate_review:fail\"\nto = \"fmn_work:port_in\"\n"
     )
 }
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(AREAS, "").await.unwrap();
-                let dir = node.dir().join("missions/missions");
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(dir.join("hello.mission.toml"), mission()).unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            })
-    });
-    let (url, node) = wait.recv_timeout(Duration::from_secs(20)).unwrap();
-    Running {
-        url,
-        node,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut condition: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if condition(cx) {
-            break;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+fn start() -> Served<()> {
+    serve(move || async move {
+        let node = Node::start(AREAS, "").await.unwrap();
+        let dir = node.dir().join("missions/missions");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("hello.mission.toml"), mission()).unwrap();
+        Started::new(node, ())
+    })
 }
 fn scroll(cx: &mut VisualTestContext, delta: f32) {
     cx.simulate_event(gpui::ScrollEvent {
@@ -131,7 +82,7 @@ fn undo_and_redo_replay_both_wires_of_a_removed_shared_input(cx: &mut TestAppCon
                 Ask::Reveal {
                     what: "mission".into(),
                     id: "hello".into(),
-                    node: Some(NodeId(running.node.clone())),
+                    node: Some(NodeId(running.id.clone())),
                     part: None,
                     beside: false,
                 },

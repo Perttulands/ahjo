@@ -1,72 +1,31 @@
 //! The Harness page reads an isolated node and offers its tool details.
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_app_kit::{Ask, Host};
+use ahjo_testkit::app::{Served, Started, serve, until};
 use ahjo_testkit::{fresh_dir, node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-struct Running {
-    url: String,
+struct Fixture {
     home: PathBuf,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
-        }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            let home = fresh_dir("ahjo-harness-page-home");
-            std::fs::create_dir_all(home.join(".claude")).unwrap();
-            std::fs::write(home.join(".claude/CLAUDE.md"), "# Mine\n\nBe brief.\n").unwrap();
-            std::fs::create_dir_all(home.join("proj/.git")).unwrap();
-            std::fs::write(home.join("proj/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
-            std::fs::write(home.join("proj/AGENTS.md"), "# Project\n").unwrap();
-            let config = format!("[harness]\nhome = {:?}\npath = []\n", home);
-            let node = Node::start(&[sessions::LISTING, ahjo_harness::LISTING], &config)
-                .await
-                .unwrap();
-            ready.send((node.url(), home.clone())).unwrap();
-            while stopped.try_recv().is_err() {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-            node.stop().await;
+fn start() -> Served<Fixture> {
+    serve(move || async move {
+        let home = fresh_dir("ahjo-harness-page-home");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(home.join(".claude/CLAUDE.md"), "# Mine\n\nBe brief.\n").unwrap();
+        std::fs::create_dir_all(home.join("proj/.git")).unwrap();
+        std::fs::write(home.join("proj/.git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(home.join("proj/AGENTS.md"), "# Project\n").unwrap();
+        let config = format!("[harness]\nhome = {:?}\npath = []\n", home);
+        let node = Node::start(&[sessions::LISTING, ahjo_harness::LISTING], &config)
+            .await
+            .unwrap();
+        Started::new(node, Fixture { home: home.clone() }).then(move || {
             std::fs::remove_dir_all(home).unwrap();
-        });
-    });
-    let (url, home) = wait.recv().unwrap();
-    Running {
-        url,
-        home,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+        })
+    })
 }
 #[gpui::test]
 fn skills_and_agent_views_remain_accessible(cx: &mut TestAppContext) {

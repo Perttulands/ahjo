@@ -5,6 +5,7 @@ use ahjo_core::NodeId;
 use ahjo_mission_engine::{ExecutionSink, Executor, LabExecutor, StepExecution, StepResult};
 use ahjo_node_kit::{Built, Listing, NodeClient, Setup};
 use ahjo_term::Sessions;
+use ahjo_testkit::app::{Served, Started, serve, until};
 use ahjo_testkit::{
     node::Node,
     sessions::{self, FakeSessions},
@@ -16,7 +17,7 @@ use gpui::{
 };
 use serde_json::json;
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 static FAIL_GATE_READ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static WATCHES: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
@@ -129,73 +130,26 @@ const MISSIONS: Listing = Listing {
     build,
     ..ahjo_missions::LISTING
 };
-struct Running {
-    url: String,
-    id: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
-        }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, MISSIONS], "")
-                    .await
-                    .unwrap();
-                *FAKE.lock().unwrap() = Some(node.fake_sessions());
-                let dir = node.dir().join("missions/missions");
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(
-                    dir.join("gated.mission.toml"),
-                    include_str!("fixtures/gated.mission.toml"),
-                )
-                .unwrap();
-                std::fs::write(
-                    dir.join("admission-findings.mission.toml"),
-                    include_str!("fixtures/admission-findings.mission.toml"),
-                )
-                .unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                *FAKE.lock().unwrap() = None;
-                node.stop().await;
-            })
-    });
-    let (url, id) = wait.recv().unwrap();
-    Running {
-        url,
-        id,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+fn start() -> Served<()> {
+    serve(move || async move {
+        let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, MISSIONS], "")
+            .await
+            .unwrap();
+        *FAKE.lock().unwrap() = Some(node.fake_sessions());
+        let dir = node.dir().join("missions/missions");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("gated.mission.toml"),
+            include_str!("fixtures/gated.mission.toml"),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("admission-findings.mission.toml"),
+            include_str!("fixtures/admission-findings.mission.toml"),
+        )
+        .unwrap();
+        Started::new(node, ()).then(|| *FAKE.lock().unwrap() = None)
+    })
 }
 fn click(cx: &mut VisualTestContext, selector: &str) {
     // Aim at the frame the click lands on: draw what changed since the

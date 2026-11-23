@@ -2,15 +2,11 @@
 #![cfg(target_os = "linux")]
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{NodeClient, cli};
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::node::Node;
-use gpui::{Modifiers, TestAppContext, VisualTestContext};
+use gpui::TestAppContext;
 use serde_json::{Value, json};
-use std::{
-    path::PathBuf,
-    process::Command,
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use std::{path::PathBuf, process::Command};
 
 struct Unit {
     name: String,
@@ -54,29 +50,15 @@ impl Drop for Unit {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
-struct Running {
-    url: String,
-    id: String,
+struct Fixture {
     config: PathBuf,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
-fn start(unit: &Unit) -> Running {
-    let (ready, receive) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
+fn start(unit: &Unit) -> Served<Fixture> {
     let name = unit.name.clone();
-    let thread =
-        std::thread::spawn(move || {
-            tokio::runtime::Runtime::new().unwrap().block_on(async move {
-        let node = Node::start(&[ahjo_host::LISTING], "[host]\nenabled = true\n").await.unwrap();
+    serve(move || async move {
+        let node = Node::start(&[ahjo_host::LISTING], "[host]\nenabled = true\n")
+            .await
+            .unwrap();
         let user = std::env::var("USER").unwrap();
         let component = json!({"kind":"systemd-user", "user":user, "unit":name});
         let missing = json!({"kind":"systemd-user", "user":user, "unit":format!("missing-{name}")});
@@ -85,41 +67,12 @@ fn start(unit: &Unit) -> Running {
             {"id":"group", "name":"Disposable group", "components":[component.clone(), component]},
             {"id":"missing", "name":"Missing unit", "components":[missing]}
         ]}).to_string()).unwrap();
-        ready.send((node.url(), node.id(), node.dir().join("config.toml"))).unwrap();
-        while stopped.try_recv().is_err() { tokio::time::sleep(Duration::from_millis(20)).await; }
-        node.stop().await;
+        let config = node.dir().join("config.toml");
+        Started::new(node, Fixture { config })
     })
-        });
-    let (url, id, config) = receive.recv().unwrap();
-    Running {
-        url,
-        id,
-        config,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut test: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let end = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if test(cx) {
-            return;
-        }
-        assert!(Instant::now() < end, "timed out: {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 fn selector(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
-}
-fn click(cx: &mut VisualTestContext, id: &'static str) {
-    let at = cx.debug_bounds(id).unwrap().center();
-    cx.simulate_click(at, Modifiers::none());
 }
 fn command(url: &str, noun: &str, args: &[&str]) -> Value {
     let url = url.to_owned();

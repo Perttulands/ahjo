@@ -3,13 +3,10 @@
 #![cfg(unix)]
 use ahjo_app_kit::{Host, Mounted, link::client::LinkState, mount};
 use ahjo_terminals_app::Terminals;
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::{fresh_dir, node::Node, tmux::Server};
-use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext, Window};
-use std::{
-    cell::RefCell,
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use gpui::{Entity, TestAppContext, VisualTestContext, Window};
+use std::cell::RefCell;
 
 thread_local! { static TERMINALS: RefCell<Option<Entity<Terminals>>> = const { RefCell::new(None) }; }
 fn terminals(host: Host, window: &mut Window, cx: &mut gpui::App) -> Mounted {
@@ -18,103 +15,46 @@ fn terminals(host: Host, window: &mut Window, cx: &mut gpui::App) -> Mounted {
         Terminals::new(host, window, cx)
     })
 }
-struct Running {
-    url: String,
-    node: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
+fn start() -> Option<Served<()>> {
+    let tmux = Server::start_in("brain-send-journey")?;
+    Some(serve(move || async move {
+        tmux.new_session("alpha", 100, 30);
+        let corpus = fresh_dir("brain-send-corpus");
+        std::fs::create_dir(corpus.join("notes")).unwrap();
+        std::fs::write(corpus.join("notes/page.md"), "# Page\n").unwrap();
+        // A page arrives by a commit.
+        for args in [
+            &["init", "-q"][..],
+            &["config", "user.name", "Fixture"],
+            &["config", "user.email", "fixture@example.org"],
+            &["add", "."],
+            &["commit", "-qm", "Fixture"],
+        ] {
+            let done = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&corpus)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                done.status.success(),
+                "{}",
+                String::from_utf8_lossy(&done.stderr)
+            );
         }
-    }
-}
-fn start() -> Option<Running> {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let Some(tmux) = Server::start_in("brain-send-journey") else {
-                    ready.send(None).unwrap();
-                    return;
-                };
-                tmux.new_session("alpha", 100, 30);
-                let corpus = fresh_dir("brain-send-corpus");
-                std::fs::create_dir(corpus.join("notes")).unwrap();
-                std::fs::write(corpus.join("notes/page.md"), "# Page\n").unwrap();
-                // A page arrives by a commit.
-                for args in [
-                    &["init", "-q"][..],
-                    &["config", "user.name", "Fixture"],
-                    &["config", "user.email", "fixture@example.org"],
-                    &["add", "."],
-                    &["commit", "-qm", "Fixture"],
-                ] {
-                    let done = std::process::Command::new("git")
-                        .arg("-C")
-                        .arg(&corpus)
-                        .args(args)
-                        .output()
-                        .unwrap();
-                    assert!(
-                        done.status.success(),
-                        "{}",
-                        String::from_utf8_lossy(&done.stderr)
-                    );
-                }
-                let config = format!(
-                    "[brain]\ncorpus = {:?}\n[terminals]\nsocket = {:?}\n",
-                    corpus,
-                    tmux.socket_path()
-                );
-                let node = Node::start(&[ahjo_terminals::LISTING, ahjo_brain::LISTING], &config)
-                    .await
-                    .unwrap();
-                ready.send(Some((node.url(), node.id()))).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-                std::fs::remove_dir_all(corpus).unwrap();
-            });
-    });
-    match wait.recv().unwrap() {
-        Some((url, node)) => Some(Running {
-            url,
-            node,
-            stop,
-            thread: Some(thread),
-        }),
-        None => {
-            thread.join().unwrap();
-            None
-        }
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-fn click(cx: &mut VisualTestContext, selector: &str) {
-    let selector = Box::leak(selector.to_string().into_boxed_str());
-    let at = cx.debug_bounds(selector).expect(selector).center();
-    cx.simulate_click(at, Modifiers::none());
+        let config = format!(
+            "[brain]\ncorpus = {:?}\n[terminals]\nsocket = {:?}\n",
+            corpus,
+            tmux.socket_path()
+        );
+        let node = Node::start(&[ahjo_terminals::LISTING, ahjo_brain::LISTING], &config)
+            .await
+            .unwrap();
+        Started::new(node, ()).then(move || {
+            std::fs::remove_dir_all(corpus).unwrap();
+            drop(tmux);
+        })
+    }))
 }
 fn shown(cx: &mut VisualTestContext) -> String {
     TERMINALS
@@ -145,7 +85,7 @@ fn brain_send_reaches_a_real_session(cx: &mut TestAppContext) {
             s.hub().read(cx).fleet.here().state == LinkState::Open
         })
     });
-    let row = format!("row-{}::alpha", running.node);
+    let row = format!("row-{}::alpha", running.id);
     let selector = Box::leak(row.clone().into_boxed_str());
     until(cx, "session", |cx| cx.debug_bounds(selector).is_some());
     click(cx, &row);

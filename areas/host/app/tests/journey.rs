@@ -1,12 +1,12 @@
 //! The operator's Host journeys, with a fake service manager
 //! and controlled readings.
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use std::{
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc,
     },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use ahjo_app_kit::link::client::LinkState;
@@ -222,74 +222,22 @@ fn snapshot() -> Vec<u8> {
         },
     )
 }
-struct Running {
-    url: String,
-    node: String,
+struct Fixture {
     control: Arc<Control>,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
-fn start() -> Running {
+fn start() -> Served<Fixture> {
     let control = Arc::new(Control::default());
     let (tx, rx) = tokio_mpsc::unbounded_channel();
     *control.sender.lock().unwrap() = Some(tx);
     *control.receiver.lock().unwrap() = Some(rx);
     assert!(CONTROL.set(control.clone()).is_ok());
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(&[FAKE], "").await.unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            });
-    });
-    let (url, node) = wait.recv().unwrap();
-    Running {
-        url,
-        node,
-        control,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    serve(move || async move {
+        let node = Node::start(&[FAKE], "").await.unwrap();
+        Started::new(node, Fixture { control })
+    })
 }
 fn selector(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
-}
-fn click(cx: &mut VisualTestContext, selector: &'static str) {
-    let position = cx
-        .debug_bounds(selector)
-        .expect("the control is visible")
-        .center();
-    cx.simulate_click(position, Modifiers::none());
 }
 fn status(shell: &gpui::Entity<ahjo_app_shell::Shell>, cx: &mut VisualTestContext) -> String {
     shell.read_with(cx, |s, cx| {
@@ -317,7 +265,7 @@ fn host_journeys(cx: &mut TestAppContext) {
             cx,
         )
     });
-    let node = running.node.clone();
+    let node = running.id.clone();
     let at = |what: String| selector(what);
     let shows = |cx: &mut VisualTestContext, s: &'static str| cx.debug_bounds(s).is_some();
     until(cx, "the node link", |cx| {

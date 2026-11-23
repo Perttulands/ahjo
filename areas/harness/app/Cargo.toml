@@ -21,7 +21,7 @@ log = "0.4"
 [dev-dependencies]
 ahjo-app-shell = { path = "../../../kit/app-shell" }
 ahjo-harness = { path = "../node" }
-ahjo-testkit = { path = "../../../kit/testkit" }
+ahjo-testkit = { path = "../../../kit/testkit", features = ["app"] }
 ahjo-node-kit = { path = "../../../kit/node-kit" }
 gpui = { package = "gpui-pre", version = "=0.3.12", features = ["test-support"] }
 tokio = { version = "1", features = ["full"] }

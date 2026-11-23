@@ -1,10 +1,8 @@
 //! The Files page draws a node's real listing.
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::node::Node;
 use gpui::{Modifiers, ParentElement, TestAppContext, VisualTestContext};
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use std::time::Duration;
 
 thread_local! {
     static SENT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
@@ -68,78 +66,26 @@ fn toy(
     ahjo_app_kit::mount(host, window, cx, |_, _, _| Toy)
 }
 
-struct Running {
-    url: String,
-    node: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
-fn start(root: std::path::PathBuf) -> Running {
+fn start(root: std::path::PathBuf) -> Served<()> {
     start_with_terminal(root, None)
 }
-fn start_with_terminal(root: std::path::PathBuf, socket: Option<std::path::PathBuf>) -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async move {
-            let mut config = format!(
-                "[files]\nroots = [{}]\n",
-                serde_json::to_string(root.to_str().unwrap()).unwrap()
-            );
-            let areas = if let Some(socket) = socket {
-                config.push_str(&format!("[terminals]\nsocket = {:?}\n", socket));
-                vec![ahjo_files::LISTING, ahjo_terminals::LISTING]
-            } else {
-                vec![ahjo_files::LISTING]
-            };
-            let node = Node::start(&areas, &config).await.unwrap();
-            ready.send((node.url(), node.id())).unwrap();
-            while stopped.try_recv().is_err() {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            node.stop().await;
-        });
-    });
-    let (url, node) = wait.recv().unwrap();
-    Running {
-        url,
-        node,
-        stop,
-        thread: Some(thread),
-    }
+fn start_with_terminal(root: std::path::PathBuf, socket: Option<std::path::PathBuf>) -> Served<()> {
+    serve(move || async move {
+        let mut config = format!(
+            "[files]\nroots = [{}]\n",
+            serde_json::to_string(root.to_str().unwrap()).unwrap()
+        );
+        let areas = if let Some(socket) = socket {
+            config.push_str(&format!("[terminals]\nsocket = {:?}\n", socket));
+            vec![ahjo_files::LISTING, ahjo_terminals::LISTING]
+        } else {
+            vec![ahjo_files::LISTING]
+        };
+        let node = Node::start(&areas, &config).await.unwrap();
+        Started::new(node, ())
+    })
 }
 
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-fn click(cx: &mut VisualTestContext, id: &'static str) {
-    let point = cx
-        .debug_bounds(id)
-        .unwrap_or_else(|| panic!("missing {id}"))
-        .center();
-    cx.simulate_click(point, Modifiers::none());
-}
 fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
@@ -325,7 +271,7 @@ fn terminal_panel_search_and_printed_path_open_beside(cx: &mut TestAppContext) {
             cx,
         )
     });
-    let row = leak(format!("row-{}::alpha", running.node));
+    let row = leak(format!("row-{}::alpha", running.id));
     until(cx, "terminal session", |cx| cx.debug_bounds(row).is_some());
     click(cx, row);
     until(cx, "attach", |cx| cx.debug_bounds("peek-attach").is_some());
@@ -478,7 +424,7 @@ fn browse_find_edit_save_and_send_to_a_session(cx: &mut TestAppContext) {
             cx,
         )
     });
-    let row = leak(format!("row-{}::alpha", running.node));
+    let row = leak(format!("row-{}::alpha", running.id));
     until(cx, "session in rail", |cx| cx.debug_bounds(row).is_some());
     click(cx, row);
     until(cx, "attach session", |cx| {
@@ -1001,7 +947,7 @@ fn reveal_opens_files_and_lists_folders(cx: &mut TestAppContext) {
     let reveal = |path: &std::path::Path| ahjo_app_kit::Ask::Reveal {
         what: "path".into(),
         id: path.to_string_lossy().into_owned(),
-        node: Some(ahjo_core::NodeId(running.node.clone())),
+        node: Some(ahjo_core::NodeId(running.id.clone())),
         part: None,
         beside: false,
     };
@@ -1321,7 +1267,7 @@ fn markdown_beside_terminal_scrolls_inside_its_border(cx: &mut TestAppContext) {
     cx.update(|_, cx| {
         host.ask(
             ahjo_app_kit::Ask::OpenPath {
-                node: ahjo_core::NodeId(running.node.clone()),
+                node: ahjo_core::NodeId(running.id.clone()),
                 path: file.to_string_lossy().into_owned(),
                 beside: true,
             },
@@ -1384,7 +1330,7 @@ fn open_path_beside_keeps_the_terminal_and_the_draft(cx: &mut TestAppContext) {
         ahjo_app_kit::Host::new(s.hub()).for_page("sessions", &[])
     });
     let ask = |path: std::path::PathBuf| ahjo_app_kit::Ask::OpenPath {
-        node: ahjo_core::NodeId(running.node.clone()),
+        node: ahjo_core::NodeId(running.id.clone()),
         path: path.to_string_lossy().into_owned(),
         beside: true,
     };
@@ -1640,7 +1586,7 @@ fn a_save_answered_after_switching_files_lands_on_its_tab(cx: &mut TestAppContex
         std::fs::read(root.join("note.txt")).ok().as_deref() == Some(b"first")
     });
     let note = (
-        running.node.clone(),
+        running.id.clone(),
         root.join("note.txt").to_string_lossy().into_owned(),
     );
     until(cx, "the draft acknowledged", |cx| {

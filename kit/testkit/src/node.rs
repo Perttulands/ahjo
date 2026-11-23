@@ -24,7 +24,13 @@ impl Node {
     /// of its own on loopback. Refused as the node refuses: an unknown
     /// section, a bad one, or areas that conflict.
     pub async fn start(areas: &[Listing], config: &str) -> anyhow::Result<Node> {
-        let dir = fresh_dir("ahjo-node");
+        Node::start_in(fresh_dir("ahjo-node"), areas, config).await
+    }
+
+    /// Like [`Node::start`], with `dir` as its config folder: one the test
+    /// made and filled first, as an older node left it. The node owns it
+    /// from here and removes it when it drops.
+    pub async fn start_in(dir: PathBuf, areas: &[Listing], config: &str) -> anyhow::Result<Node> {
         let started = async {
             let config = Config::parse(config, dir.clone())?;
             let options = Options {

@@ -45,7 +45,7 @@ impl Node {
             child,
             address: listen,
         };
-        match serving.recv_timeout(Duration::from_secs(30)) {
+        match serving.recv_timeout(crate::timeout(Duration::from_secs(30))) {
             Ok(address) => {
                 assert!(
                     address.ip() == listen.ip()

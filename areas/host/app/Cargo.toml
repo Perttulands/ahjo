@@ -25,6 +25,6 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 ahjo-node-kit = { path = "../../../kit/node-kit" }
 ahjo-app-shell = { path = "../../../kit/app-shell" }
 ahjo-host = { path = "../node" }
-ahjo-testkit = { path = "../../../kit/testkit" }
+ahjo-testkit = { path = "../../../kit/testkit", features = ["app"] }
 gpui = { package = "gpui-pre", version = "=0.3.12", features = ["test-support"] }
 tokio = { version = "1", features = ["full"] }

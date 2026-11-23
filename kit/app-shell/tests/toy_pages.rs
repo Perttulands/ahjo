@@ -13,6 +13,7 @@ use ahjo_app_kit::menu::MenuRow;
 use ahjo_app_kit::{Answers, Ask, Build, Host, Mounted, Page, Setting, mount};
 use ahjo_app_shell::Shell;
 use ahjo_core::NodeId;
+use ahjo_testkit::app::until;
 use futures_util::{SinkExt, StreamExt};
 use gpui::{
     Entity, Modifiers, TestAppContext, VisualTestContext, WeakEntity, Window, div, point,
@@ -440,23 +441,6 @@ async fn serve(mut stream: tokio::net::TcpStream, heard: Arc<Mutex<Vec<Vec<u8>>>
                 }
             }
         }
-    }
-}
-
-/// Runs the app until `ok`, or fails naming `what` after ten seconds.
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
     }
 }
 

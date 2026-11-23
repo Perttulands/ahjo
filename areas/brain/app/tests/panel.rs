@@ -3,126 +3,74 @@
 //! sends the page as `ahjo brain send` words it, and closes with the
 //! keyboard back where it was.
 use ahjo_app_kit::link::client::LinkState;
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::{fresh_dir, node::Node};
 use axum::{Json, routing::post};
 use gpui::{FocusHandle, Modifiers, TestAppContext, VisualTestContext, point, px};
 use serde_json::{Value, json};
-use std::{
-    cell::RefCell,
-    sync::mpsc,
-    time::{Duration, Instant},
-};
-
-struct Running {
-    url: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
-        }
-    }
-}
+use std::{cell::RefCell, time::Duration};
 
 /// A node serving a corpus of a few pages in git, its search answered by
 /// a stand-in Citadel.
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async move {
-            let corpus = fresh_dir("brain-panel-corpus");
-            std::fs::create_dir(corpus.join("notes")).unwrap();
-            std::fs::create_dir(corpus.join("other")).unwrap();
-            std::fs::write(corpus.join("other/third.md"), "# Third\n").unwrap();
-            std::fs::write(
-                corpus.join("notes/first.md"),
-                "# First\n\n[[second|Second]]\n",
-            )
-            .unwrap();
-            std::fs::write(corpus.join("notes/second.md"), "# Second\n\nLinked page.\n").unwrap();
-            let git = |args: &[&str]| {
-                let output = std::process::Command::new("git")
-                    .arg("-C")
-                    .arg(&corpus)
-                    .args(args)
-                    .output()
-                    .unwrap();
-                assert!(
-                    output.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            };
-            git(&["init", "-q"]);
-            git(&["config", "user.name", "Fixture"]);
-            git(&["config", "user.email", "fixture@example.org"]);
-            git(&["add", "."]);
-            git(&["commit", "-qm", "Fixture"]);
-            let citadel = axum::Router::new().route(
-                "/v1/library/search",
-                post(|Json(query): Json<Value>| async move {
-                    let results = if query["query"] == "first" {
-                        json!([
-                            { "path": "notes/first.md", "title": "First", "collection": "notes", "kind": "note" },
-                            { "path": "notes/second.md", "title": "Second", "collection": "notes" },
-                            { "path": "other/third.md", "title": "Third", "collection": "other" }
-                        ])
-                    } else {
-                        json!([])
-                    };
-                    Json(json!({"results": results}))
-                }),
+fn start() -> Served<()> {
+    serve(move || async move {
+        let corpus = fresh_dir("brain-panel-corpus");
+        std::fs::create_dir(corpus.join("notes")).unwrap();
+        std::fs::create_dir(corpus.join("other")).unwrap();
+        std::fs::write(corpus.join("other/third.md"), "# Third\n").unwrap();
+        std::fs::write(
+            corpus.join("notes/first.md"),
+            "# First\n\n[[second|Second]]\n",
+        )
+        .unwrap();
+        std::fs::write(corpus.join("notes/second.md"), "# Second\n\nLinked page.\n").unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&corpus)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
             );
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-            let addr = listener.local_addr().unwrap();
-            let server = tokio::spawn(async move { axum::serve(listener, citadel).await.unwrap() });
-            let config = format!(
-                "[brain]\ncorpus = {:?}\ncitadel = {:?}\n",
-                corpus.to_str().unwrap(),
-                format!("http://{addr}")
-            );
-            let node = Node::start(&[ahjo_brain::LISTING], &config).await.unwrap();
-            ready.send(node.url()).unwrap();
-            while stopped.try_recv().is_err() {
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            node.stop().await;
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.name", "Fixture"]);
+        git(&["config", "user.email", "fixture@example.org"]);
+        git(&["add", "."]);
+        git(&["commit", "-qm", "Fixture"]);
+        let citadel = axum::Router::new().route(
+            "/v1/library/search",
+            post(|Json(query): Json<Value>| async move {
+                let results = if query["query"] == "first" {
+                    json!([
+                        { "path": "notes/first.md", "title": "First", "collection": "notes", "kind": "note" },
+                        { "path": "notes/second.md", "title": "Second", "collection": "notes" },
+                        { "path": "other/third.md", "title": "Third", "collection": "other" }
+                    ])
+                } else {
+                    json!([])
+                };
+                Json(json!({"results": results}))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, citadel).await.unwrap() });
+        let config = format!(
+            "[brain]\ncorpus = {:?}\ncitadel = {:?}\n",
+            corpus.to_str().unwrap(),
+            format!("http://{addr}")
+        );
+        let node = Node::start(&[ahjo_brain::LISTING], &config).await.unwrap();
+        Started::new(node, ()).then(move || {
             server.abort();
             std::fs::remove_dir_all(corpus).unwrap();
-        });
-    });
-    Running {
-        url: wait.recv().unwrap(),
-        stop,
-        thread: Some(thread),
-    }
-}
-
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ok: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if ok(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
-fn click(cx: &mut VisualTestContext, selector: &str) {
-    let selector = Box::leak(selector.to_string().into_boxed_str());
-    let at = cx.debug_bounds(selector).expect(selector).center();
-    cx.simulate_click(at, Modifiers::none());
+        })
+    })
 }
 
 thread_local! {

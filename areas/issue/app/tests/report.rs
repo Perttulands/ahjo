@@ -2,10 +2,9 @@
 #![cfg(unix)]
 use ahjo_app_kit::{Host, Mounted, Page, mount};
 use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::app::until;
 use ahjo_testkit::node::Node;
-use gpui::{
-    App, Context, IntoElement, Render, TestAppContext, VisualTestContext, Window, div, prelude::*,
-};
+use gpui::{App, Context, IntoElement, Render, TestAppContext, Window, div, prelude::*};
 use std::sync::{OnceLock, mpsc};
 static GH: OnceLock<String> = OnceLock::new();
 static BD: OnceLock<String> = OnceLock::new();
@@ -20,7 +19,7 @@ const WORK: Listing = Listing {
     build: build_work,
     ..ahjo_issue::LISTING
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 struct Toy;
 impl Page for Toy {
@@ -34,22 +33,6 @@ impl Render for Toy {
 }
 fn toy(host: Host, window: &mut Window, cx: &mut App) -> Mounted {
     mount(host, window, cx, |_, _, _| Toy)
-}
-
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut ready: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    loop {
-        cx.run_until_parked();
-        if ready(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 #[gpui::test]

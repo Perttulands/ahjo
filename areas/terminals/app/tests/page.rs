@@ -341,7 +341,7 @@ fn until(
     mut ok: impl FnMut(&mut VisualTestContext) -> bool,
 ) {
     let _waiting = waiting(what);
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + ahjo_testkit::timeout(Duration::from_secs(15));
     loop {
         cx.run_until_parked();
         if ok(cx) {

@@ -1,79 +1,24 @@
 #![cfg(unix)]
 mod common;
 use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::{node::Node, sessions};
-use gpui::{Modifiers, TestAppContext, VisualTestContext};
+use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
-use std::{
-    sync::mpsc,
-    time::{Duration, Instant},
-};
 const AREAS: &[Listing] = &[
     sessions::LISTING,
     ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
-struct Running {
-    url: String,
-    node: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
-        }
-    }
-}
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(AREAS, "").await.unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            })
-    });
-    let (url, node) = wait.recv_timeout(Duration::from_secs(20)).unwrap();
-    Running {
-        url,
-        node,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            break;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+fn start() -> Served<()> {
+    serve(move || async move {
+        let node = Node::start(AREAS, "").await.unwrap();
+        Started::new(node, ())
+    })
 }
 fn has(cx: &mut VisualTestContext, selector: &str) -> bool {
     cx.debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
         .is_some()
-}
-fn click(cx: &mut VisualTestContext, selector: &str) {
-    let bounds = cx
-        .debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
-        .expect(selector);
-    cx.simulate_click(bounds.center(), Modifiers::none());
 }
 #[gpui::test]
 fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestAppContext) {
@@ -190,7 +135,7 @@ fn creates_and_renames_a_mission_with_cancel_and_conflict_guard(cx: &mut TestApp
     cx.simulate_input("Scratch");
     click(cx, "mission-form-submit");
     until(cx, "second mission created", |cx| !has(cx, "mission-form"));
-    let listed = format!("mission-{}-scratch", running.node);
+    let listed = format!("mission-{}-scratch", running.id);
     until(cx, "scratch shown", |cx| has(cx, "pane-title-Scratch"));
     menu(cx, "Delete…");
     until(cx, "archive confirmation", |cx| {
@@ -253,7 +198,7 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     until(cx, "new mission form", |cx| has(cx, "mission-form-name"));
     cx.simulate_input("Design journey");
     click(cx, "mission-form-submit");
-    let mission = format!("mission-{}-design-journey", running.node);
+    let mission = format!("mission-{}-design-journey", running.id);
     until(cx, "mission listing", |cx| has(cx, &mission));
     click(cx, &mission);
     // An empty mission opens on its board, which says to add its Input.

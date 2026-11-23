@@ -8,6 +8,10 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+# What app tests share (`app`): it builds the GUI toolkit.
+app = ["dep:gpui"]
+
 [dependencies]
 ahjo-node-kit = { path = "../node-kit" }
 ahjo-term = { path = "../../engine/term" }
@@ -16,6 +20,7 @@ anyhow = "1"
 axum = { version = "0.8", default-features = false }
 serde_json = { version = "1", features = ["preserve_order"] }
 tokio = { version = "1", features = ["full"] }
+gpui = { package = "gpui-pre", version = "=0.3.12", features = ["test-support"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

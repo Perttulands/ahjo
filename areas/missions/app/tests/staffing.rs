@@ -5,13 +5,11 @@ use ahjo_core::{NodeId, TypedCommand};
 use ahjo_harness_contract::agents::{ListAgents, ListedAgents};
 use ahjo_missions_contract::commands::MissionDefinition;
 use ahjo_node_kit::{Area, Built, Listing, NodeClient, Setup};
+use ahjo_testkit::app::{Served, Started, serve, until};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
 use serde_json::json;
-use std::{
-    sync::{Arc, mpsc},
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
 
 struct AgentCatalog;
 impl Area for AgentCatalog {
@@ -47,21 +45,7 @@ const AGENTS: Listing = Listing {
     commands: &[ListAgents::NAME],
     build,
 };
-struct Running {
-    url: String,
-    node: String,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
-}
-fn start() -> Running {
+fn start() -> Served<()> {
     // The node checks a chosen model against this host's Codex models; give
     // it the one the catalog test node offers. Alone in its binary, so the
     // process-wide variable is safe to set.
@@ -73,65 +57,33 @@ fn start() -> Running {
     )
     .unwrap();
     unsafe { std::env::set_var("CODEX_HOME", &codex) };
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
-            .unwrap()
-            .block_on(async move {
-                let node = Node::start(
-                    &[
-                        sessions::LISTING,
-                        ahjo_issue::LISTING,
-                        ahjo_missions::LISTING,
-                        AGENTS,
-                    ],
-                    "",
-                )
-                .await
-                .unwrap();
-                let agents = node.dir().join("missions/agents");
-                std::fs::create_dir_all(&agents).unwrap();
-                std::fs::write(
-                    agents.join("planner.toml"),
-                    "schema = 1\nid = \"planner\"\nname = \"Alpha\"\ninstructions = \"Plan\"\nharness = \"openai-codex\"\nmodel = \"\"\neffort = \"medium\"\n",
-                ).unwrap();
-                let dir = node.dir().join("missions/missions");
-                std::fs::create_dir_all(&dir).unwrap();
-                std::fs::write(
-                    dir.join("hello.mission.toml"),
-                    include_str!("fixtures/solo-lab.mission.toml"),
-                )
-                .unwrap();
-                ready.send((node.url(), node.id())).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            })
-    });
-    let (url, node) = wait.recv_timeout(Duration::from_secs(20)).unwrap();
-    Running {
-        url,
-        node,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            break;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    serve(move || async move {
+        let node = Node::start(
+            &[
+                sessions::LISTING,
+                ahjo_issue::LISTING,
+                ahjo_missions::LISTING,
+                AGENTS,
+            ],
+            "",
+        )
+        .await
+        .unwrap();
+        let agents = node.dir().join("missions/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(
+            agents.join("planner.toml"),
+            "schema = 1\nid = \"planner\"\nname = \"Alpha\"\ninstructions = \"Plan\"\nharness = \"openai-codex\"\nmodel = \"\"\neffort = \"medium\"\n",
+        ).unwrap();
+        let dir = node.dir().join("missions/missions");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("hello.mission.toml"),
+            include_str!("fixtures/solo-lab.mission.toml"),
+        )
+        .unwrap();
+        Started::new(node, ())
+    })
 }
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     if selector.starts_with("seat-") || selector.starts_with("staffing-") {
@@ -186,7 +138,7 @@ fn catalog_pickers_offer_sorted_agents_and_model_efforts_and_save_the_choice(
                 Ask::Reveal {
                     what: "mission".into(),
                     id: "hello".into(),
-                    node: Some(NodeId(running.node.clone())),
+                    node: Some(NodeId(running.id.clone())),
                     part: None,
                     beside: false,
                 },

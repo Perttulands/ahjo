@@ -3,14 +3,15 @@ use ahjo_app_kit::{Ask, Host, Mounted, Page, ask::Answers, mount};
 use ahjo_core::NodeId;
 use ahjo_mission_engine::{ExecutionSink, Executor, LabExecutor, StepExecution, StepResult};
 use ahjo_node_kit::{Built, Listing, Setup};
+use ahjo_testkit::app::{Served, Started, click, serve, until};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{
-    App, AppContext, Context, IntoElement, Modifiers, ParentElement, TestAppContext,
-    VisualTestContext, Window, div, point, px,
+    App, AppContext, Context, IntoElement, ParentElement, TestAppContext, VisualTestContext,
+    Window, div, point, px,
 };
 use serde_json::{Value, json};
 use std::{
-    sync::{Mutex, mpsc},
+    sync::Mutex,
     time::{Duration, Instant},
 };
 
@@ -102,28 +103,23 @@ fn mission() -> String {
         "{work}\n[[step]]{judge}\n[[gate]]\nid = \"gate_review\"\ntitle = \"Review\"\nkinds = [\"step\"]\n[[connection]]\nid = \"edge_pass\"\nfrom = \"gate_review:pass\"\nto = \"end_done:in\"\n[[connection]]\nid = \"edge_fail\"\nfrom = \"gate_review:fail\"\nto = \"fmn_work:port_in\"\n[[connection]]\nid = \"edge_judge\"\nfrom = \"gate_review:judge\"\nto = \"fmn_judge:port_in\"\n[[connection]]\nid = \"edge_return\"\nfrom = \"fmn_judge:port_out\"\nto = \"gate_review:judge\"\n"
     )
 }
-struct Running {
-    url: String,
-    id: String,
+struct Fixture {
     run: String,
     evidence: Value,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
 }
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(thread) = self.thread.take() {
-            thread.join().unwrap();
-        }
-    }
-}
-fn start() -> Running {
-    let (tx, rx) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new().unwrap().block_on(async move {
-        let node = Node::start(&[sessions::LISTING, ahjo_issue::LISTING, ahjo_files::LISTING, MISSIONS], "[files]\nroots = ['/tmp']\n").await.unwrap();
+fn start() -> Served<Fixture> {
+    serve(move || async move {
+        let node = Node::start(
+            &[
+                sessions::LISTING,
+                ahjo_issue::LISTING,
+                ahjo_files::LISTING,
+                MISSIONS,
+            ],
+            "[files]\nroots = ['/tmp']\n",
+        )
+        .await
+        .unwrap();
         let dir = node.dir().join("missions/missions");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("hello.mission.toml"), mission()).unwrap();
@@ -132,47 +128,20 @@ fn start() -> Running {
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let answer = node.call("run_show", json!({"run":id})).await.unwrap();
-                let state = &answer["state"];
-            if state["final"] == true || state["status"] == "blocked" { assert_eq!(state["status"], "succeeded", "{state}"); break; }
+            let state = &answer["state"];
+            if state["final"] == true || state["status"] == "blocked" {
+                assert_eq!(state["status"], "succeeded", "{state}");
+                break;
+            }
             assert!(Instant::now() < deadline);
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let evidence = node.call("run_show", json!({"run":id,"evidence":true})).await.unwrap();
-        tx.send((node.url(), node.id(), id, evidence)).unwrap();
-        while stopped.try_recv().is_err() { tokio::time::sleep(Duration::from_millis(20)).await; }
-        node.stop().await;
+        let evidence = node
+            .call("run_show", json!({"run":id,"evidence":true}))
+            .await
+            .unwrap();
+        Started::new(node, Fixture { run: id, evidence })
     })
-    });
-    let (url, id, run, evidence) = rx.recv_timeout(Duration::from_secs(20)).unwrap();
-    Running {
-        url,
-        id,
-        run,
-        evidence,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            break;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-fn click(cx: &mut VisualTestContext, selector: &str) {
-    let bounds = cx
-        .debug_bounds(Box::leak(selector.to_owned().into_boxed_str()))
-        .expect(selector);
-    cx.simulate_click(bounds.center(), Modifiers::none());
 }
 fn reveal_control(cx: &mut VisualTestContext, selector: &str) {
     let selector: &'static str = Box::leak(selector.to_owned().into_boxed_str());

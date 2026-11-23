@@ -117,7 +117,7 @@ impl Server {
             &rows.to_string(),
             "env PS1='$ ' sh",
         ]);
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + crate::timeout(Duration::from_secs(10));
         while self.display(&format!("={name}:"), "#{pane_current_command}") != "sh" {
             assert!(
                 Instant::now() < deadline,
@@ -204,7 +204,7 @@ impl Server {
     /// exited. The socket is in this test's private directory, so whatever
     /// answers there is this test's; it is stopped by its process id.
     fn stop(&self) -> Result<(), String> {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + crate::timeout(Duration::from_secs(10));
         let pid = loop {
             let output = self
                 .command()
@@ -361,9 +361,10 @@ pub async fn window_becomes(server: &Server, session: &str, size: &str) {
     .await;
 }
 
-/// Polls `check` until it returns `Some`, or panics after ten seconds.
+/// Polls `check` until it returns `Some`, or panics after ten seconds
+/// ([`crate::timeout`]).
 pub async fn eventually<T>(what: &str, mut check: impl FnMut() -> Option<T>) -> T {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + crate::timeout(Duration::from_secs(10));
     loop {
         if let Some(value) = check() {
             return value;

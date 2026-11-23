@@ -4,86 +4,40 @@
 mod common;
 use ahjo_app_kit::link::client::LinkState;
 use ahjo_node_kit::{Listing, NodeClient};
+use ahjo_testkit::app::{Served, Started, serve, until};
 use ahjo_testkit::{node::Node, sessions};
 use gpui::{Bounds, Modifiers, Pixels, TestAppContext, VisualTestContext, px};
 use serde_json::json;
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
 
 const AREAS: &[Listing] = &[
     sessions::LISTING,
     ahjo_issue::LISTING,
     ahjo_missions::LISTING,
 ];
-struct Running {
-    url: String,
-    id: String,
+struct Fixture {
     steps: Vec<String>,
-    stop: mpsc::Sender<()>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-impl Drop for Running {
-    fn drop(&mut self) {
-        let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            t.join().unwrap();
-        }
-    }
 }
 /// A node with a ten-step sketch: longer than its pane shows whole.
-fn start() -> Running {
-    let (ready, wait) = mpsc::channel();
-    let (stop, stopped) = mpsc::channel();
-    let thread = std::thread::spawn(move || {
-        tokio::runtime::Runtime::new()
+fn start() -> Served<Fixture> {
+    serve(move || async move {
+        let node = Node::start(AREAS, "").await.unwrap();
+        let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
+        let steps: Vec<String> = (1..=10).map(|n| format!("Step {n}")).collect();
+        let doc = common::call(
+            &client,
+            "mission_create",
+            json!({"slug":"long", "title":"Long", "steps":steps.join("\n")}),
+        )
+        .await
+        .unwrap();
+        let ids = doc["steps"]
+            .as_array()
             .unwrap()
-            .block_on(async move {
-                let node = Node::start(AREAS, "").await.unwrap();
-                let client = NodeClient::new(Some(&format!("{}/", node.url()))).unwrap();
-                let steps: Vec<String> = (1..=10).map(|n| format!("Step {n}")).collect();
-                let doc = common::call(
-                    &client,
-                    "mission_create",
-                    json!({"slug":"long", "title":"Long", "steps":steps.join("\n")}),
-                )
-                .await
-                .unwrap();
-                let ids = doc["steps"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|f| f["id"].as_str().unwrap().to_owned())
-                    .collect();
-                ready.send((node.url(), node.id(), ids)).unwrap();
-                while stopped.try_recv().is_err() {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                }
-                node.stop().await;
-            });
-    });
-    let (url, id, steps) = wait.recv().unwrap();
-    Running {
-        url,
-        id,
-        steps,
-        stop,
-        thread: Some(thread),
-    }
-}
-fn until(
-    cx: &mut VisualTestContext,
-    what: &str,
-    mut f: impl FnMut(&mut VisualTestContext) -> bool,
-) {
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        cx.run_until_parked();
-        if f(cx) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+            .iter()
+            .map(|f| f["id"].as_str().unwrap().to_owned())
+            .collect();
+        Started::new(node, Fixture { steps: ids })
+    })
 }
 fn at(cx: &mut VisualTestContext, selector: String) -> Option<Bounds<Pixels>> {
     cx.debug_bounds(Box::leak(selector.into_boxed_str()))
