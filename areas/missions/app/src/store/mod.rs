@@ -3,6 +3,7 @@ pub mod attempts;
 pub mod canvas;
 pub mod evidence;
 pub mod gate;
+pub mod gate_art;
 pub mod history;
 pub mod navigator;
 pub mod placement;

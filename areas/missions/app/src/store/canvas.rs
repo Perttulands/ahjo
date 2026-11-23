@@ -26,13 +26,6 @@ pub const START_WORDS: f32 = 60.;
 /// An end: its mark and its name.
 pub const END_W: f32 = 132.;
 pub const END_H: f32 = 28.;
-/// A fork: the question over the line, which splits at a dot.
-pub const FORK_W: f32 = 210.;
-pub const FORK_H: f32 = 100.;
-/// Where the line runs through a fork, from its top.
-pub const FORK_LINE: f32 = 70.;
-/// Where the fork's dot sits, from its left.
-pub const FORK_DOT: f32 = 14.;
 /// A card's inner padding across.
 pub const CARD_PAD: f32 = 12.;
 /// A gate's condition: its type size and line, the most lines it takes
@@ -42,8 +35,6 @@ pub const CARD_PAD: f32 = 12.;
 pub const CRITERION_SIZE: f32 = 11.5;
 pub const CRITERION_LINE: f32 = 17.;
 pub const CRITERION_MOST: usize = 10;
-/// How wide a gate's condition runs: the fork, past its dot.
-pub const CRITERION_W: f32 = FORK_W - FORK_DOT;
 /// A glyph's width for its size, roughly, for guessing how text wraps.
 pub const GLYPH: f32 = 0.62;
 /// A port's dot, and how near a drop must land to take it.
@@ -104,8 +95,6 @@ pub struct Wire {
     /// It returns to a step the run met already (Flow's loop), whichever
     /// way the cards stand: drawn dashed.
     pub back: bool,
-    /// Where a loop's words go: the middle of its run under the cards.
-    pub label: Option<P>,
 }
 
 impl Wire {
@@ -162,8 +151,8 @@ fn size(m: &Mission, flow: &Flow, id: &str, running: bool) -> Option<(Kind, f32,
         return Some((Kind::Step, STEP_W, h));
     }
     if let Some(g) = m.gates.iter().find(|g| g.id == id) {
-        let (w, h) = gate_size(&g.criterion);
-        return Some((Kind::Gate, w, h));
+        let f = gate_frame(&g.criterion);
+        return Some((Kind::Gate, f.w, f.h));
     }
     if m.ends.iter().any(|e| e.id == id) {
         return Some((Kind::End, END_W, END_H));
@@ -171,14 +160,10 @@ fn size(m: &Mission, flow: &Flow, id: &str, running: bool) -> Option<(Kind, f32,
     None
 }
 
-/// A fork grows up with its condition, which it shows whole past the two
-/// lines it has room for at its least.
-fn gate_size(criterion: &str) -> (f32, f32) {
-    let lines = criterion_lines(criterion, CRITERION_W);
-    (
-        FORK_W,
-        FORK_H + lines.saturating_sub(2) as f32 * CRITERION_LINE,
-    )
+/// A gate's card for its condition (`gate_art`), which grows down with
+/// the condition's lines.
+pub fn gate_frame(criterion: &str) -> super::gate_art::Frame {
+    super::gate_art::frame(criterion_lines(criterion, super::gate_art::MEASURE_W))
 }
 
 /// The lines `text` wraps to at `width`, word by word, at most
@@ -202,12 +187,6 @@ pub fn wrapped_lines(text: &str, width: f32) -> usize {
         }
     }
     lines + usize::from(used > 0)
-}
-
-/// Where the line runs through a fork of height `h`, from its top: a
-/// longer condition stands taller above it.
-pub fn fork_line(h: f32) -> f32 {
-    h - (FORK_H - FORK_LINE)
 }
 
 /// Run order, left to right in one row: what a card the layout misses
@@ -302,8 +281,8 @@ fn port_offset(m: &Mission, flow: &Flow, id: &str, port: &str, out: bool) -> Opt
 
 /// The mission laid out in reading rows for a view of `room` (width,
 /// height, in pixels): its run-order columns wrapped into the rows that
-/// draw its cards largest there, so a tall view gets a column of rows and
-/// a wide one a single row. When even the best wrap draws them smaller
+/// break the fewest loops and draw its cards largest there, so a tall view
+/// gets a column of rows and a wide one a single row. When even the best wrap draws them smaller
 /// than `floor`, the rows are as wide as still fit across at `floor`, and
 /// the board runs down past the view. Each card keeps the room `under`
 /// gives it beneath. Within a row the ways in stand on one line, so the
@@ -423,9 +402,8 @@ pub fn shaped(
         (room.0 / w).min(room.1 / h).min(1.)
     };
     let all = columns.len();
-    // A wire back to an earlier column, a loop, reads only when its two
-    // ends share a row: wrapped between rows it crosses the wire that
-    // wraps.
+    // A wire back to an earlier column, a loop, reads best when its two
+    // ends share a row.
     let column_of = |id: &str| {
         columns
             .iter()
@@ -440,25 +418,25 @@ pub fn shaped(
             (to <= from).then_some((from, to))
         })
         .collect();
-    let whole_loops = |n: usize| back.iter().all(|(a, b)| a / n == b / n);
-    // The fewest rows among those that draw it largest (the last of
-    // equals wins), keeping loops whole where that still reads.
-    let largest = |fits: &dyn Fn(usize) -> bool| {
-        (1..=all)
-            .filter(|n| fits(*n))
-            .max_by(|a, b| zoom(*a).total_cmp(&zoom(*b)))
-    };
-    let best = largest(&|_| true).unwrap_or(all);
-    let per_row = if let Some(n) = largest(&whole_loops).filter(|n| zoom(*n) >= floor) {
-        n
-    } else if zoom(best) >= floor {
-        best
-    } else {
-        (1..=all)
-            .rev()
-            .find(|n| room.0 / extent(*n).0 >= floor)
-            .unwrap_or(1)
-    };
+    let broken = |n: usize| back.iter().filter(|(a, b)| a / n != b / n).count();
+    // Among the wraps that read, the one that breaks the fewest loops,
+    // then draws it largest, then has the fewest rows. A loop between rows
+    // has to climb back past the row it leaves, so a smaller board that
+    // keeps it whole reads better than a larger one that breaks it.
+    let per_row = (1..=all)
+        .filter(|n| zoom(*n) >= floor)
+        .min_by(|a, b| {
+            broken(*a)
+                .cmp(&broken(*b))
+                .then(zoom(*b).total_cmp(&zoom(*a)))
+                .then(b.cmp(a))
+        })
+        .unwrap_or_else(|| {
+            (1..=all)
+                .rev()
+                .find(|n| room.0 / extent(*n).0 >= floor)
+                .unwrap_or(1)
+        });
     let drops = drops_for(per_row);
     let mut out = vec![];
     let mut y = MARGIN;
@@ -492,11 +470,19 @@ fn port_of(endpoint: &str) -> (&str, &str) {
 fn port_at(m: &Mission, c: &Card, port: &str, out: bool) -> P {
     let side = if out { c.x + c.w } else { c.x };
     match c.kind {
-        Kind::Gate => match port {
-            "pass" => (c.x + c.w, c.y + fork_line(c.h)),
-            "fail" => (c.x + FORK_DOT, c.y + c.h),
-            _ => (c.x, c.y + fork_line(c.h)),
-        },
+        Kind::Gate => {
+            let criterion = m
+                .gates
+                .iter()
+                .find(|g| g.id == c.id)
+                .map(|g| g.criterion.as_str());
+            let f = gate_frame(criterion.unwrap_or_default());
+            match port {
+                "pass" => (c.x + c.w, c.y + f.line_y),
+                "fail" => (c.x + f.fail_x, c.y + c.h),
+                _ => (c.x, c.y + f.line_y),
+            }
+        }
         Kind::Step => {
             let f = m.steps.iter().find(|f| f.id == c.id);
             let ports = f.map(|f| if out { &f.outputs } else { &f.inputs });
@@ -659,7 +645,6 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutCard], running: bool) -> 
             id: c.id.clone(),
             points,
             back,
-            label: None,
             route,
             from_card: from_card.to_string(),
             to_card: to_card.to_string(),
@@ -673,34 +658,102 @@ pub fn board(m: &Mission, flow: &Flow, layout: &[LayoutCard], running: bool) -> 
 
 /// A gate's fail back to a step it met already: down from the gate's
 /// foot, back along a lane under the cards between, and up into the step
-/// from its left. Its words go along that lane. The loops it finds no
-/// clear way for are returned.
+/// from its left. A step in a row above is reached round the rows' left
+/// edge (`climb`). Loops going back to one place nest, the nearest inside,
+/// so none crosses another. The loops it finds no clear way for are
+/// returned.
 fn route_under(wires: &mut [Wire], loops: &[usize], cards: &[Card]) -> Vec<usize> {
+    let mut order = loops.to_vec();
+    order.sort_by(|a, b| {
+        let (p, q) = (wires[*a].from(), wires[*b].from());
+        p.1.total_cmp(&q.1).then(p.0.total_cmp(&q.0))
+    });
+    let all: Vec<&Card> = cards.iter().collect();
     let mut stuck = vec![];
     let mut taken = 0.;
-    for &i in loops {
+    for i in order {
         let (from, to) = (wires[i].from(), wires[i].to());
         let back = to.0 - STUB - taken;
-        let (left, right) = (back.min(from.0), back.max(from.0));
-        let lane = cards
-            .iter()
-            .filter(|c| c.x < right + SPAN_PAD && c.x + c.w > left - SPAN_PAD)
-            .filter(|c| c.y < from.1 && c.y + c.h > to.1.min(from.1) - 1.)
-            .map(|c| c.y + c.h)
-            .fold(from.1, f32::max)
-            + LANE_CLEARANCE
-            + taken;
-        let points = vec![from, (from.0, lane), (back, lane), (back, to.1), to];
-        let all: Vec<&Card> = cards.iter().collect();
-        if back > from.0 || !clear(&points[1..points.len() - 1], &all) {
+        let target = cards.iter().find(|c| c.id == wires[i].to_card);
+        let points = match target {
+            Some(t) if t.y + t.h < from.1 - STUB => climb(from, to, back, t, cards, taken),
+            // Under the row, the step must stand back from the gate.
+            _ if back > from.0 => {
+                stuck.push(i);
+                continue;
+            }
+            _ => {
+                let (left, right) = (back.min(from.0), back.max(from.0));
+                let lane = cards
+                    .iter()
+                    .filter(|c| c.x < right + SPAN_PAD && c.x + c.w > left - SPAN_PAD)
+                    .filter(|c| c.y < from.1 && c.y + c.h > to.1.min(from.1) - 1.)
+                    .map(|c| c.y + c.h)
+                    .fold(from.1, f32::max)
+                    + LANE_CLEARANCE
+                    + taken;
+                vec![from, (from.0, lane), (back, lane), (back, to.1), to]
+            }
+        };
+        if !clear(&points[1..points.len() - 1], &all) {
             stuck.push(i);
             continue;
         }
-        wires[i].label = Some(((from.0 + back) / 2., lane));
         wires[i].points = points;
         taken += CHANNEL_GAP;
     }
     stuck
+}
+
+/// A loop back to `target` in a row above the gate it leaves: down from
+/// the gate's foot to a lane under its own row, back along it past the
+/// rows' left edge, outside the wires that drop into the rows there, up
+/// that edge to the gap under the target's row, along it, and up into the
+/// target from its left. `taken` moves it out a channel on every leg, so a
+/// loop placed later runs outside the earlier.
+fn climb(from: P, to: P, back: f32, target: &Card, cards: &[Card], taken: f32) -> Vec<P> {
+    let below = target.y + target.h;
+    // The rows it passes: everything under the target's row, down to the
+    // gate's own.
+    let passed: Vec<&Card> = cards
+        .iter()
+        .filter(|c| c.y > below && c.y < from.1)
+        .collect();
+    let edge = cards
+        .iter()
+        .filter(|c| c.y + c.h > target.y && c.y < from.1)
+        .map(|c| c.x)
+        .fold(back, f32::min)
+        - STUB
+        - CHANNEL_GAP
+        - taken;
+    // Under its own row: clear of every card it runs back under.
+    let mut lane = from.1 + LANE_CLEARANCE + taken;
+    while let Some(c) = passed
+        .iter()
+        .find(|c| hits((from.0, lane), (edge, lane), c, OBSTACLE_PAD))
+    {
+        lane = c.y + c.h + LANE_CLEARANCE + taken;
+    }
+    // Over the row under the target's, outside the wire that wraps into
+    // that row.
+    let gap = passed
+        .iter()
+        .filter(|c| c.x < back + SPAN_PAD)
+        .map(|c| c.y)
+        .fold(below + ROW_GAP, f32::min)
+        - LANE_CLEARANCE
+        - CHANNEL_GAP
+        - taken;
+    vec![
+        from,
+        (from.0, lane),
+        (edge, lane),
+        (edge, gap),
+        (back, gap),
+        (back, to.1),
+        to,
+    ]
 }
 
 /// Whether the segment a to b crosses `c` grown by `margin` (Liang-Barsky).
@@ -919,15 +972,8 @@ fn route_loops(wires: &mut [Wire], loops: &[usize], cards: &[Card]) {
             points = round;
         }
         placed.extend(legs(&points));
-        wires[i].label = Some(loop_label(&points));
         wires[i].points = points;
     }
-}
-
-/// Where a loop names what it returns to: at its first turn, beside the
-/// port it leaves, where the eye starts following it.
-fn loop_label(points: &[P]) -> P {
-    points.get(1).copied().unwrap_or(points[0])
 }
 
 /// Bends cost as much as this much length, so a way round prefers few.
@@ -1069,7 +1115,10 @@ pub fn new_size(kind: Kind) -> (f32, f32) {
     match kind {
         Kind::Input => (START, START),
         Kind::Step => (STEP_W, STEP_H),
-        Kind::Gate => gate_size(""),
+        Kind::Gate => {
+            let f = gate_frame("");
+            (f.w, f.h)
+        }
         Kind::End => (END_W, END_H),
         Kind::Limit => (0., 0.),
     }
@@ -1165,9 +1214,8 @@ mod tests {
         let fail = b.wires.iter().find(|w| w.route == "fail").unwrap();
         assert_eq!(fail.to_card, "fmn_beads");
         // Sent back, it drops from the gate and runs back under the cards
-        // it spans, just under them, dashed and saying how often along
-        // its lane.
-        assert!(fail.back && fail.label.is_some());
+        // it spans, just under them, dashed.
+        assert!(fail.back);
         let lane = fail.points.iter().map(|p| p.1).fold(f32::MIN, f32::max);
         let (left, right) = (fail.to().0, fail.from().0);
         let spanned: Vec<&Card> = b
@@ -1177,9 +1225,8 @@ mod tests {
             .collect();
         let foot = spanned.iter().map(|c| c.y + c.h).fold(f32::MIN, f32::max);
         assert!(lane > foot && lane < foot + 2. * LANE_CLEARANCE, "{lane}");
-        assert_eq!(fail.label.unwrap().1, lane);
         let pass = b.wires.iter().find(|w| w.route == "pass").unwrap();
-        assert!(!pass.back && pass.label.is_none());
+        assert!(!pass.back);
         assert_eq!(crossing(&b), Vec::<String>::new());
     }
 
@@ -1378,6 +1425,93 @@ mod tests {
                 "at {width} the loop's ends are on two rows: {step:?} and {gate:?}"
             );
         }
+    }
+
+    /// A fix that two gates send back to, the way a mission is usually
+    /// written: tests, then review, then the operator's word.
+    fn ship_a_fix() -> Mission {
+        serde_json::from_value(serde_json::json!({
+            "input_card": [{"id": "inp", "inputs": [{"name": "report"}]}],
+            "step": [{"id": "fix", "title": "Fix", "input": [{"id": "in"}], "output": [{"id": "out"}],
+                      "seat": [{"id": "s", "harness": "claude-code"}]}],
+            "gate": [
+                {"id": "tests", "kinds": ["code"], "criterion": "Every test in the workspace passes, including the new one that reproduces the bug."},
+                {"id": "review", "kinds": ["human"], "criterion": "The change fixes the cause rather than the symptom, touches nothing it does not need, and its test would catch the bug coming back."},
+                {"id": "ship", "kinds": ["human"], "criterion": "You have read the diff and the review, and you are happy for this to go out today."}
+            ],
+            "end": [{"id": "shipped", "outcome": "done"}, {"id": "held", "outcome": "rejected"}],
+            "limit": [{"id": "three", "scope": "fix", "rounds": 3, "when_spent": "fail"}],
+            "connection": [
+                {"id": "bug", "from": "inp:out", "to": "fix:in"},
+                {"id": "fixed", "from": "fix:out", "to": "tests:in"},
+                {"id": "red", "from": "tests:fail", "to": "fix:in"},
+                {"id": "green", "from": "tests:pass", "to": "review:in"},
+                {"id": "again", "from": "review:fail", "to": "fix:in"},
+                {"id": "reviewed", "from": "review:pass", "to": "ship:in"},
+                {"id": "ship", "from": "ship:pass", "to": "shipped:in"},
+                {"id": "hold", "from": "ship:fail", "to": "held:in"}
+            ]
+        }))
+        .unwrap()
+    }
+
+    /// Where a horizontal and a vertical run cross inside both.
+    fn cross((a1, a2): (P, P), (b1, b2): (P, P)) -> bool {
+        let (h, v) = if (a1.1 - a2.1).abs() < 0.5 {
+            ((a1, a2), (b1, b2))
+        } else {
+            ((b1, b2), (a1, a2))
+        };
+        let inside = |x: f32, p: f32, q: f32| x > p.min(q) + 0.5 && x < p.max(q) - 0.5;
+        (h.0.1 - h.1.1).abs() < 0.5
+            && (v.0.0 - v.1.0).abs() < 0.5
+            && inside(v.0.0, h.0.0, h.1.0)
+            && inside(h.0.1, v.0.1, v.1.1)
+    }
+
+    #[test]
+    fn loops_back_to_a_row_above_go_round_its_edge_and_never_tangle() {
+        // A narrow pane, as on a laptop with a panel open, wraps the
+        // mission; whatever the wrap, no wire crosses a card, no loop
+        // crosses another and none runs along another.
+        let m = ship_a_fix();
+        let flow = build(&m);
+        let mut climbed = 0;
+        for width in (500..=1300).step_by(25) {
+            for height in [600., 900.] {
+                let layout = shaped(&m, &flow, (width as f32, height), 0.8, &|_| 0.);
+                let b = board(&m, &flow, &layout, false);
+                assert_eq!(crossing(&b), Vec::<String>::new(), "at {width}x{height}");
+                let legs = |w: &Wire| -> Vec<(P, P)> {
+                    w.points[1..w.points.len() - 1]
+                        .windows(2)
+                        .map(|s| (s[0], s[1]))
+                        .collect()
+                };
+                let fix = b.cards.iter().find(|c| c.id == "fix").unwrap();
+                for a in b.wires.iter().filter(|w| w.back) {
+                    let gate = b.cards.iter().find(|c| c.id == a.from_card).unwrap();
+                    if gate.y > fix.y + fix.h {
+                        climbed += 1;
+                    }
+                    for other in b.wires.iter().filter(|w| w.id != a.id) {
+                        for p in legs(a) {
+                            for q in legs(other) {
+                                assert!(
+                                    !shares(p, q) && !(other.back && cross(p, q)),
+                                    "at {width}x{height} {} and {} meet: {:?} {:?}",
+                                    a.id,
+                                    other.id,
+                                    a.points,
+                                    other.points
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(climbed > 0, "some width puts a loop's gate under its step");
     }
 
     #[test]

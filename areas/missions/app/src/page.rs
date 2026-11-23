@@ -1,8 +1,10 @@
 mod activity;
 mod canvas;
+mod card_panel;
 mod editor_diff;
 mod edits;
 mod flow_view;
+mod gate_panel;
 mod manage;
 mod navigator;
 mod notes;
@@ -36,7 +38,6 @@ const PAD: f32 = 12.;
 const START_FORM_MAX: f32 = 680.;
 const TAB_GAP: f32 = 6.;
 const EDGE: f32 = 2.;
-const EDITOR_W: f32 = 360.;
 /// How long after the last keystroke the drawer applies an edit.
 const APPLY_AFTER: std::time::Duration = std::time::Duration::from_millis(600);
 /// A file opened from a run, beside it.
@@ -50,6 +51,10 @@ const FLOW_W: f32 = 380.;
 const FLOW_AT: f32 = FLOW_W + 680.;
 pub struct MissionsPage {
     host: Host,
+    /// The open card's panel, made the first time a card opens, and
+    /// whether it is lent to the window's edge panel now.
+    card_panel: Option<Entity<card_panel::CardPanel>>,
+    is_panel_lent: bool,
     focus: FocusHandle,
     state: Store,
     validation: crate::store::validation::Validation,
@@ -181,6 +186,8 @@ impl MissionsPage {
     pub fn new(host: Host, _: &mut Window, cx: &mut Context<Self>) -> Self {
         let page = Self {
             host,
+            card_panel: None,
+            is_panel_lent: false,
             focus: cx.focus_handle(),
             state: Store::default(),
             validation: Default::default(),
@@ -694,11 +701,9 @@ impl MissionsPage {
                 EditKind::Gate,
                 g.title.clone(),
                 g.criterion.clone(),
-                g.kinds
-                    .iter()
-                    .map(|kind| kind.as_str())
-                    .collect::<Vec<_>>()
-                    .join(","),
+                // Who decides is chosen on the gate's panel and saved as
+                // chosen; no field holds it.
+                String::new(),
                 Default::default(),
             )
         } else if let Some(e) = m.ends.iter().find(|e| e.id == id) {
@@ -1290,6 +1295,560 @@ impl MissionsPage {
         let patch = edits::delete_card_patch(ed.kind, &ed.id);
         self.write_board(patch, WriteMode::Edit, cx);
     }
+    /// The open card's panel, the page's column of the window's edge
+    /// panel: one header with its title, Delete, Done and Close.
+    pub(crate) fn editor_column(&mut self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let t = theme(cx).clone();
+        let ed = self.editor.as_ref()?;
+        let header = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(TAB_GAP))
+            .px(px(PAD))
+            .py(px(TAB_GAP))
+            .border_b_1()
+            .border_color(t.divider)
+            .child(
+                div()
+                    .flex_1()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(match ed.kind {
+                        EditKind::Step => "Edit step",
+                        EditKind::Input => "Edit input",
+                        EditKind::Gate => "Gate",
+                        EditKind::End => "Edit end",
+                    }),
+            )
+            .when(!ed.deleting, |d| {
+                d.child(left(
+                    kit::button(&t, "step-delete", "Delete", Kind::Quiet)
+                        .debug_selector(|| "step-delete".into())
+                        .on_click(cx.listener(|p, _, _, cx| p.delete_card(cx))),
+                ))
+            })
+            .child(
+                kit::button(&t, "step-save", "Done", Kind::Primary)
+                    .debug_selector(|| "step-save".into())
+                    .on_click(cx.listener(|p, _, _, cx| p.save_step(cx))),
+            )
+            .child(
+                kit::button(&t, "panel-close", "×", Kind::Quiet)
+                    .debug_selector(|| "panel-close".into())
+                    .on_click(cx.listener(|p, _, window, cx| p.close_editor(window, cx))),
+            );
+        let body = div()
+            .id("step-editor")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .p(px(PAD))
+            .flex()
+            .flex_col()
+            .gap(px(TAB_GAP))
+            .when(ed.deleting, |d| {
+                d.child(
+                    div()
+                        .child("Delete this card? Its wires go with it; Undo brings both back.")
+                        .child(left(
+                            kit::button(&t, "delete-keep", "Keep", Kind::Quiet)
+                                .debug_selector(|| "delete-keep".into())
+                                .on_click(cx.listener(|p, _, _, cx| {
+                                    if let Some(ed) = &mut p.editor {
+                                        ed.deleting = false;
+                                    }
+                                    cx.notify();
+                                })),
+                        ))
+                        .child(left(
+                            kit::button(&t, "delete-yes", "Delete", Kind::Quiet)
+                                .debug_selector(|| "delete-yes".into())
+                                .on_click(cx.listener(|p, _, _, cx| p.delete_card(cx))),
+                        )),
+                )
+            })
+            .when(matches!(ed.kind, EditKind::Step), |d| {
+                let id = ed.id.clone();
+                d.child(left(
+                    kit::button(&t, "run-step", "Run this step", Kind::Quiet).on_click(
+                        cx.listener(move |p, _, window, cx| {
+                            p.run.start_at = Some(Spot::here(window, cx));
+                            p.prepare_step_run(id.clone(), cx)
+                        }),
+                    ),
+                ))
+            })
+            .when(matches!(ed.kind, EditKind::Step), |mut d| {
+                if let Some((node, slug)) = &self.state.selected
+                    && let Some(feed) = self.state.nodes.get(node)
+                {
+                    for seat in feed
+                        .runs
+                        .values()
+                        .filter(|run| &run.mission_slug == slug)
+                        .flat_map(crate::store::seats::seats)
+                        .filter(|seat| {
+                            seat.step == ed.id && seat.state == crate::store::seats::State::Live
+                        })
+                    {
+                        d = d.children(self.seat_control(&t, seat, "step"));
+                    }
+                }
+                d
+            })
+            .children(
+                matches!(ed.kind, EditKind::Gate)
+                    .then(|| self.gate_run_part(&t, &ed.id, cx))
+                    .flatten(),
+            )
+            .child(kit::label(&t, "Title"))
+            .child(
+                div()
+                    .debug_selector(|| "step-title".into())
+                    .child(self.title.clone()),
+            )
+            .child(kit::label(
+                &t,
+                match ed.kind {
+                    EditKind::Step => "Brief",
+                    EditKind::Input => "Goal",
+                    EditKind::Gate => "Lets through when",
+                    EditKind::End => "Description",
+                },
+            ))
+            .child(
+                div()
+                    .debug_selector(|| "step-goal".into())
+                    .child(self.goal.clone()),
+            )
+            .children(
+                matches!(ed.kind, EditKind::Gate)
+                    .then(|| self.gate_decider_part(&t, &ed.id, cx))
+                    .flatten(),
+            )
+            .children(
+                matches!(ed.kind, EditKind::Gate)
+                    .then(|| self.gate_fail_part(&t, &ed.id, cx))
+                    .flatten(),
+            )
+            // Who does the step comes first: it is what a new step lacks.
+            .when(matches!(ed.kind, EditKind::Step), |mut d| {
+                if let Some(f) = self
+                    .state
+                    .mission
+                    .as_ref()
+                    .and_then(|m| m.steps.iter().find(|f| f.id == ed.id))
+                {
+                    d = d.child(kit::label(&t, "Agents"));
+                    for seat in &f.seats {
+                        let id = seat.id.clone();
+                        let selected = id.clone();
+                        let selector = format!("seat-{id}");
+                        d = d.child(left(
+                            kit::button(
+                                &t,
+                                gpui::SharedString::from(format!("seat-{id}")),
+                                crate::store::words::seat_label(seat),
+                                Kind::Quiet,
+                            )
+                            .debug_selector(move || selector.clone())
+                            .on_click(cx.listener(move |p, _, _, cx| p.select_seat(&selected, cx))),
+                        ));
+                    }
+                }
+                d
+            })
+            .when(
+                matches!(ed.kind, EditKind::Step) && self.seat.is_some(),
+                |d| d.child(self.seat_pickers(&t, cx)),
+            )
+            .when(
+                matches!(ed.kind, EditKind::Step) && !self.editor_more,
+                |d| {
+                    d.child(left(
+                        kit::button(&t, "step-more", "More…", Kind::Quiet)
+                            .debug_selector(|| "step-more".into())
+                            .on_click(cx.listener(|p, _, _, cx| {
+                                p.editor_more = true;
+                                cx.notify();
+                            })),
+                    ))
+                },
+            )
+            .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| {
+                d.child(kit::label(&t, "Team"))
+                    .child({
+                        let current = self
+                            .state
+                            .mission
+                            .as_ref()
+                            .and_then(|m| m.steps.iter().find(|f| f.id == ed.id))
+                            .map(|f| f.formation);
+                        let pick = |id: &'static str, text: &'static str, ty: Formation| {
+                            kit::button(
+                                &t,
+                                id,
+                                text,
+                                if current == Some(ty) {
+                                    Kind::Plain
+                                } else {
+                                    Kind::Quiet
+                                },
+                            )
+                            .on_click(cx.listener(move |p, _, _, cx| p.set_formation(ty, cx)))
+                        };
+                        div()
+                            .flex()
+                            .gap(px(TAB_GAP))
+                            .child(pick("formation-solo", "Solo", Formation::Solo))
+                            .child(pick("formation-peer", "Peer", Formation::Peer))
+                            .child(pick(
+                                "formation-orchestrated",
+                                "Orchestrated",
+                                Formation::Orchestrated,
+                            ))
+                    })
+                    .child(kit::label(&t, "Environment"))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(TAB_GAP))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .debug_selector(|| "step-environment".into())
+                                    .child(self.extra.clone()),
+                            )
+                            .child(left(
+                                kit::button(&t, "set-environment", "Set environment", Kind::Quiet)
+                                    .on_click(cx.listener(|p, _, _, cx| p.set_environment(cx))),
+                            )),
+                    )
+            })
+            .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| {
+                d.child(kit::label(&t, "Repository"))
+                    .child(self.repository_picker(&t, &self.repository, "repository", cx))
+                    .child(kit::label(&t, "Issue"))
+                    .child(div().child(self.issue.clone()))
+                    .child(kit::label(&t, "Files"))
+                    .child(div().child(self.files.clone()))
+                    .child(kit::label(&t, "Links"))
+                    .child(div().child(self.links.clone()))
+            })
+            .when(!matches!(ed.kind, EditKind::Step | EditKind::Gate), |d| {
+                d.child(kit::label(
+                    &t,
+                    match ed.kind {
+                        EditKind::Input => "Human channel",
+                        EditKind::End => "Outcome",
+                        _ => "",
+                    },
+                ))
+                .child(
+                    div()
+                        .debug_selector(|| "step-extra".into())
+                        .child(self.extra.clone()),
+                )
+            })
+            .when(
+                matches!(ed.kind, EditKind::Step) && self.editor_more,
+                |mut d| {
+                    if let Some(f) = self
+                        .state
+                        .mission
+                        .as_ref()
+                        .and_then(|m| m.steps.iter().find(|f| f.id == ed.id))
+                    {
+                        d = d.child(kit::label(&t, "Ports"));
+                        for (dir, port) in f
+                            .inputs
+                            .iter()
+                            .map(|p| ("in", p))
+                            .chain(f.outputs.iter().map(|p| ("out", p)))
+                        {
+                            let id = port.id.clone();
+                            let selected = id.clone();
+                            let label = port.label.clone();
+                            let kind = port.kind;
+                            let selector = format!("port-{id}");
+                            d = d.child(left(
+                                kit::button(
+                                    &t,
+                                    gpui::SharedString::from(format!("port-{id}")),
+                                    format!(
+                                        "{dir} · {}",
+                                        if port.label.trim().is_empty() {
+                                            &id
+                                        } else {
+                                            &port.label
+                                        }
+                                    ),
+                                    Kind::Quiet,
+                                )
+                                .debug_selector(move || selector.clone())
+                                .on_click(cx.listener(
+                                    move |p, _, _, cx| {
+                                        p.select_port(&selected, &label, kind.as_str(), cx);
+                                    },
+                                )),
+                            ));
+                        }
+                        d = d
+                            .child(div().child(self.port_label.clone()))
+                            .child(div().child(self.port_kind.clone()))
+                            .child(left(
+                                kit::button(&t, "port-add-in", "+ Input port", Kind::Quiet)
+                                    .on_click(cx.listener(|p, _, _, cx| p.port_edit("input", cx))),
+                            ))
+                            .child(left(
+                                kit::button(&t, "port-add-out", "+ Output port", Kind::Quiet)
+                                    .on_click(cx.listener(|p, _, _, cx| p.port_edit("output", cx))),
+                            ))
+                            .when(self.port.is_some(), |d| {
+                                d.child(left(
+                                    kit::button(&t, "port-update", "Rename port", Kind::Quiet)
+                                        .on_click(
+                                            cx.listener(|p, _, _, cx| p.port_edit("update", cx)),
+                                        ),
+                                ))
+                                .child(left(
+                                    kit::button(&t, "port-remove", "Remove port", Kind::Quiet)
+                                        .debug_selector(|| "port-remove".into())
+                                        .on_click(
+                                            cx.listener(|p, _, _, cx| p.port_edit("remove", cx)),
+                                        ),
+                                ))
+                            });
+                    }
+                    d
+                },
+            )
+            .when(
+                matches!(ed.kind, EditKind::Input)
+                    || (matches!(ed.kind, EditKind::Step) && self.editor_more),
+                |mut d| {
+                    d = d.child(kit::label(&t, "Limits"));
+                    if let Some(mission) = &self.state.mission {
+                        for limit in mission.limits.iter().filter(|l| l.scope == ed.id) {
+                            let id = limit.id.clone();
+                            let selected = id.clone();
+                            d = d.child(left(
+                                kit::button(
+                                    &t,
+                                    gpui::SharedString::from(format!("limit-{id}")),
+                                    limit.title.clone(),
+                                    Kind::Quiet,
+                                )
+                                .on_click(
+                                    cx.listener(move |p, _, _, cx| p.select_limit(&selected, cx)),
+                                ),
+                            ));
+                        }
+                    }
+                    d = d.child(left(
+                        kit::button(&t, "create-limit", "Add limit", Kind::Quiet)
+                            .on_click(cx.listener(|p, _, _, cx| p.limit_action("create", cx))),
+                    ));
+                    d.when(self.limit.is_some(), |d| {
+                        d.child(div().child(self.limit_title.clone()))
+                            .child(div().child(self.limit_rounds.clone()))
+                            .child(div().child(self.limit_seconds.clone()))
+                            .child(div().child(self.limit_warn.clone()))
+                            .child(div().child(self.limit_tokens.clone()))
+                            .child(div().child(self.limit_spent.clone()))
+                            .child(left(
+                                kit::button(&t, "save-limit", "Save limit", Kind::Quiet).on_click(
+                                    cx.listener(|p, _, _, cx| p.limit_action("save", cx)),
+                                ),
+                            ))
+                            .child(left(
+                                kit::button(&t, "delete-limit", "Delete limit", Kind::Quiet)
+                                    .on_click(
+                                        cx.listener(|p, _, _, cx| p.limit_action("delete", cx)),
+                                    ),
+                            ))
+                    })
+                },
+            )
+            .when(matches!(ed.kind, EditKind::Input), |mut d| {
+                d = d.child(kit::label(&t, "Outputs"));
+                for (i, output) in ed.outputs.iter().enumerate() {
+                    d = d
+                        .child(div().child(output.name.clone()))
+                        .child(div().child(output.description.clone()))
+                        .child(left(
+                            kit::button(
+                                &t,
+                                ("required", i),
+                                if output.required {
+                                    "Required"
+                                } else {
+                                    "Optional"
+                                },
+                                Kind::Quiet,
+                            )
+                            .on_click(cx.listener(
+                                move |p, _, _, cx| {
+                                    if let Some(e) = &mut p.editor
+                                        && let Some(o) = e.outputs.get_mut(i)
+                                    {
+                                        o.required = !o.required;
+                                    }
+                                    cx.notify();
+                                },
+                            )),
+                        ))
+                        .child(left(
+                            kit::button(&t, ("remove-output", i), "Remove output", Kind::Quiet)
+                                .on_click(cx.listener(move |p, _, _, cx| {
+                                    if let Some(e) = &mut p.editor
+                                        && i < e.outputs.len()
+                                    {
+                                        e.outputs.remove(i);
+                                    }
+                                    cx.notify();
+                                })),
+                        ))
+                        .child(div().child(output.kind.clone()))
+                        .child(div().child(output.from.clone()));
+                }
+                d.child(left(
+                    kit::button(&t, "add-output", "Add output", Kind::Quiet)
+                        .on_click(cx.listener(|p, _, _, cx| p.add_output(cx))),
+                ))
+            })
+            .when_some(
+                self.notes
+                    .as_ref()
+                    .filter(|_| self.editor_more || !matches!(ed.kind, EditKind::Step)),
+                |mut d, notes| {
+                    d = d.child(kit::label(&t, "Notes"));
+                    if let Some(thread) = notes.elements.iter().find(|n| n.card_id == ed.id) {
+                        for note in &thread.entries {
+                            let id = note.id.clone();
+                            let selected = id.clone();
+                            let text = note.text.clone();
+                            if note.author == "human:ui" {
+                                d = d.child(left(
+                                    kit::button(
+                                        &t,
+                                        gpui::SharedString::from(format!("note-{id}")),
+                                        note.text.clone(),
+                                        Kind::Quiet,
+                                    )
+                                    .on_click(cx.listener(
+                                        move |p, _, _, cx| {
+                                            p.select_note(&selected, &text, cx);
+                                        },
+                                    )),
+                                ));
+                            } else {
+                                d = d.child(div().child(note.text.clone()));
+                            }
+                        }
+                    }
+                    d.child(div().child(self.note.clone()))
+                        .child(left(
+                            kit::button(
+                                &t,
+                                "add-note",
+                                if self.note_id.is_some() {
+                                    "Save note"
+                                } else {
+                                    "Add note"
+                                },
+                                Kind::Quiet,
+                            )
+                            .on_click(cx.listener(|p, _, _, cx| p.add_note(false, cx))),
+                        ))
+                        .when(
+                            self.note_id.is_some() || self.note.read(cx).text != self.note_base,
+                            |d| {
+                                d.child(left(
+                                    kit::button(
+                                        &t,
+                                        "note-cancel",
+                                        "Discard note draft",
+                                        Kind::Quiet,
+                                    )
+                                    .on_click(cx.listener(|p, _, _, cx| p.discard_note(cx))),
+                                ))
+                            },
+                        )
+                        .when(self.note_id.is_some(), |d| {
+                            d.child(left(
+                                kit::button(&t, "delete-note", "Delete note", Kind::Quiet)
+                                    .on_click(cx.listener(|p, _, _, cx| p.add_note(true, cx))),
+                            ))
+                        })
+                },
+            )
+            .when_some(ed.error.clone(), |d, error| {
+                d.child(
+                    div()
+                        .debug_selector({
+                            let error = error.clone();
+                            move || format!("step-error-{error}")
+                        })
+                        .text_color(t.error)
+                        .child(crate::store::validation::plain_error(
+                            self.state.mission.as_ref(),
+                            &error,
+                        )),
+                )
+            });
+        Some(
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(header)
+                .child(body)
+                .into_any_element(),
+        )
+    }
+
+    /// Lends the open card's panel to the window's edge panel while a card
+    /// is open, opening the edge panel for it, and takes it back after.
+    fn lend_card_panel(&mut self, cx: &mut Context<Self>) {
+        let is_open = self.editor.is_some();
+        if is_open == self.is_panel_lent {
+            return;
+        }
+        self.is_panel_lent = is_open;
+        let page = cx.entity();
+        let panel = self
+            .card_panel
+            .get_or_insert_with(|| cx.new(|cx| card_panel::CardPanel::new(&page, cx)))
+            .clone();
+        let host = self.host.clone();
+        cx.defer(move |cx| {
+            if is_open {
+                host.lend_panel(
+                    panel.into(),
+                    ahjo_app_kit::hub::SideOn::OwnPage,
+                    ahjo_app_kit::hub::Edge::Right,
+                    cx,
+                );
+                host.set_panel_open(true, cx);
+            } else {
+                host.take_panel(cx);
+            }
+        });
+    }
+
+    /// Puts the open card's panel away, unless its draft is unsaved, and
+    /// gives the keyboard back to the board.
+    pub(crate) fn close_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.unsaved(cx).is_none() {
+            self.editor = None;
+            self.resolve_wanted(cx);
+            window.focus(&self.focus, cx);
+        } else {
+            self.state.error = Some("Save or discard the current draft first.".into());
+        }
+        cx.notify();
+    }
     fn save_step(&mut self, cx: &mut Context<Self>) {
         if let Some(editor) = &mut self.editor {
             editor.keep_open = false;
@@ -1456,6 +2015,7 @@ impl Render for MissionsPage {
         self.sync_validation(cx);
         let t = theme(cx).clone();
         self.choose_first(cx);
+        self.lend_card_panel(cx);
         let side = self.host.side_room(cx);
         let room = f32::from(window.viewport_size().width) - side - size::LIST;
         let list = self.render_navigator(&t, cx);
@@ -1632,15 +2192,26 @@ impl Render for MissionsPage {
             .id("missions-root")
             .track_focus(&self.focus)
             .relative()
-            .on_mouse_down(MouseButton::Left, cx.listener(|page, _, window, cx| {
-                if window.focused(cx).is_none() { window.focus(&page.focus, cx); }
-            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|page, _, window, cx| {
+                    if window.focused(cx).is_none() {
+                        window.focus(&page.focus, cx);
+                    }
+                }),
+            )
             .on_key_down(cx.listener(|page, event: &KeyDownEvent, window, cx| {
                 let key = &event.keystroke;
-                if (key.modifiers.control || key.modifiers.platform) && (key.key == "z" || key.key == "y") && window.focused(cx).is_some_and(|focus| focus == page.focus) {
+                if (key.modifiers.control || key.modifiers.platform)
+                    && (key.key == "z" || key.key == "y")
+                    && window.focused(cx).is_some_and(|focus| focus == page.focus)
+                {
                     page.step_history(key.key == "y" || key.modifiers.shift, cx);
                     cx.stop_propagation();
-                } else if let Some(zoom) = ahjo_app_kit::zoom::from_key(key).filter(|_| page.state.mission.is_some() && window.focused(cx).is_some_and(|focus| focus == page.focus)) {
+                } else if let Some(zoom) = ahjo_app_kit::zoom::from_key(key).filter(|_| {
+                    page.state.mission.is_some()
+                        && window.focused(cx).is_some_and(|focus| focus == page.focus)
+                }) {
                     // The canvas zooms as every surface does; Ctrl+0 goes
                     // back to the view it opened at.
                     match zoom {
@@ -1651,14 +2222,15 @@ impl Render for MissionsPage {
                     cx.stop_propagation();
                     cx.notify();
                 } else if key.key == "escape" {
-                    if page.canvas.close_menu() { cx.notify(); }
-                    else if page.manage_is_open() { page.close_manage(cx); }
-                    else if page.note_paper.open.is_some() { page.close_canvas_note(cx); }
-                    else if page.escape_run(cx) {}
-                    else if page.editor.is_some() {
-                        if page.unsaved(cx).is_none() { page.editor = None; page.resolve_wanted(cx); }
-                        else { page.state.error = Some("Save or discard the current draft first.".into()); }
+                    if page.canvas.close_menu() {
                         cx.notify();
+                    } else if page.manage_is_open() {
+                        page.close_manage(cx);
+                    } else if page.note_paper.open.is_some() {
+                        page.close_canvas_note(cx);
+                    } else if page.escape_run(cx) {
+                    } else if page.editor.is_some() {
+                        page.close_editor(window, cx);
                     }
                     cx.stop_propagation();
                 }
@@ -1676,151 +2248,6 @@ impl Render for MissionsPage {
                         .border_l_1()
                         .border_color(t.divider)
                         .child(beside),
-                )
-            })
-            .when_some(self.editor.as_ref(), |root, ed| {
-                root.child(
-                    div()
-                        .id("step-editor")
-                        .overflow_y_scroll()
-                        .w(px(EDITOR_W))
-                        .flex_none()
-                        .p(px(PAD))
-                        .flex()
-                        .flex_col()
-                        .gap(px(TAB_GAP))
-                        .border_l_1()
-                        .border_color(t.divider)
-                        .bg(t.surface)
-                        .child(div().flex().items_center().gap(px(TAB_GAP)).pb(px(TAB_GAP))
-                            .child(div().flex_1().font_weight(FontWeight::SEMIBOLD).child(match ed.kind {
-                                EditKind::Step => "Edit step",
-                                EditKind::Input => "Edit input",
-                                EditKind::Gate => "Edit gate",
-                                EditKind::End => "Edit end",
-                            }))
-                            .when(!ed.deleting, |d| d.child(left(kit::button(&t, "step-delete", "Delete", Kind::Quiet).debug_selector(|| "step-delete".into()).on_click(cx.listener(|p, _, _, cx| p.delete_card(cx))))))
-
-                            .child(
-                                kit::button(&t, "step-save", "Done", Kind::Primary)
-                                    .debug_selector(|| "step-save".into())
-                                    .on_click(cx.listener(|p, _, _, cx| p.save_step(cx))),
-                            ))
-                        .when(ed.deleting, |d| d.child(div().child("Delete this card? Its wires go with it; Undo brings both back.").child(left(kit::button(&t, "delete-keep", "Keep", Kind::Quiet).debug_selector(|| "delete-keep".into()).on_click(cx.listener(|p, _, _, cx| { if let Some(ed) = &mut p.editor { ed.deleting = false; } cx.notify(); })))).child(left(kit::button(&t, "delete-yes", "Delete", Kind::Quiet).debug_selector(|| "delete-yes".into()).on_click(cx.listener(|p, _, _, cx| p.delete_card(cx)))))))
-                        .when(matches!(ed.kind, EditKind::Step), |d| { let id = ed.id.clone(); d.child(left(kit::button(&t, "run-step", "Run this step", Kind::Quiet).on_click(cx.listener(move |p, _, window, cx| { p.run.start_at = Some(Spot::here(window, cx)); p.prepare_step_run(id.clone(), cx) })))) })
-                        .when(matches!(ed.kind, EditKind::Step), |mut d| {
-                            if let Some((node, slug)) = &self.state.selected && let Some(feed) = self.state.nodes.get(node) {
-                                for seat in feed.runs.values().filter(|run| &run.mission_slug == slug).flat_map(crate::store::seats::seats).filter(|seat| seat.step == ed.id && seat.state == crate::store::seats::State::Live) {
-                                    d = d.children(self.seat_control(&t, seat, "step"));
-                                }
-                            }
-                            d
-                        })
-                        .child(kit::label(&t, "Title"))
-                        .child(
-                            div()
-                                .debug_selector(|| "step-title".into())
-                                .child(self.title.clone()),
-                        )
-                        .child(kit::label(&t, match ed.kind {
-                            EditKind::Step => "Brief",
-                            EditKind::Input => "Goal",
-                            EditKind::Gate => "Criterion",
-                            EditKind::End => "Description",
-                        }))
-                        .child(
-                            div()
-                                .debug_selector(|| "step-goal".into())
-                                .child(self.goal.clone()),
-                        )
-                        // Who does the step comes first: it is what a new step lacks.
-                        .when(matches!(ed.kind, EditKind::Step), |mut d| {
-                            if let Some(f) = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)) {
-                                d = d.child(kit::label(&t, "Agents"));
-                                for seat in &f.seats {
-                                    let id = seat.id.clone(); let selected = id.clone(); let selector = format!("seat-{id}");
-                                    d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("seat-{id}")), crate::store::words::seat_label(seat), Kind::Quiet).debug_selector(move || selector.clone()).on_click(cx.listener(move |p, _, _, cx| p.select_seat(&selected, cx)))));
-                                }
-                            }
-                            d
-                        })
-                        .when(matches!(ed.kind, EditKind::Step) && self.seat.is_some(), |d| d.child(self.seat_pickers(&t, cx)))
-                        .when(matches!(ed.kind, EditKind::Step) && !self.editor_more, |d| d.child(left(kit::button(&t, "step-more", "More…", Kind::Quiet).debug_selector(|| "step-more".into()).on_click(cx.listener(|p, _, _, cx| { p.editor_more = true; cx.notify(); })))))
-                        .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Team"))
-                            .child({ let current = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)).map(|f| f.formation); let pick = |id: &'static str, text: &'static str, ty: Formation| kit::button(&t, id, text, if current == Some(ty) { Kind::Plain } else { Kind::Quiet }).on_click(cx.listener(move |p, _, _, cx| p.set_formation(ty, cx))); div().flex().gap(px(TAB_GAP)).child(pick("formation-solo", "Solo", Formation::Solo)).child(pick("formation-peer", "Peer", Formation::Peer)).child(pick("formation-orchestrated", "Orchestrated", Formation::Orchestrated)) })
-                            .child(kit::label(&t, "Environment")).child(div().flex().gap(px(TAB_GAP)).child(div().flex_1().debug_selector(|| "step-environment".into()).child(self.extra.clone()))
-                            .child(left(kit::button(&t, "set-environment", "Set environment", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.set_environment(cx)))))))
-                        .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |d| d.child(kit::label(&t, "Repository")).child(self.repository_picker(&t, &self.repository, "repository", cx))
-                            .child(kit::label(&t, "Issue")).child(div().child(self.issue.clone()))
-                            .child(kit::label(&t, "Files")).child(div().child(self.files.clone()))
-                            .child(kit::label(&t, "Links")).child(div().child(self.links.clone())))
-                        .when(!matches!(ed.kind, EditKind::Step), |d| {
-                            d.child(kit::label(&t, match ed.kind {
-                                EditKind::Input => "Human channel",
-                                EditKind::Gate => "Kinds (comma separated)",
-                                EditKind::End => "Outcome",
-                                _ => "",
-                            }))
-                            .child(div().debug_selector(|| "step-extra".into()).child(self.extra.clone()))
-                        })
-                        .when(matches!(ed.kind, EditKind::Step) && self.editor_more, |mut d| {
-                            if let Some(f) = self.state.mission.as_ref().and_then(|m| m.steps.iter().find(|f| f.id == ed.id)) {
-                                d = d.child(kit::label(&t, "Ports"));
-                                for (dir, port) in f.inputs.iter().map(|p| ("in", p)).chain(f.outputs.iter().map(|p| ("out", p))) {
-                                    let id = port.id.clone(); let selected = id.clone(); let label = port.label.clone(); let kind = port.kind; let selector = format!("port-{id}");
-                                    d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("port-{id}")), format!("{dir} · {}", if port.label.trim().is_empty() { &id } else { &port.label }), Kind::Quiet).debug_selector(move || selector.clone()).on_click(cx.listener(move |p, _, _, cx| { p.select_port(&selected, &label, kind.as_str(), cx); }))));
-                                }
-                                d = d.child(div().child(self.port_label.clone())).child(div().child(self.port_kind.clone()))
-                                    .child(left(kit::button(&t, "port-add-in", "+ Input port", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.port_edit("input", cx)))))
-                                    .child(left(kit::button(&t, "port-add-out", "+ Output port", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.port_edit("output", cx)))))
-                                    .when(self.port.is_some(), |d| d.child(left(kit::button(&t, "port-update", "Rename port", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.port_edit("update", cx))))).child(left(kit::button(&t, "port-remove", "Remove port", Kind::Quiet).debug_selector(|| "port-remove".into()).on_click(cx.listener(|p, _, _, cx| p.port_edit("remove", cx))))))
-                                    ;
-                            }
-                            d
-                        })
-                        .when(matches!(ed.kind, EditKind::Input) || (matches!(ed.kind, EditKind::Step) && self.editor_more), |mut d| {
-                            d = d.child(kit::label(&t, "Limits"));
-                            if let Some(mission) = &self.state.mission { for limit in mission.limits.iter().filter(|l| l.scope == ed.id) {
-                                let id = limit.id.clone(); let selected = id.clone();
-                                d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("limit-{id}")), limit.title.clone(), Kind::Quiet).on_click(cx.listener(move |p, _, _, cx| p.select_limit(&selected, cx)))));
-                            } }
-                            d = d.child(left(kit::button(&t, "create-limit", "Add limit", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.limit_action("create", cx)))));
-                            d.when(self.limit.is_some(), |d| d.child(div().child(self.limit_title.clone())).child(div().child(self.limit_rounds.clone())).child(div().child(self.limit_seconds.clone())).child(div().child(self.limit_warn.clone())).child(div().child(self.limit_tokens.clone())).child(div().child(self.limit_spent.clone())).child(left(kit::button(&t, "save-limit", "Save limit", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.limit_action("save", cx))))).child(left(kit::button(&t, "delete-limit", "Delete limit", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.limit_action("delete", cx))))) )
-                        })
-                        .when(matches!(ed.kind, EditKind::Input), |mut d| {
-                            d = d.child(kit::label(&t, "Outputs"));
-                            for (i, output) in ed.outputs.iter().enumerate() {
-                                d = d.child(div().child(output.name.clone())).child(div().child(output.description.clone()))
-                                    .child(left(kit::button(&t, ("required", i), if output.required { "Required" } else { "Optional" }, Kind::Quiet).on_click(cx.listener(move |p, _, _, cx| { if let Some(e) = &mut p.editor && let Some(o) = e.outputs.get_mut(i) { o.required = !o.required; } cx.notify(); }))))
-                                    .child(left(kit::button(&t, ("remove-output", i), "Remove output", Kind::Quiet).on_click(cx.listener(move |p, _, _, cx| { if let Some(e) = &mut p.editor && i < e.outputs.len() { e.outputs.remove(i); } cx.notify(); }))))
-                                     .child(div().child(output.kind.clone())).child(div().child(output.from.clone()));
-                            }
-                            d.child(left(kit::button(&t, "add-output", "Add output", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.add_output(cx)))))
-                        })
-                        .when(matches!(ed.kind, EditKind::Gate), |d| d.child(kit::label(&t, "Check profile")).child(div().child(self.check.clone())).child(kit::label(&t, "Profile version")).child(div().child(self.check_version.clone())).child(kit::label(&t, "Check value")).child(div().child(self.check_value.clone())).child(kit::label(&t, "Files")).child(div().child(self.files.clone())))
-                        .when_some(self.notes.as_ref().filter(|_| self.editor_more || !matches!(ed.kind, EditKind::Step)), |mut d, notes| {
-                            d = d.child(kit::label(&t, "Notes"));
-                            if let Some(thread) = notes.elements.iter().find(|n| n.card_id == ed.id) {
-                                for note in &thread.entries {
-                                    let id = note.id.clone(); let selected = id.clone(); let text = note.text.clone();
-                                    if note.author == "human:ui" {
-                                        d = d.child(left(kit::button(&t, gpui::SharedString::from(format!("note-{id}")), note.text.clone(), Kind::Quiet).on_click(cx.listener(move |p, _, _, cx| { p.select_note(&selected, &text, cx); }))));
-                                    } else { d = d.child(div().child(note.text.clone())); }
-                                }
-                            }
-                            d.child(div().child(self.note.clone()))
-                                .child(left(kit::button(&t, "add-note", if self.note_id.is_some() { "Save note" } else { "Add note" }, Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.add_note(false, cx)))))
-                                .when(self.note_id.is_some() || self.note.read(cx).text != self.note_base, |d| d.child(left(kit::button(&t, "note-cancel", "Discard note draft", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.discard_note(cx))))))
-                                .when(self.note_id.is_some(), |d| d.child(left(kit::button(&t, "delete-note", "Delete note", Kind::Quiet).on_click(cx.listener(|p, _, _, cx| p.add_note(true, cx))))))
-                        })
-                        .when_some(ed.error.clone(), |d, error| {
-                            d.child(
-                                div()
-                                    .debug_selector({ let error = error.clone(); move || format!("step-error-{error}") })
-                                    .text_color(t.error)
-                                    .child(crate::store::validation::plain_error(self.state.mission.as_ref(), &error)),
-                            )
-                        })
                 )
             })
             .children(start_form)

@@ -99,9 +99,11 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let at = cx.debug_bounds(selector).expect(selector).center();
     cx.simulate_click(at, Modifiers::none());
 }
+/// Scrolls the open card's panel, at the window's edge.
 fn scroll(cx: &mut VisualTestContext, delta: f32) {
+    let panel = cx.debug_bounds("card-panel").expect("card-panel");
     cx.simulate_event(gpui::ScrollEvent {
-        position: point(px(1100.), px(500.)),
+        position: point(panel.center().x, px(500.)),
         delta: gpui::ScrollDelta::Pixels(point(px(0.), px(delta))),
         modifiers: Default::default(),
         touch_phase: gpui::TouchPhase::Moved,

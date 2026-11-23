@@ -281,13 +281,14 @@ fn designs_a_multi_gate_mission_and_shows_findings_on_the_canvas(cx: &mut TestAp
     until(cx, "judge gate card", |cx| has(cx, &gate));
     click(cx, &gate);
     cx.run_until_parked();
-    until(cx, "gate editor", |cx| has(cx, "step-extra"));
-    click(cx, "step-extra");
-    cx.simulate_keystrokes("ctrl-a");
-    cx.simulate_input("step");
+    // Who decides is chosen on the gate's panel, and saved as chosen.
+    until(cx, "gate panel", |cx| has(cx, "decider-step"));
+    click(cx, "decider-step");
+    until(cx, "judge gate saved", |_| {
+        read()["gate"][0]["kinds"][0] == "step"
+    });
     click(cx, "step-save");
-    until(cx, "judge gate saved", |cx| !has(cx, "step-extra"));
-    assert_eq!(read()["gate"][0]["kinds"][0], "step");
+    until(cx, "gate panel closed", |cx| !has(cx, "decider-step"));
     for (button, field, count) in [
         ("menu-label-Add gate", "gate", 2),
         ("menu-label-Add end", "end", 1),

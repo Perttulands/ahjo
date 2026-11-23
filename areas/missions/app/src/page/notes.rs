@@ -440,7 +440,16 @@ impl MissionsPage {
         let mut opened = Vec::new();
         for card in &board.cards {
             let entries = thread(notes, &card.id);
-            out.push(self.canvas_note_pin(t, card, entries, view, cx));
+            // A gate carries its mark on the gate's own corner.
+            let corner = mission
+                .gates
+                .iter()
+                .find(|g| g.id == card.id)
+                .map(|g| board::gate_frame(&g.criterion).pin)
+                .map_or((card.x + card.w, card.y), |pin| {
+                    (card.x + pin.0, card.y + pin.1)
+                });
+            out.push(self.canvas_note_pin(t, card, corner, entries, view, cx));
             if self.writing_in(&card.id, false) {
                 opened.push(self.canvas_sticky(
                     t,
@@ -483,13 +492,14 @@ impl MissionsPage {
         &self,
         t: &Theme,
         card: &board::Card,
+        corner: (f32, f32),
         entries: &[Note],
         view: &View,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let z = view.zoom();
         let side = (PIN * z).max(PIN_MIN);
-        let (right, top) = view.position(card.x + card.w, card.y);
+        let (right, top) = view.position(corner.0, corner.1);
         let has = !entries.is_empty();
         let done = resolved(entries);
         let target = card.id.clone();

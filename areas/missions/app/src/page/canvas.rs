@@ -1,5 +1,7 @@
 //! Mission canvas interaction, adapted from the original Missions page.
 use super::*;
+use crate::store::gate_art;
+use crate::store::run_state::CardState;
 use ahjo_app_kit::widgets::boundary;
 use ahjo_missions_contract::{
     Effort, EndOutcome, Formation, GateKind, HumanChannel, LayoutCard, Mission, SeatSettings,
@@ -47,14 +49,13 @@ const GAP: f32 = 8.;
 const BADGE_SCALE: f32 = 0.75;
 const SEAT_PAD: f32 = 10.;
 const END_MARK: f32 = 14.;
-/// The dot a fork's line splits at.
-const FORK_DOT_SIZE: f32 = 9.;
+/// A gate's picture is made this many times its size, sharp when the
+/// board is zoomed in.
+const GATE_ART_SCALE: f32 = 3.;
+/// How far a gate's outline stands off it.
+const OUTLINE: f32 = 6.;
 /// A seat's mark: a harness's, or an empty seat's ring.
 const SEAT: f32 = 16.;
-/// The room a loop's words are centred in, along its lane.
-const LOOP_WORDS: f32 = 320.;
-/// A line of a loop's words, for keeping one loop's off another's.
-const LOOP_LINE: f32 = 17.;
 #[derive(Clone, Debug)]
 enum Drag {
     Pan(Point<Pixels>, (f32, f32)),
@@ -472,7 +473,6 @@ impl MissionsPage {
         layer = layer.child(wires(
             t,
             &board,
-            painted(mission, &board),
             view.clone(),
             cx.weak_entity(),
             self.generation,
@@ -489,35 +489,6 @@ impl MissionsPage {
                 running,
             },
         ));
-        // A loop back says, along its lane, how often it goes round and
-        // what then.
-        let said = loop_places(
-            board
-                .wires
-                .iter()
-                .filter(|w| w.back)
-                .filter_map(|w| Some((w.id.clone(), loop_words(mission, w)?, w.label?)))
-                .collect(),
-        );
-        for (id, words, label) in said {
-            let z = view.zoom;
-            let (x, y) = view.position(label.0, label.1);
-            let selector = format!("canvas-loop-{id}");
-            layer = layer.child(
-                div()
-                    .absolute()
-                    .left(px(x - LOOP_WORDS / 2. * z))
-                    .w(px(LOOP_WORDS * z))
-                    .top(px(y + TAB_GAP * z))
-                    .flex()
-                    .justify_center()
-                    .debug_selector(move || selector.clone())
-                    .text_size(px(CARD_SMALL * z))
-                    .text_color(t.text2)
-                    .whitespace_nowrap()
-                    .child(words),
-            );
-        }
         // Under the start: what a run takes, and the mission's cap.
         for card in board.cards.iter().filter(|c| c.kind == board::Kind::Input) {
             let Some(c) = mission.input_cards.iter().find(|c| c.id == card.id) else {
@@ -556,8 +527,22 @@ impl MissionsPage {
                 .as_ref()
                 .and_then(|s| s.attempts.get(&card.id))
                 .copied();
+            // A gate's loop counts the tries of the step it sends back to.
+            let loop_try = back_loop(mission, &card.id).and_then(|(target, _)| {
+                states
+                    .as_ref()
+                    .and_then(|s| s.attempts.get(&target))
+                    .copied()
+            });
             layer = layer.child(self.canvas_card(
-                t, mission, card, &view, running, state, attempts, &findings, cx,
+                t,
+                mission,
+                card,
+                &view,
+                running,
+                (state, attempts, loop_try),
+                &findings,
+                cx,
             ));
             if self.todo_open {
                 layer = layer.children(self.card_badge(t, mission, card, &view, &findings));
@@ -821,8 +806,11 @@ impl MissionsPage {
         card: &board::Card,
         view: &View,
         running: bool,
-        state: Option<crate::store::run_state::CardState>,
-        attempts: Option<i64>,
+        (state, attempts, loop_try): (
+            Option<crate::store::run_state::CardState>,
+            Option<i64>,
+            Option<i64>,
+        ),
         findings: &[(ahjo_missions_contract::Finding, bool)],
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
@@ -847,13 +835,19 @@ impl MissionsPage {
                     p.edit_step(&judge, cx);
                 }))
             });
+        let tries = tries_words(mission, &card.id, running.then_some(loop_try).flatten()).map(
+            |(words, spent)| {
+                let spent = spent && state == Some(crate::store::run_state::CardState::Failed);
+                (words, if spent { t.fail } else { t.text2 })
+            },
+        );
         let face = card_face(
             t,
             mission,
             card,
             z,
             running.then_some(state),
-            judge,
+            (judge, tries),
             self.agents.as_ref(),
         );
         let issues: Vec<_> = findings
@@ -882,8 +876,8 @@ impl MissionsPage {
             }
             _ => t.divider,
         };
-        // Only a step is drawn as a card; a fork is painted with the wires,
-        // the start is its play control and an end is its mark.
+        // Only a step is drawn as a card; a gate is its gatehouse and
+        // words, the start is its play control and an end is its mark.
         let boxed = card.kind == board::Kind::Step;
         let marked = self.reveal_card.as_deref() == Some(&id)
             || self.flow_focus.as_deref() == Some(&id)
@@ -896,6 +890,9 @@ impl MissionsPage {
             color
         };
         let r = px(size::RADIUS * z);
+        let is_gate = card.kind == board::Kind::Gate;
+        let is_selected = marked || self.editor.as_ref().is_some_and(|e| e.id == id);
+        let group = SharedString::from(format!("gate-{id}"));
         let rendered = div()
             .id(SharedString::from(format!("card-{id}")))
             .absolute()
@@ -903,7 +900,30 @@ impl MissionsPage {
             .top(px(card.y * z + view.pan.1))
             .w(px(card.w * z))
             .h(px(card.h * z))
-            .overflow_hidden()
+            .when(!is_gate, |d| d.overflow_hidden())
+            // A gate is one thing: a quiet outline round all of it under
+            // the pointer, the accent's while it is open or pointed out.
+            .when(is_gate, |d| {
+                let hovered = t.divider;
+                d.group(group.clone()).child(
+                    div()
+                        .absolute()
+                        .left(px(-OUTLINE * z))
+                        .top(px(-OUTLINE * z))
+                        .w(px((card.w + 2. * OUTLINE) * z))
+                        .h(px((card.h + 2. * OUTLINE) * z))
+                        .rounded(px(size::RADIUS * 2. * z))
+                        .border_1()
+                        .border_color(if is_selected {
+                            t.accent
+                        } else {
+                            gpui::transparent_black()
+                        })
+                        .when(!is_selected, |d| {
+                            d.group_hover(group.clone(), move |s| s.border_color(hovered))
+                        }),
+                )
+            })
             .when(boxed, |d| {
                 d.border_1()
                     .border_color(edge)
@@ -994,7 +1014,18 @@ impl MissionsPage {
             rendered
         };
         if running {
-            return rendered.cursor_default();
+            let open = card.id.clone();
+            return match card.kind {
+                board::Kind::Gate => rendered
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |p, _, _, cx| p.edit_step(&open, cx))),
+                board::Kind::Step => rendered
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |p, _, window, cx| {
+                        p.open_canvas_attempts(&open, window, cx)
+                    })),
+                _ => rendered.cursor_default(),
+            };
         }
         rendered.on_mouse_down(
             MouseButton::Left,
@@ -1259,40 +1290,10 @@ struct Fitting {
     running: bool,
 }
 
-/// A gate the wires' layer paints: a fork's line and dot. Its card,
-/// whether it waits on the operator, and whether its pass and fail are
-/// wired.
-#[derive(Clone)]
-struct Painted {
-    card: board::Card,
-    human: bool,
-    pass: bool,
-    fail: bool,
-}
-
-fn painted(mission: &Mission, board: &board::Board) -> Vec<Painted> {
-    let wired = |e: String| mission.connections.iter().any(|c| c.from == e);
-    board
-        .cards
-        .iter()
-        .filter(|c| c.kind == board::Kind::Gate)
-        .map(|c| Painted {
-            card: c.clone(),
-            human: mission
-                .gates
-                .iter()
-                .any(|g| g.id == c.id && g.kinds.contains(&GateKind::Human)),
-            pass: wired(format!("{}:pass", c.id)),
-            fail: wired(format!("{}:fail", c.id)),
-        })
-        .collect()
-}
-
 #[allow(clippy::too_many_arguments)]
 fn wires(
     t: &ahjo_app_kit::theme::Theme,
     board: &board::Board,
-    gates: Vec<Painted>,
     view: View,
     entity: gpui::WeakEntity<MissionsPage>,
     generation: u64,
@@ -1311,8 +1312,7 @@ fn wires(
         .map(|(finding, _)| finding.card_id.clone())
         .collect();
     let accent = t.accent;
-    let (work, pass, fail, quiet, error) = (t.wire, t.pass, t.fail, t.dim, t.error);
-    let (needs, mark) = (t.needs, t.text2);
+    let (work, fail, error) = (t.wire, t.fail, t.error);
     let grid = (
         ahjo_app_kit::theme::alpha(t.text, DOT_ALPHA),
         ahjo_app_kit::theme::alpha(t.text, GRID_ALPHA),
@@ -1385,9 +1385,6 @@ fn wires(
                 )
             };
             paint_grid(window, b, &view, grid);
-            for g in &gates {
-                paint_gate(window, g, &at, z, (work, pass, fail, quiet), (needs, mark));
-            }
             for w in &list {
                 let colour = if errors.contains(&w.id) {
                     error
@@ -1426,50 +1423,6 @@ fn wires(
     .absolute()
     .inset_0()
     .size_full()
-}
-
-/// A fork: the line through it, splitting at its dot into the pass going on
-/// and the fail dropping; the dot amber when the operator answers.
-fn paint_gate(
-    window: &mut Window,
-    g: &Painted,
-    at: &dyn Fn((f32, f32)) -> Point<Pixels>,
-    z: f32,
-    (work, pass, fail, quiet): (Hsla, Hsla, Hsla, Hsla),
-    (needs, mark): (Hsla, Hsla),
-) {
-    let c = &g.card;
-    let line = |points: &[(f32, f32)], colour: Hsla, window: &mut Window| {
-        let mut path = PathBuilder::stroke(px(WIRE));
-        let points: Vec<_> = points.iter().map(|p| at(*p)).collect();
-        rounded(&mut path, &points, px(0.));
-        if let Ok(path) = path.build() {
-            window.paint_path(path, colour);
-        }
-    };
-    let y = c.y + board::fork_line(c.h);
-    let dot = c.x + board::FORK_DOT;
-    line(&[(c.x, y), (dot, y)], work, window);
-    line(
-        &[(dot, y), (c.x + c.w, y)],
-        if g.pass { pass } else { quiet },
-        window,
-    );
-    if g.fail {
-        line(&[(dot, y), (dot, c.y + c.h)], fail, window);
-    }
-    let r = FORK_DOT_SIZE / 2. * z;
-    let centre = at((dot, y));
-    window.paint_quad(
-        gpui::fill(
-            Bounds::new(
-                point(centre.x - px(r), centre.y - px(r)),
-                gpui::size(px(2. * r), px(2. * r)),
-            ),
-            if g.human { needs } else { mark },
-        )
-        .corner_radii(px(r)),
-    );
 }
 
 /// A course of straight runs, its corners rounded to `radius` (less where a
@@ -1572,7 +1525,7 @@ fn card_face(
     card: &board::Card,
     z: f32,
     run: Option<Option<crate::store::run_state::CardState>>,
-    on_judge: Option<OnJudge>,
+    (on_judge, tries): (Option<OnJudge>, Option<(String, Hsla)>),
     catalog: Catalog,
 ) -> Div {
     match card.kind {
@@ -1588,7 +1541,14 @@ fn card_face(
             let Some(g) = mission.gates.iter().find(|g| g.id == card.id) else {
                 return div();
             };
-            gate_face(t, mission, g, card, z, on_judge, catalog)
+            gate_face(
+                t,
+                mission,
+                g,
+                run,
+                z,
+                (answerer(t, mission, &g.id, z, on_judge, catalog), tries),
+            )
         }
         board::Kind::End => {
             let Some(e) = mission.ends.iter().find(|e| e.id == card.id) else {
@@ -1922,18 +1882,16 @@ fn answerer(
     who
 }
 
-fn gate_face(
+/// A gate's number and title, numbered like the steps so the count has
+/// no gap where a gate is.
+fn gate_title(
     t: &ahjo_app_kit::theme::Theme,
     mission: &Mission,
     g: &ahjo_missions_contract::Gate,
-    card: &board::Card,
     z: f32,
-    on_judge: Option<OnJudge>,
-    catalog: Catalog,
 ) -> Div {
-    // Numbered like the steps, so the count has no gap where a gate is.
     let number = flow::build(mission).numbers.get(&g.id).copied();
-    let title = div()
+    div()
         .min_w_0()
         .flex()
         .items_baseline()
@@ -1955,45 +1913,182 @@ fn gate_face(
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(t.text)
                 .child(g.title.clone()),
-        );
-    // The condition is the decision: it shows whole, the gate sized to
-    // it, and only one past all reason is cut, whole on hover.
-    let cut = board::wrapped_lines(&g.criterion, board::CRITERION_W) > board::CRITERION_MOST;
+        )
+}
+
+/// A gate's condition, whole at `width` up to `CRITERION_MOST` lines; one
+/// past all reason is cut, and whole on hover.
+fn gate_criterion(
+    t: &ahjo_app_kit::theme::Theme,
+    g: &ahjo_missions_contract::Gate,
+    width: f32,
+    z: f32,
+) -> Stateful<Div> {
+    let cut = board::wrapped_lines(&g.criterion, width) > board::CRITERION_MOST;
     let whole = g.criterion.clone();
-    let criterion = || {
-        div()
-            .id(SharedString::from(format!("canvas-criterion-{}", g.id)))
-            .min_w_0()
-            .line_clamp(board::CRITERION_MOST)
-            .text_ellipsis()
-            .text_size(px(board::CRITERION_SIZE * z))
-            .line_height(px(board::CRITERION_LINE * z))
-            .text_color(t.text2)
-            .when(cut, |d| d.tooltip(kit::tip(whole.clone())))
-            .child(g.criterion.clone())
+    div()
+        .id(SharedString::from(format!("canvas-criterion-{}", g.id)))
+        .min_w_0()
+        .line_clamp(board::CRITERION_MOST)
+        .text_ellipsis()
+        .text_size(px(board::CRITERION_SIZE * z))
+        .line_height(px(board::CRITERION_LINE * z))
+        .text_color(t.text2)
+        .when(cut, |d| d.tooltip(kit::tip(whole)))
+        .child(g.criterion.clone())
+}
+
+thread_local! {
+    /// Each gate's picture, by what it shows.
+    static GATE_ART: std::cell::RefCell<std::collections::HashMap<String, std::sync::Arc<gpui::Image>>> =
+        Default::default();
+}
+
+/// A colour as 0xRRGGBB, for drawn art.
+fn rgb(c: Hsla) -> u32 {
+    let c = gpui::Rgba::from(c);
+    let b = |v: f32| (v.clamp(0., 1.) * 255.).round() as u32;
+    (b(c.r) << 16) | (b(c.g) << 8) | b(c.b)
+}
+
+/// A gate drawn as a gate: its picture, the question beside it, who
+/// answers under the way on and the loop's tries beside the fail's drop,
+/// shut, deciding, open or barred as the run has it.
+fn gate_face(
+    t: &ahjo_app_kit::theme::Theme,
+    mission: &Mission,
+    g: &ahjo_missions_contract::Gate,
+    run: Option<Option<CardState>>,
+    z: f32,
+    (who, tries): (Div, Option<(String, Hsla)>),
+) -> Div {
+    let f = board::gate_frame(&g.criterion);
+    let moment = match run.flatten() {
+        Some(CardState::Done) => gate_art::Moment::Passed,
+        Some(CardState::Failed) => gate_art::Moment::Failed,
+        Some(CardState::Running | CardState::Waiting) => gate_art::Moment::Deciding,
+        _ => gate_art::Moment::Plan,
     };
+    let wired = |port: &str| {
+        let from = format!("{}:{port}", g.id);
+        mission.connections.iter().any(|c| c.from == from)
+    };
+    let wiring = gate_art::Wiring {
+        pass: wired("pass"),
+        fail: wired("fail"),
+        human: g.kinds.contains(&GateKind::Human),
+    };
+    let ink = gate_art::Ink {
+        bg: rgb(t.bg),
+        text: rgb(t.text),
+        wire: rgb(t.wire),
+        quiet: rgb(t.dim),
+        pass: rgb(t.pass),
+        fail: rgb(t.fail),
+        needs: rgb(t.needs),
+        running: rgb(t.running),
+    };
+    let key = format!("{moment:?} {wiring:?} {ink:?} {}", f.h);
+    let image = GATE_ART.with(|art| {
+        art.borrow_mut()
+            .entry(key)
+            .or_insert_with(|| {
+                let svg = gate_art::svg(ink, &f, wiring, moment, GATE_ART_SCALE);
+                std::sync::Arc::new(gpui::Image::from_bytes(
+                    gpui::ImageFormat::Svg,
+                    svg.into_bytes(),
+                ))
+            })
+            .clone()
+    });
+    let (w, o) = (f.words, f.who);
     div()
         .size_full()
         .relative()
+        .child(gpui::img(image).absolute().top_0().left_0().size_full())
         .child(
             div()
                 .absolute()
-                .left(px(board::FORK_DOT * z))
-                .right_0()
-                .bottom(px((card.h - board::fork_line(card.h) + GAP) * z))
+                .left(px(w.x * z))
+                .top(px(w.y * z))
+                .w(px(w.w * z))
+                .h(px(w.h * z))
                 .flex()
                 .flex_col()
-                .gap(px(EDGE * z))
-                .child(title)
-                .child(criterion()),
+                .child(
+                    gate_title(t, mission, g, z)
+                        .h(px(gate_art::TITLE_H * z))
+                        .flex_none(),
+                )
+                .child(gate_criterion(t, g, gate_art::MEASURE_W, z)),
         )
         .child(
-            answerer(t, mission, &g.id, z, on_judge, catalog)
-                .absolute()
-                .left(px((board::FORK_DOT + CARD_PAD) * z))
-                .right_0()
-                .top(px((board::fork_line(card.h) + GAP) * z)),
+            who.absolute()
+                .left(px(o.x * z))
+                .top(px(o.y * z))
+                .w(px(o.w * z))
+                .h(px(o.h * z)),
         )
+        .when_some(tries, |d, (words, colour)| {
+            let r = f.tries;
+            let selector = format!("gate-tries-{}: {words}", g.id);
+            d.child(
+                div()
+                    .debug_selector(move || selector.clone())
+                    .absolute()
+                    .left(px(r.x * z))
+                    .top(px(r.y * z))
+                    .w(px(r.w * z))
+                    .h(px(r.h * z))
+                    .flex()
+                    .items_center()
+                    .text_size(px(CARD_SMALL * z))
+                    .text_color(colour)
+                    .whitespace_nowrap()
+                    .child(words),
+            )
+        })
+}
+
+/// Where a gate's fail sends the work back to, and the limit that caps how
+/// often: None when failing ends the run instead.
+pub(super) fn back_loop<'a>(
+    mission: &'a Mission,
+    gate: &str,
+) -> Option<(String, Option<&'a ahjo_missions_contract::Limit>)> {
+    let from = format!("{gate}:fail");
+    let to = mission
+        .connections
+        .iter()
+        .find(|c| c.from == from)?
+        .to
+        .clone();
+    let target = to.split(':').next()?.to_owned();
+    if !mission.steps.iter().any(|f| f.id == target) {
+        return None;
+    }
+    let limit = mission
+        .limits
+        .iter()
+        .find(|l| l.scope == target && l.rounds.is_some());
+    Some((target, limit))
+}
+
+/// What a gate's fail exit says: how often the loop may go round, or
+/// which try a run is on. The flag is true on the last try.
+pub(super) fn tries_words(
+    mission: &Mission,
+    gate: &str,
+    now: Option<i64>,
+) -> Option<(String, bool)> {
+    let (_, limit) = back_loop(mission, gate)?;
+    let most = limit.and_then(|l| l.rounds);
+    Some(match (now, most) {
+        (Some(n), Some(r)) => (format!("↺ try {n} of {r}"), n >= r),
+        (Some(n), None) => (format!("↺ try {n}"), false),
+        (None, Some(r)) => (format!("↺ up to {r} tries"), false),
+        (None, None) => ("↺ until it passes".into(), false),
+    })
 }
 
 fn state_words(
@@ -2010,69 +2105,6 @@ fn state_words(
         Some(CardState::Canceled) => ("canceled", t.dim),
         None => ("not reached", t.dim),
     }
-}
-
-/// Where each loop's words go, given where each would say them: two
-/// loops held by one limit say the same thing near each other, and it is
-/// said once, under the lower lane; words that would still overprint
-/// others step down a line.
-fn loop_places(wanted: Vec<(String, String, (f32, f32))>) -> Vec<(String, String, (f32, f32))> {
-    let mut said: Vec<(String, String, (f32, f32))> = Vec::new();
-    let span = |words: &str, x: f32| {
-        let half = words.chars().count() as f32 * CARD_SMALL * board::GLYPH / 2.;
-        (x - half, x + half)
-    };
-    for (id, words, (x, mut y)) in wanted {
-        let (a, b) = span(&words, x);
-        let clash = |y: f32, said: &[(String, String, (f32, f32))]| {
-            said.iter()
-                .find(|(_, w, (sx, sy))| {
-                    let (sa, sb) = span(w, *sx);
-                    a < sb && sa < b && (y - sy).abs() < LOOP_LINE
-                })
-                .map(|(_, w, _)| w.clone())
-        };
-        if clash(y, &said).is_some_and(|w| w == words) {
-            // Said under the lowest of the lanes it speaks for, clear of
-            // them all.
-            if let Some((.., at)) = said.iter_mut().find(|(_, w, (sx, sy))| {
-                let (sa, sb) = span(w, *sx);
-                *w == words && a < sb && sa < b && (y - sy).abs() < LOOP_LINE
-            }) {
-                at.1 = at.1.max(y);
-            }
-            continue;
-        }
-        while clash(y, &said).is_some() {
-            y += LOOP_LINE;
-        }
-        said.push((id, words, (x, y)));
-    }
-    said
-}
-
-/// What a loop back says along its lane: how often it goes round, and
-/// what happens when that is spent.
-fn loop_words(mission: &Mission, wire: &board::Wire) -> Option<String> {
-    if wire.route != "fail" {
-        return None;
-    }
-    let limit = mission
-        .limits
-        .iter()
-        .find(|l| (l.scope == wire.to_card || l.scope == wire.from_card) && l.rounds.is_some());
-    Some(match limit.and_then(|l| l.rounds.map(|r| (r, l))) {
-        Some((r, l)) => {
-            let tries = format!("{r} tries");
-            let then = match l.when_spent.as_str() {
-                "best" => "then the best goes on",
-                "fail" => "then it fails",
-                _ => "then it waits for you",
-            };
-            format!("up to {tries} · {then}")
-        }
-        None => "again until it passes".into(),
-    })
 }
 
 const CLAUDE: &str = "M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z";
@@ -2516,20 +2548,24 @@ mod tests {
     }
 
     #[test]
-    fn loops_held_by_one_limit_say_it_once_and_others_keep_clear() {
-        let words = "up to 3 tries · then it fails".to_string();
-        let near = |id: &str, w: &str, at| (id.to_string(), w.to_string(), at);
-        let placed = loop_places(vec![
-            near("a", &words, (720., 490.)),
-            near("b", &words, (850., 502.)),
-            near("c", "again until it passes", (800., 490.)),
-            near("d", &words, (2000., 490.)),
-        ]);
-        let ids: Vec<_> = placed.iter().map(|(id, ..)| id.as_str()).collect();
-        assert_eq!(ids, ["a", "c", "d"]);
-        // Under the lower of the two lanes it speaks for.
-        assert_eq!(placed[0].2, (720., 502.));
-        let (_, _, c) = &placed[1];
-        assert!(c.1 >= 490. + LOOP_LINE, "{c:?}");
+    fn a_gate_counts_the_tries_of_the_step_it_sends_back_to() {
+        let mission: Mission = serde_json::from_value(serde_json::json!({
+            "step": [{"id": "fix", "input": [{"id": "in"}], "output": [{"id": "out"}]}],
+            "gate": [{"id": "review", "kinds": ["human"]}, {"id": "ship", "kinds": ["human"]}],
+            "end": [{"id": "held", "outcome": "rejected"}],
+            "limit": [{"id": "three", "scope": "fix", "rounds": 3, "when_spent": "fail"}],
+            "connection": [
+                {"id": "e1", "from": "fix:out", "to": "review:in"},
+                {"id": "e2", "from": "review:fail", "to": "fix:in"},
+                {"id": "e3", "from": "ship:fail", "to": "held:in"}
+            ]
+        }))
+        .unwrap();
+        let words = |now| tries_words(&mission, "review", now);
+        assert_eq!(words(None), Some(("↺ up to 3 tries".into(), false)));
+        assert_eq!(words(Some(2)), Some(("↺ try 2 of 3".into(), false)));
+        assert_eq!(words(Some(3)), Some(("↺ try 3 of 3".into(), true)));
+        // A fail that ends the run starts no loop.
+        assert_eq!(tries_words(&mission, "ship", None), None);
     }
 }

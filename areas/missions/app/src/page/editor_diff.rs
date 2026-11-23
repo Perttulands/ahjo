@@ -3,7 +3,7 @@
 use super::*;
 use crate::store::staffing::Staffing;
 use ahjo_missions_contract::{
-    EndUpdate, GateKind, GateUpdate, InputCardUpdate, LimitUpdate, Mission, MissionOutput,
+    EndUpdate, GateUpdate, InputCardUpdate, LimitUpdate, Mission, MissionOutput,
 };
 
 fn changed<T: PartialEq>(
@@ -239,23 +239,6 @@ fn operations(
             let mut update = GateUpdate {
                 title: drafted!(0, "The title", &gate.title),
                 criterion: drafted!(1, "The criterion", &gate.criterion),
-                kinds: drafted!(
-                    2,
-                    "Who decides",
-                    gate.kinds
-                        .iter()
-                        .map(|kind| kind.as_str())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                )
-                .map(|kinds| {
-                    kinds
-                        .split(',')
-                        .map(str::trim)
-                        .filter(|kind| !kind.is_empty())
-                        .filter_map(|kind| enum_value::<GateKind>(kind, &mut problems))
-                        .collect()
-                }),
                 files: drafted!(5, "The files", gate.files.join("\n")).map(|files| lines(&files)),
                 check: drafted!(7, "The check", &gate.check),
                 check_version: drafted!(8, "The check version", &gate.check_version),
