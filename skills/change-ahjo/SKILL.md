@@ -6,11 +6,14 @@ description: Change Ahjo itself, in its repository at /srv/ahjo, and put the cha
 # Change Ahjo
 
 `AGENTS.md`'s stop conditions (Stop before building) hold for every change.
-Read what your kind of change needs, then build and check it as below:
+Read what your kind of change needs, then build and check it as below.
+`CODING_STANDARDS.md` is what the review will hold the change to; read the
+rules your change touches before you build, not after the review:
 
 | Change | Read |
 |---|---|
 | A page, or anything else on screen | `DESIGN.md` Principles and the surface it is on; `ARCHITECTURE.md` Kit and its page under App pages; then See it on screen |
+| A page's behaviour: its store, pending choices, replies | `CODING_STANDARDS.md` State and Regression tests; its page under `ARCHITECTURE.md` App pages |
 | A command, contract or node area | `ARCHITECTURE.md` Words, Rules the compiler holds, Errors and its area under Node areas |
 | `kit/` | `ARCHITECTURE.md` Kit and Rules the compiler holds; tell the other owners when its interface changes |
 | Install, upgrade or the Windows apps | `ARCHITECTURE.md` Install and upgrade, then [lead-and-deploy.md](lead-and-deploy.md) |
