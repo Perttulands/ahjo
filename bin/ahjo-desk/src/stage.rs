@@ -778,12 +778,17 @@ impl DeskApp {
         let this = cx.entity().downgrade();
         let body = div()
             .id("doc")
+            .debug_selector(|| "doc".into())
+            .track_scroll(&self.doc_scroll)
             .size_full()
             .overflow_y_scroll()
             .bg(t.bg)
             .cursor_text()
+            // A column: in a row the page would be stretched to the
+            // room's height, and what runs past it would never scroll.
             .flex()
-            .justify_center()
+            .flex_col()
+            .items_center()
             .child(
                 div()
                     .w_full()

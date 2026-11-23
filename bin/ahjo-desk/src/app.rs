@@ -206,6 +206,8 @@ pub struct DeskApp {
     pub turns: gpui::ScrollHandle,
     /// Where the list is scrolled, read the same way.
     pub rail: gpui::ScrollHandle,
+    /// Where the document is scrolled.
+    pub doc_scroll: gpui::ScrollHandle,
     pub drafts: HashMap<DraftKey, Draft>,
     /// Where the drafts are kept between launches (none when the file
     /// there did not read: it is left as it is), whether they changed
@@ -394,6 +396,7 @@ impl DeskApp {
             current: None,
             turns: gpui::ScrollHandle::new(),
             rail: gpui::ScrollHandle::new(),
+            doc_scroll: gpui::ScrollHandle::new(),
             drafts,
             drafts_at,
             drafts_changed: false,
@@ -639,6 +642,8 @@ impl DeskApp {
     fn show(&mut self, key: Option<Key>, cx: &mut Context<Self>) {
         if self.current != key {
             self.turns
+                .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
+            self.doc_scroll
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
         }
         self.current = key;
