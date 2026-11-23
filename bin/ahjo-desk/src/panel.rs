@@ -319,7 +319,9 @@ impl DeskApp {
         let words: Option<AnyElement> =
             if now {
                 let focused = active && self.words.read(cx).is_focused(window);
-                let field = words_box(t, focused).id(("words", i));
+                let field = words_box(t, focused)
+                    .id(("words", i))
+                    .debug_selector(move || format!("words-{i}"));
                 Some(if active {
                     field.child(self.words.clone()).into_any_element()
                 } else {

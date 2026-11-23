@@ -128,6 +128,37 @@ pub fn doc_ask(id: &str, text: &str) -> Value {
     })
 }
 
+/// A grilling ask on its `round`th round, each round three questions (the
+/// last answered in words only) and every earlier one answered.
+pub fn grill_ask(id: &str, round: u32) -> Value {
+    let one = |n: u32, answered: bool| {
+        json!({
+            "id": id, "bead": "ahjo-test", "kind": "grill", "title": format!("Round {n} of the grilling"),
+            "question": "Three questions.", "status": if answered { "answered" } else { "open" },
+            "round": n, "revision": n, "media": [], "options": [], "comments": [], "marks": [],
+            "questions": [
+                {"id": "q1", "title": format!("Round {n}: which way?"), "options": [
+                    {"name": "One", "why": "The first way"}, {"name": "Other", "why": "The second way"}],
+                 "recommend": "One"},
+                {"id": "q2", "title": format!("Round {n}: how many?"), "options": [
+                    {"name": "Few", "why": "Enough to tell"}, {"name": "Many", "why": "A long sitting"}],
+                 "recommend": "Few"},
+                {"id": "q3", "title": format!("Round {n}: anything else?")},
+            ],
+            "answer": if answered {
+                json!({"verdict": "grill", "options": [], "comment": "", "at": "2026-11-23T09:30:00+00:00",
+                       "answers": {"q1": {"pick": "One", "comment": ""}, "q3": {"pick": null, "comment": "Nothing more."}}})
+            } else {
+                Value::Null
+            },
+            "created_at": "2026-11-23T09:00:00+00:00", "updated_at": "2026-11-23T09:00:00+00:00",
+        })
+    };
+    let mut ask = one(round, false);
+    ask["history"] = (1..round).map(|n| one(n, true)).collect();
+    ask
+}
+
 /// A scratch folder for what the app keeps (its settings and drafts), so
 /// nothing of the operator's is read or written.
 pub fn scratch(name: &str) -> std::path::PathBuf {

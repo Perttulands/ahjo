@@ -891,26 +891,38 @@ impl DeskApp {
             .as_ref()
             .map(|k| self.desks[k.0].name())
             .unwrap_or_default();
-        let mut turns = div()
-            .flex()
-            .flex_col()
-            .gap(px(tokens::BETWEEN_TURNS))
-            .px(px(tokens::COLUMN_PAD))
-            .pt(px(tokens::COLUMN_TOP));
+        // Each round is one child of the scrolled column, which starts at
+        // the round in front (`land`); every round keeps the same room above
+        // it, so the one it starts at stands as a first round does.
+        self.land(ask, cx);
+        let round = || {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(tokens::BETWEEN_TURNS))
+                .px(px(tokens::COLUMN_PAD))
+                .pt(px(tokens::COLUMN_TOP))
+        };
         let at = key.as_ref().map_or(0, |k| k.0);
+        let mut rounds = vec![];
         for past in &ask.history {
             let pics = self.sent_pictures(t, at, past, cx);
-            turns = turns
-                .child(self.agent_turn(t, past, false, window, cx))
-                .children(past.answer.as_ref().map(|_| his_turn(t, past, pics)))
-                .children(past.comments.iter().map(|c| comment(t, c)));
+            rounds.push(
+                round()
+                    .pb(px(tokens::BETWEEN_TURNS - tokens::COLUMN_TOP))
+                    .child(self.agent_turn(t, past, false, window, cx))
+                    .children(past.answer.as_ref().map(|_| his_turn(t, past, pics)))
+                    .children(past.comments.iter().map(|c| comment(t, c))),
+            );
         }
         let open = ask.is_open();
         let pics = self.sent_pictures(t, at, ask, cx);
-        turns = turns
-            .child(self.agent_turn(t, ask, open, window, cx))
-            .children(ask.comments.iter().map(|c| comment(t, c)))
-            .children((!open).then(|| his_turn(t, ask, pics)));
+        rounds.push(
+            round()
+                .child(self.agent_turn(t, ask, open, window, cx))
+                .children(ask.comments.iter().map(|c| comment(t, c)))
+                .children((!open).then(|| his_turn(t, ask, pics))),
+        );
         let folded = self.config.fold_list;
         let head = div()
             .flex_none()
@@ -989,11 +1001,12 @@ impl DeskApp {
                     .child(
                         div()
                             .id("turns")
+                            .debug_selector(|| "turns".into())
                             .track_scroll(&self.turns)
                             .flex_initial()
                             .min_h_0()
                             .overflow_y_scroll()
-                            .child(turns),
+                            .children(rounds),
                     )
                     .children(fades(&self.turns, t.bg)),
             )

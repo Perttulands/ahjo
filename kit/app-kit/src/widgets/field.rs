@@ -91,6 +91,9 @@ pub enum FieldEvent {
     Down,
     Tab,
     Focused,
+    /// Its caret stands somewhere new or it is another height, and it has
+    /// been drawn so: what scrolls it reads `caret` and keeps it in sight.
+    Moved,
 }
 
 /// An attachment pasted into a field configured to accept one.
@@ -129,6 +132,8 @@ pub struct TextField {
     scroll_y: Pixels,
     content_h: Pixels,
     followed: (usize, usize),
+    /// The caret, length and height it was last drawn with.
+    drawn: (usize, usize, Pixels),
     /// Where Up and Down aim across rows of different lengths.
     goal_x: Option<Pixels>,
     selecting: bool,
@@ -168,6 +173,7 @@ impl TextField {
             scroll: px(0.),
             max_lines: None,
             scroll_y: px(0.),
+            drawn: (0, 0, px(0.)),
             content_h: px(0.),
             followed: (0, 0),
             goal_x: None,
@@ -244,6 +250,13 @@ impl TextField {
     /// Where the field was last drawn, in window coordinates.
     pub fn bounds(&self) -> Option<Bounds<Pixels>> {
         self.bounds
+    }
+
+    /// Where the caret was last drawn, in window coordinates.
+    pub fn caret(&self) -> Option<Bounds<Pixels>> {
+        let lh = line_height(self.text_size);
+        self.position_of(self.cursor(), lh)
+            .map(|p| Bounds::new(p, sz(CARET, lh)))
     }
 
     pub fn is_focused(&self, window: &Window) -> bool {
@@ -1105,10 +1118,15 @@ impl Element for TextElement {
             }
         });
         let lines = std::mem::take(&mut pre.lines);
-        let resized = self.field.update(cx, |f, _| {
+        let resized = self.field.update(cx, |f, cx| {
             f.lines = lines;
             let resized = f.bounds.map(|b| b.size.width) != Some(bounds.size.width);
             f.bounds = Some(bounds);
+            let drawn = (f.cursor(), f.text.len(), bounds.size.height);
+            if drawn != f.drawn {
+                f.drawn = drawn;
+                cx.emit(FieldEvent::Moved);
+            }
             f.multiline && resized
         });
         // A multiline field's height is measured at its last width: a new

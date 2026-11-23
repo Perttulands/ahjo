@@ -214,9 +214,15 @@ pub struct DeskApp {
     pub updates: gpui::Entity<ahjo_app_kit::update::Updates>,
     pub desks: Vec<DeskState>,
     pub current: Option<Key>,
-    /// Where the conversation is scrolled: from its top for each ask, and
-    /// read to fade the edge that has more beyond it.
+    /// Where the conversation is scrolled, read to fade the edge that has
+    /// more beyond it: its children are the rounds, the earliest first.
     pub turns: gpui::ScrollHandle,
+    /// The ask and round the conversation was last brought to: another
+    /// one in front starts at its own top, the earlier rounds above it.
+    landed: Option<(Key, u32)>,
+    /// He wrote since his words were last drawn: the conversation follows
+    /// their caret.
+    wrote: bool,
     /// Where the list is scrolled, read the same way.
     pub rail: gpui::ScrollHandle,
     /// Where the document is scrolled.
@@ -428,6 +434,8 @@ impl DeskApp {
                 .collect(),
             current: None,
             turns: gpui::ScrollHandle::new(),
+            landed: None,
+            wrote: false,
             rail: gpui::ScrollHandle::new(),
             doc_scroll: gpui::ScrollHandle::new(),
             drafts,
@@ -679,8 +687,6 @@ impl DeskApp {
     /// ask's pictures fetched behind it so moving on is instant.
     fn show(&mut self, key: Option<Key>, cx: &mut Context<Self>) {
         if self.current != key {
-            self.turns
-                .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
             self.doc_scroll
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
             self.grading = Default::default();
@@ -1441,6 +1447,7 @@ impl DeskApp {
     ) {
         match e {
             FieldEvent::Changed => self.words_changed(cx),
+            FieldEvent::Moved => self.follow_caret(cx),
             // Enter sends when he chose it (the field is then not prose).
             FieldEvent::SubmitAlt | FieldEvent::Submit => self.send(Verdict::Send, cx),
             _ => {}
@@ -1495,6 +1502,56 @@ impl DeskApp {
                 None => d.words = text,
             }
         }
+        self.wrote = true;
+        cx.notify();
+    }
+
+    /// Starts the conversation at the round in front: the rounds before it
+    /// stand above, a scroll away. The views call it as they draw.
+    pub fn land(&mut self, ask: &Ask, cx: &mut Context<Self>) {
+        let at = self.current.clone().map(|key| (key, ask.round()));
+        if self.landed == at {
+            return;
+        }
+        self.turns.scroll_to_top_of_item(ask.history.len());
+        if self.turns.bounds().size.height > gpui::px(0.) {
+            self.landed = at;
+        } else {
+            // Never drawn, the column has no place to scroll against yet:
+            // it lands once more when it has been (a notify while drawing
+            // is lost).
+            cx.spawn(async move |this, cx| {
+                let _ = this.update(cx, |_, cx| cx.notify());
+            })
+            .detach();
+        }
+    }
+
+    /// Keeps the line he is writing in sight while his words stand in the
+    /// conversation, on a grill's question: the field grows down as he
+    /// writes, out of the scrolled column unless the column follows.
+    fn follow_caret(&mut self, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.wrote) {
+            return;
+        }
+        let on_question = self.draft().at.is_some()
+            && self
+                .current_ask()
+                .is_some_and(|a| a.is_open() && a.form() == Form::Grill);
+        let Some(caret) = self.words.read(cx).caret().filter(|_| on_question) else {
+            return;
+        };
+        let column = self.turns.bounds();
+        let clear = gpui::px(tokens::FADE);
+        let mut offset = self.turns.offset();
+        if caret.bottom() + clear > column.bottom() {
+            offset.y -= caret.bottom() + clear - column.bottom();
+        } else if caret.top() - clear < column.top() {
+            offset.y += column.top() - (caret.top() - clear);
+        } else {
+            return;
+        }
+        self.turns.set_offset(offset);
         cx.notify();
     }
 
