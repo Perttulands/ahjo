@@ -380,7 +380,7 @@ impl DeskApp {
                 .bg(k.paper)
                 .border_1()
                 .border_color(rgb(P::EDGE))
-                .rounded(px(2.))
+                .rounded(px(P::CORNER))
                 .shadow_lg()
                 .text_color(k.ink)
                 .font_family(t.ty.reading)
@@ -475,7 +475,7 @@ impl DeskApp {
                             None => div()
                                 .mt(px(P::TEXT * P::LEADING / 2. - 3.))
                                 .size(px(6.))
-                                .rounded(px(1.))
+                                .rounded(px(P::DOT_CORNER))
                                 .bg(k.ink),
                         }),
                 )
@@ -495,7 +495,7 @@ impl DeskApp {
             Block::Code => div()
                 .px(px(12.))
                 .py(px(10.))
-                .rounded(px(2.))
+                .rounded(px(P::CORNER))
                 .bg(alpha(k.ink, 0.05))
                 .font_family(FAMILY)
                 .text_size(px(P::TEXT * 0.8))
@@ -577,7 +577,7 @@ impl DeskApp {
                     .text_color(k.grade)
                     .cursor_pointer()
                     .when(on, |d| d.bg(k.wash))
-                    .rounded(px(2.))
+                    .rounded(px(P::CORNER))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
                         if let Some(m) = app.marks().into_iter().find(|m| m.id == id) {
@@ -603,8 +603,8 @@ impl DeskApp {
                     .child(
                         div()
                             .font_family(t.ty.reading)
-                            .text_size(px(10.))
-                            .line_height(px(14.))
+                            .text_size(px(P::CAPTION))
+                            .line_height(px(P::CAPTION_LINE))
                             .text_color(k.soft)
                             .child(format!(
                                 "ROUND {} {} · {}",
@@ -689,7 +689,7 @@ impl DeskApp {
                 .max_w(px(P::WIDTH))
                 .px(px(14.))
                 .py(px(10.))
-                .rounded(px(3.))
+                .rounded(px(P::CARD_CORNER))
                 .border_1()
                 .border_color(rgb(P::EDGE))
                 .bg(k.paper)
@@ -817,7 +817,7 @@ fn pen_button(
         .gap(px(5.))
         .px(px(9.))
         .py(px(3.))
-        .rounded(px(3.))
+        .rounded(px(P::CARD_CORNER))
         .border_1()
         .border_color(if on { k.grade } else { k.rule })
         .bg(if on { k.wash } else { k.paper })
@@ -846,8 +846,8 @@ fn head(t: &Theme, k: &Inks, ask: &Ask) -> Div {
         .pb(px(10.))
         .mb(px(20.))
         .font_family(t.ty.display)
-        .text_size(px(12.))
-        .line_height(px(16.))
+        .text_size(px(P::HEAD))
+        .line_height(px(P::HEAD_LINE))
         .text_color(k.soft)
         .child(div().min_w_0().truncate().child(name.to_uppercase()))
         .child(div().flex_none().child(format!("ROUND {}", ask.round())))

@@ -918,7 +918,7 @@ impl DeskApp {
                     tokens::TICK_W
                 }))
                 .left(relative(f as f32 / n as f32))
-                .rounded(px(1.))
+                .rounded(px(tokens::TICK_RADIUS))
                 .bg(c)
         });
         div()
@@ -1106,7 +1106,7 @@ impl DeskApp {
                                 .left(px(4.))
                                 .bottom(px(4.))
                                 .px(px(4.))
-                                .rounded(px(2.))
+                                .rounded(px(ahjo_app_kit::theme::size::RADIUS_TAG))
                                 .bg(if is_rec { t.accent } else { alpha(t.bg, 0.8) })
                                 .text_color(if is_rec { t.on_accent() } else { t.text })
                                 .text_size(px(CAP_TEXT))

@@ -335,7 +335,6 @@ impl Issue {
                 });
             },
         )
-        .debug_selector(|| "issue-grip".into())
     }
 
     fn list_head(&self, t: &Theme, cx: &mut Context<Self>) -> Div {

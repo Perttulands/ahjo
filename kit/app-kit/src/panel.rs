@@ -14,8 +14,8 @@ use crate::theme::{Theme, motion};
 use crate::widgets::kit::{self, GripEdge, Phase};
 use crate::widgets::pane;
 use gpui::{
-    AnyElement, AnyView, App, Context, Entity, FocusHandle, KeyDownEvent, Render, Window, deferred,
-    div, ease_out_quint, prelude::*, px,
+    AnyElement, AnyView, App, Context, Entity, FocusHandle, KeyDownEvent, Render, Window, div,
+    ease_out_quint, prelude::*, px,
 };
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -277,10 +277,9 @@ impl EdgeColumn {
             .child(div().flex_1().min_h_0().flex().flex_col().child(content));
         // The grip lies outside the frame, which clips its column as it
         // slides, and is drawn over the page beside.
-        let grip_id = format!("{id}-grip");
         let grip = kit::grip(
             t,
-            (gpui::SharedString::from(grip_id.clone()), left as usize),
+            format!("{id}-grip"),
             if left {
                 GripEdge::Right
             } else {
@@ -298,8 +297,7 @@ impl EdgeColumn {
                 };
                 sized(width, keep, window, cx);
             },
-        )
-        .debug_selector(move || grip_id);
+        );
         let frame = div()
             .id((gpui::SharedString::from(id), left as usize))
             .debug_selector(move || format!("{id}-{}", if left { "left" } else { "right" }))
@@ -323,7 +321,7 @@ impl EdgeColumn {
             .h_full()
             .relative()
             .child(frame)
-            .child(deferred(grip))
+            .child(grip)
             .into_any_element()
     }
 }

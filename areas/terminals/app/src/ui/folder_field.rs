@@ -9,7 +9,7 @@
 //! Its rules live in `store::launch`.
 
 use crate::store::launch::{self, FolderList, Suggestion};
-use crate::theme::theme;
+use crate::theme::{size, theme};
 use ahjo_app_kit::Host;
 use ahjo_app_kit::widgets::field::{FieldEvent, TextField};
 use ahjo_app_kit::widgets::finder::marked_letters;
@@ -412,10 +412,10 @@ impl Render for FolderField {
                     .px(px(4.))
                     .flex()
                     .items_center()
-                    .rounded(px(3.))
+                    .rounded(px(size::RADIUS_SMALL))
                     .overflow_hidden()
                     .whitespace_nowrap()
-                    .text_size(px(12.))
+                    .text_size(px(size::NOTE))
                     .text_color(if shown || lit == Some(n) {
                         t.text
                     } else {

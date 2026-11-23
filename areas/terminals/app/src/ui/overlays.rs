@@ -390,7 +390,7 @@ impl Terminals {
                             )
                             .child(
                                 div()
-                                    .text_size(px(10.))
+                                    .text_size(px(size::TINY))
                                     .text_color(t.dim)
                                     .child(sessions::activity(s, super::page::now_ms())),
                             ),
@@ -528,17 +528,22 @@ impl Terminals {
                                 .flex()
                                 .gap(px(8.))
                                 .child(div().text_color(t.text).child(name))
-                                .child(div().text_size(px(11.)).text_color(t.dim).child(device))
                                 .child(
                                     div()
-                                        .text_size(px(11.))
+                                        .text_size(px(size::SMALL))
+                                        .text_color(t.dim)
+                                        .child(device),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(size::SMALL))
                                         .text_color(t.dim)
                                         .child(format!("line {}", m.line + 1)),
                                 ),
                         )
                         .child(
                             div()
-                                .text_size(px(11.))
+                                .text_size(px(size::SMALL))
                                 .text_color(t.dim)
                                 .whitespace_nowrap()
                                 .overflow_hidden()
@@ -547,7 +552,7 @@ impl Terminals {
                         .child(hit_line(&t, &m.context[1], &query, lead))
                         .child(
                             div()
-                                .text_size(px(11.))
+                                .text_size(px(size::SMALL))
                                 .text_color(t.dim)
                                 .whitespace_nowrap()
                                 .overflow_hidden()
@@ -595,7 +600,7 @@ impl Terminals {
 /// before the match, which a long line would otherwise cut off.
 fn hit_line(t: &Theme, line: &str, query: &str, lead: usize) -> gpui::Div {
     let row = div()
-        .text_size(px(12.))
+        .text_size(px(size::NOTE))
         .text_color(t.text)
         .whitespace_nowrap()
         .overflow_hidden();

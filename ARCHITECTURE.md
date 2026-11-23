@@ -343,6 +343,56 @@ reserves, or whose `everywhere` chords share a key, naming both;
 - **Tests.** An app area's test drives `ahjo-app-shell` with its own page, or
   pages it defines, against a testkit or fake node, building no other area.
 
+## Kit
+
+Every interaction has one element in the kit, the same in Swarm, Brain and
+Desk. Build with it; where it falls short, extend it in `kit/`. How the
+popups, the panel, renames, scroll areas and settings behave is said once,
+above (App pages); this is where to find each. Paths are under
+`kit/app-kit/src` (`ahjo_app_kit`); `kit::` is `widgets::kit`, `pane::`
+is `widgets::pane`.
+
+| Element | Use it for | Where |
+| --- | --- | --- |
+| Popup | anything small opened over the page beside what was clicked: `Host::popup(Popup::beside(spot, view))`, its `Outside`, `focus`, `may_close` | `popup`, `Host::popup` |
+| Form in a popup | a small form whose fields scroll and whose actions stay in view; a page draws it with `popup::drawn` | `popup::form` |
+| Menu | a list of acts, with keys, rules, submenus and refused rows (`MenuRow`) | `Host::menu`, `menu_keyed`, `menu_armed`; `menu` |
+| Confirm | a danger asked about before it runs: one armed row beside the button | `Host::confirm` |
+| Layer | a page-wide surface over the page or window (Overview, Peek); `keeps_escape` when Escape is its content's | `Host::layer`, `frame::Layer` |
+| Escape and the stack | Escape closes only the top popup, menu or layer; an app's own Escape is for its own modes, when the stack is empty | `frame::key`, `frame::dismiss_top` |
+| Panel | content opened beside the page (a file, a card, Send): a `PanelView` with its head, Back and `may_close` | `Host::show_panel`, `panel::Panel`, `panel::PanelView` |
+| Edge column | a column at the window's edge in an app without the shell (Desk's asks): head, Close, grip, slide | `panel::EdgeColumn` |
+| Side section | a page's part of the shell's left column, on every page | `Host::lend_side` |
+| Grip | an edge dragged to size what it edges; double click puts the first width back | `kit::grip` |
+| Scroll area | everything that scrolls: down, across, or both (a picture, a board) | `pane::scroll`, `pane::scroll_x`, `pane::scroll_both` |
+| Page skeleton | a list beside the thing, its heads, rows, tables, lines, empty states and Send | `pane::page`, `list`, `detail`, `row`, `table`, `empty`, `send` |
+| Text field | any typed text, one line or a wrapping note, with undo | `widgets::field::TextField` (`widgets::undo`) |
+| Code | a file's text: line numbers, syntax, find, edits when asked | `widgets::code::Code` |
+| Rename in place | a name renamed where it is shown | `widgets::inline_edit::InlineEdit` |
+| Search | every filter of a list, forgiving a slipped letter, marking what matched | `text::fuzzy::filter`, `fuzzy::matches` |
+| Finder | picking a thing from a list by typing, keyboard first, one or several | `widgets::finder::Finder` |
+| Notices | the status line and the toast: `Host::report`, `Host::toast`; drawn over the page, or in the flow where an app gives them a place | `frame::notices`, `frame::notices_in` |
+| Settings file | an app's JSON settings: read, written, a broken file set aside, an outside edit picked up | `settings_file::SettingsFile`, `KeepsSettings` |
+| Page settings | a setting shown on Swarm's Settings page | `Page::SETTINGS`, `declared::Setting` |
+| Unsaved work | a view that holds edits not yet kept, asked about when the window closes | `Host::guard_close` |
+| Theme picker | choosing the theme, in every app | `widgets::theme_picker::button`, `open` |
+| Tip | a hover explanation: `.tooltip(kit::tip(why))` | `kit::tip` |
+| Buttons and toggles | an act (`Kind::Primary`, `Plain`, `Quiet`), a chosen option, a switch; a quiet act in a head | `kit::button`, `kit::option`, `kit::toggle`, `pane::act` |
+| Tabs | a bar of tabs with the shown one marked | `kit::tab_bar`, `kit::tab`, `kit::tab_label` |
+| Dragged file | a file on a node dragged from one page onto another | `drag::NodeFile` |
+| File picking | the desktop's picker, with a typed path where it has none | `widgets::path_picker::pick`, `pick_folder` |
+| Markdown | prose drawn in the theme, its links handed to the page | `widgets::markdown` |
+| Selectable text | prose selected and copied across a column | `widgets::select::Selectable` |
+| Tokens | every colour, size, corner, type size and motion | `theme` (`size`, `ty`, `board`, `fade`, `motion`), and a page's own tokens beside it |
+| AppFrame and Hub | `AppFrame` is a window's stack, status and toast, with no node; Swarm's `Hub` holds one beside the fleet and settings; Brain and Desk hold an `AppFrame` alone (App pages, Host, Hub and AppFrame) | `frame::AppFrame`, `hub::Hub` |
+
+`bin/ahjo/tests/layout.rs` refuses the hand-rolled forms outside the kit:
+a scroll area or scrollbar of a page's own, a popup placed with
+`anchored`, something drawn over the page with `deferred`, a press outside
+caught with `on_mouse_down_out`, and a type size, corner or colour written
+as a number. Its failure names the element to use. What it allows is
+listed in it, each with its reason, and only shrinks.
+
 ## One repository
 
 Swarm, Brain and Desk live in one repository. They share the app kit (theme,

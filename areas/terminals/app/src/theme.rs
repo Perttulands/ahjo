@@ -10,6 +10,8 @@ pub mod size {
     pub use ahjo_app_kit::theme::size::*;
 
     pub const STRIP: f32 = 44.;
+    /// A group's fold mark (▶ ▼) before its name.
+    pub const FOLD_GLYPH: f32 = 8.;
     /// A tab's name field while it is renamed in place.
     /// The least the Sessions tabs shrink to on a narrow bar: one tab and
     /// the `+` beside it.
@@ -105,6 +107,8 @@ pub mod place {
     pub const DEVICES: [u32; 6] = [0x3d5a80, 0x7a4f2e, 0x3f6b4a, 0x6a4a7d, 0x7d4a55, 0x2f6b6b];
     /// How light a plate is on a dark ground, where its ink is the ground.
     pub const PLATE_BRIGHT: f32 = 0.74;
+    /// The ink on a plate on a light ground.
+    pub const PLATE_INK_LIGHT: u32 = 0xffffff;
     /// How much of the secondary text colour the strip's edge and its
     /// texture take.
     pub const STRIP_EDGE: f32 = 0.6;

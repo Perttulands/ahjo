@@ -88,6 +88,7 @@ pub const STRIP_THUMB_W: f32 = 96.;
 pub const TRANSPORT: f32 = 40.;
 pub const TRACK_H: f32 = 6.;
 pub const TICK_W: f32 = 3.;
+pub const TICK_RADIUS: f32 = 1.;
 /// A key cap's height; a chip stands a little taller, so a pointer finds it.
 pub const CAP: f32 = 22.;
 /// The answer panel's measures. Its column stands in by `COLUMN_PAD`;
@@ -246,6 +247,17 @@ pub mod paper {
     pub const H3: f32 = 19.;
     pub const HAND_TEXT: f32 = 22.;
     pub const STAMP: f32 = 40.;
+    /// The sheet's head (whose it is, which round), and a mark's caption
+    /// in the margin, with their line heights.
+    pub const HEAD: f32 = 12.;
+    pub const HEAD_LINE: f32 = 16.;
+    pub const CAPTION: f32 = 10.;
+    pub const CAPTION_LINE: f32 = 14.;
+    /// Corners: the sheet's, a code block's and a note's; a card's and a
+    /// pen's; a mark's dot.
+    pub const CORNER: f32 = 2.;
+    pub const CARD_CORNER: f32 = 3.;
+    pub const DOT_CORNER: f32 = 1.;
     /// The page's margins, the column the notes stand in, and the room
     /// between blocks.
     pub const PAD_X: f32 = 44.;

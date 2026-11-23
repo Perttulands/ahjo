@@ -1061,7 +1061,7 @@ impl Terminals {
             .children(word.or(seat).map(|w| {
                 div()
                     .flex_none()
-                    .text_size(px(10.))
+                    .text_size(px(size::TINY))
                     .text_color(t.dim)
                     .child(w)
             }))
@@ -1082,7 +1082,7 @@ impl Terminals {
                 d.child(
                     div()
                         .flex_none()
-                        .text_size(px(10.))
+                        .text_size(px(size::TINY))
                         .text_color(t.accent)
                         .child("history"),
                 )
@@ -1677,11 +1677,11 @@ impl Terminals {
                 .flex()
                 .items_center()
                 .px(px(8.))
-                .rounded(px(3.))
+                .rounded(px(size::RADIUS_SMALL))
                 .bg(alpha(t.surface, 0.92))
                 .border_1()
                 .border_color(t.divider)
-                .text_size(px(11.))
+                .text_size(px(size::SMALL))
                 .text_color(t.text2)
                 .cursor_pointer()
                 .hover(|d| d.text_color(t.text))

@@ -27,10 +27,21 @@ pub mod size {
     pub const TAB_BAR: f32 = 44.;
     pub const ROW: f32 = 28.;
     pub const CONTROL: f32 = 28.;
+    /// Corners: a control's; a panel's standing over the page (a popup,
+    /// a menu, a tip); a small thing's (a key cap, a badge, a box); a
+    /// tag's, the least.
     pub const RADIUS: f32 = 4.;
+    pub const RADIUS_PANEL: f32 = 6.;
+    pub const RADIUS_SMALL: f32 = 3.;
+    pub const RADIUS_TAG: f32 = 2.;
     /// Chrome text and its small companion (labels, counts, hints).
     pub const TEXT: f32 = 13.;
     pub const SMALL: f32 = 11.;
+    /// Words a step under chrome text, beside what they explain: a note,
+    /// a tip, a key cap.
+    pub const NOTE: f32 = 12.;
+    /// The least words: a badge, a chip, a word on a row's state.
+    pub const TINY: f32 = 10.;
     /// The widest a notice over an empty page grows (a failed page's).
     pub const NOTICE: f32 = 420.;
     /// The name column of a page of settings or help.

@@ -553,7 +553,7 @@ impl ScheduledPage {
             .top(px((WEEK_LANE - WEEK_MARK_H) / 2.))
             .w(px(WEEK_MARK_W))
             .h(px(WEEK_MARK_H))
-            .rounded(px(1.))
+            .rounded(px(WEEK_MARK_RADIUS))
             .cursor_pointer()
             .map(|d| {
                 if m.kind == Kind::Paused {
@@ -686,7 +686,7 @@ fn legend(t: &Theme, paused: bool) -> Div {
                 div()
                     .w(px(WEEK_MARK_W))
                     .h(px(WEEK_MARK_H))
-                    .rounded(px(1.))
+                    .rounded(px(WEEK_MARK_RADIUS))
                     .map(|d| {
                         if hollow {
                             d.border_1().border_color(c)

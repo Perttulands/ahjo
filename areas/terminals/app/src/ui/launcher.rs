@@ -615,7 +615,7 @@ impl Render for Launcher {
                         .border_1()
                         .border_color(if chosen { t.accent } else { t.divider })
                         .when(chosen, |d| d.bg(t.accent_soft()))
-                        .text_size(px(12.))
+                        .text_size(px(size::NOTE))
                         .cursor_pointer()
                         .when(!u.is_empty(), |d| d.child(kit::user_square(&t, u)))
                         .child(label)
@@ -684,7 +684,12 @@ impl Render for Launcher {
                             },
                         )),
                     )
-                    .child(div().text_size(px(12.)).text_color(t.text2).child(label)),
+                    .child(
+                        div()
+                            .text_size(px(size::NOTE))
+                            .text_color(t.text2)
+                            .child(label),
+                    ),
             });
         let reset = (flags.trim() != default_flags.trim()).then(|| {
             let h = harness.clone();
@@ -744,7 +749,7 @@ impl Render for Launcher {
                                 .child(name)
                                 .child(
                                     div()
-                                        .text_size(px(11.))
+                                        .text_size(px(size::SMALL))
                                         .text_color(t.dim)
                                         .child(flag.description.clone()),
                                 )
@@ -870,7 +875,7 @@ impl Render for Launcher {
             .child(
                 div()
                     .h(px(16.))
-                    .text_size(px(11.))
+                    .text_size(px(size::SMALL))
                     .text_color(t.dim)
                     .overflow_hidden()
                     .whitespace_nowrap()

@@ -22,7 +22,7 @@ use ahjo_app_kit::widgets::kit::{self, GripEdge, Kind, Phase};
 use ahjo_app_kit::widgets::pane;
 use gpui::{
     AnyElement, ClickEvent, Context, Div, FontWeight, Hsla, IntoElement, ObjectFit, Render,
-    SharedString, Stateful, StyledImage, Window, deferred, div, img, prelude::*, px, relative,
+    SharedString, Stateful, StyledImage, Window, div, img, prelude::*, px, relative,
 };
 use std::rc::Rc;
 
@@ -233,15 +233,14 @@ impl DeskApp {
                     Phase::Reset => app.size_column(Grip::Talk, None, true, cx),
                 });
             },
-        )
-        .debug_selector(|| "grip-talk".into());
+        );
         div()
             .w(px(1.))
             .h_full()
             .flex_none()
             .bg(t.divider)
             .relative()
-            .child(deferred(grip))
+            .child(grip)
     }
 
     /// The list of asks at the window's left, as the kit draws a column at

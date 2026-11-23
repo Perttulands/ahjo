@@ -68,7 +68,7 @@ impl BrainApp {
                             .flex_none()
                             .mt(px(4.))
                             .size(px(7.))
-                            .rounded(px(7.))
+                            .rounded_full()
                             .bg(t.error),
                     )
                     .child(
@@ -170,7 +170,7 @@ impl BrainApp {
                             cx.notify();
                         }
                     }))
-                    .child(div().flex_none().size(px(7.)).rounded(px(7.)).bg(hue))
+                    .child(div().flex_none().size(px(7.)).rounded_full().bg(hue))
                     .child(
                         div()
                             .flex_1()
@@ -244,7 +244,7 @@ impl BrainApp {
                     .flex_none()
                     .when(!compact, |d| d.mt(px(5.)))
                     .size(px(7.))
-                    .rounded(px(7.))
+                    .rounded_full()
                     .bg(hue),
             )
             .child(
@@ -582,7 +582,7 @@ impl BrainApp {
             .tooltip(kit::tip(tip))
             .child(pointer::watch())
             .when(self.away_from.is_some(), |d| {
-                d.child(div().mr(px(8.)).size(px(7.)).rounded(px(7.)).bg(t.error))
+                d.child(div().mr(px(8.)).size(px(7.)).rounded_full().bg(t.error))
             })
             .on_click(cx.listener(|me, _, window, cx| me.choose_from(window, cx)))
             .child(label)
@@ -731,7 +731,7 @@ impl BrainApp {
                 InboxRow::Waiting(p) => {
                     let page = &data.corpus.pages[*p];
                     row(i, "waiting")
-                        .child(div().flex_none().size(px(7.)).rounded(px(7.)).bg(t.dim))
+                        .child(div().flex_none().size(px(7.)).rounded_full().bg(t.dim))
                         .child(
                             div()
                                 .flex_1()
@@ -791,7 +791,7 @@ impl BrainApp {
                         }
                     };
                     row(i, "filed")
-                        .child(div().flex_none().size(px(7.)).rounded(px(7.)).bg(hue))
+                        .child(div().flex_none().size(px(7.)).rounded_full().bg(hue))
                         .child(
                             div()
                                 .flex_1()

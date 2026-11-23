@@ -1234,7 +1234,7 @@ impl Render for Editor {
                         .hover(|s| s.bg(alpha(t.text, 0.06)))
                         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
                         .on_click(cx.listener(move |me, _, _, cx| me.take_pick(i, cx)))
-                        .child(div().flex_none().size(px(7.)).rounded(px(7.)).bg(name.hue))
+                        .child(div().flex_none().size(px(7.)).rounded_full().bg(name.hue))
                         .child(
                             div()
                                 .flex_1()

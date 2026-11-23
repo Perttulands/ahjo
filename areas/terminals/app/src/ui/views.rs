@@ -207,7 +207,7 @@ impl Terminals {
                         div()
                             .flex_none()
                             .px(px(4.))
-                            .rounded(px(3.))
+                            .rounded(px(size::RADIUS_SMALL))
                             .border_1()
                             .border_color(t.divider)
                             .text_color(t.dim)

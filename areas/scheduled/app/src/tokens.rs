@@ -24,6 +24,7 @@ pub const WEEK_LANE: f32 = 24.;
 pub const WEEK_LABEL_W: f32 = 200.;
 pub const WEEK_MARK_W: f32 = 3.;
 pub const WEEK_MARK_H: f32 = 12.;
+pub const WEEK_MARK_RADIUS: f32 = 1.;
 pub const WEEK_STEADY: f32 = 4.;
 pub const WEEK_NOW_W: f32 = 2.;
 pub const WEEK_AXIS_TOP: f32 = 4.;

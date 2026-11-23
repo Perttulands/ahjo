@@ -324,8 +324,8 @@ pub fn cap(t: &Theme, text: &str, filled: bool) -> Div {
         .h(px(22.))
         .flex()
         .items_center()
-        .rounded(px(3.))
-        .text_size(px(12.))
+        .rounded(px(size::RADIUS_SMALL))
+        .text_size(px(size::NOTE))
         .font_weight(FontWeight::BOLD)
         .child(text.to_string());
     if filled {
@@ -340,7 +340,7 @@ pub fn caps(t: &Theme, list: &[String]) -> Div {
     let mut row = div().flex().items_center().gap(px(6.));
     for (i, c) in list.iter().enumerate() {
         if i > 0 {
-            row = row.child(div().text_color(t.dim).text_size(px(12.)).child("+"));
+            row = row.child(div().text_color(t.dim).text_size(px(size::NOTE)).child("+"));
         }
         // Every cap but the key itself is a modifier (Alt, Shift, the
         // leader).
@@ -359,12 +359,12 @@ pub fn user_square(t: &Theme, user: &str) -> Div {
     div()
         .flex_none()
         .size(px(14.))
-        .rounded(px(2.))
+        .rounded(px(size::RADIUS_TAG))
         .bg(t.identity_of(user))
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(9.))
+        .text_size(px(INITIAL))
         .font_weight(FontWeight::BOLD)
         .text_color(t.text)
         .child(initial)
@@ -407,7 +407,7 @@ pub fn panel(t: &Theme) -> Div {
         .bg(t.surface)
         .border_1()
         .border_color(t.divider)
-        .rounded(px(6.))
+        .rounded(px(size::RADIUS_PANEL))
         .shadow_lg()
         .text_color(t.text)
         .text_size(px(size::TEXT))
@@ -421,7 +421,7 @@ pub fn rule(t: &Theme) -> Div {
 /// A muted line of text.
 pub fn note(t: &Theme, text: impl Into<SharedString>, c: Option<Hsla>) -> Div {
     div()
-        .text_size(px(12.))
+        .text_size(px(size::NOTE))
         .text_color(c.unwrap_or(t.text2))
         .child(text.into())
 }
@@ -441,13 +441,16 @@ pub fn badge(
         .h(px(16.))
         .flex()
         .items_center()
-        .rounded(px(3.))
+        .rounded(px(size::RADIUS_SMALL))
         .border_1()
         .border_color(t.divider)
-        .text_size(px(10.))
+        .text_size(px(size::TINY))
         .text_color(t.text2)
         .child(text.into())
 }
+
+/// A user's initial in its square ([`user_square`]).
+const INITIAL: f32 = 9.;
 
 /// A hover explanation, drawn like a menu: `.tooltip(kit::tip(why))`.
 pub fn tip(
@@ -483,7 +486,7 @@ impl Render for Tip {
             .max_w(px(320.))
             .px(px(8.))
             .py(px(4.))
-            .text_size(px(12.))
+            .text_size(px(size::NOTE))
             .text_color(t.text)
             .child(self.0.clone())
             .into_any_element()
@@ -536,19 +539,22 @@ pub enum Phase {
 /// width it makes, within `range`, as [`Phase::Moving`], and the release,
 /// caught wherever on the window it happens, as [`Phase::Kept`]; a double
 /// click hands [`Phase::Reset`]. The caller keeps the width. It stands
-/// absolutely at `edge` of the relative box it is put in.
+/// absolutely at `edge` of the relative box it is put in, half over what
+/// lies beyond the edge, so it is drawn after it (deferred) and caught on
+/// both sides. `name` names it and is its debug selector.
 #[allow(clippy::too_many_arguments)]
 pub fn grip(
     t: &Theme,
-    id: impl Into<ElementId>,
+    name: impl Into<SharedString>,
     edge: GripEdge,
     now: f32,
     range: (f32, f32),
     window: &mut gpui::Window,
     cx: &mut App,
     on: impl Fn(f32, Phase, &mut gpui::Window, &mut App) + 'static,
-) -> Stateful<Div> {
-    let id: ElementId = id.into();
+) -> gpui::Deferred {
+    let name: SharedString = name.into();
+    let id = ElementId::Name(name.clone());
     // Where the press was, and the width then, while held.
     let held = window.use_keyed_state(id.clone(), cx, |_, _| None::<(f32, f32)>);
     let is_held = held.read(cx).is_some();
@@ -568,8 +574,9 @@ pub fn grip(
         .h_full()
         .group_hover("grip", |d| d.bg(t.accent_soft()))
         .when(is_held, |d| d.bg(t.accent_soft()));
-    div()
+    let grip = div()
         .id(id)
+        .debug_selector(move || name.to_string())
         .group("grip")
         .absolute()
         .top_0()
@@ -644,5 +651,6 @@ pub fn grip(
             )
             .absolute()
             .size_full(),
-        )
+        );
+    gpui::deferred(grip)
 }

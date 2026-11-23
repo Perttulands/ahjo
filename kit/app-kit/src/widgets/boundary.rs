@@ -10,6 +10,10 @@ use gpui::{AnyElement, Div, Hsla, Stateful, div, prelude::*, px};
 use std::cell::RefCell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+/// The failed view's notice: its sign and its words.
+const GLYPH: f32 = 28.;
+const TITLE: f32 = 16.;
+
 thread_local! {
     /// A failure in drawing that runs after a page has been built (a
     /// canvas painting), until the next frame takes it to its page.
@@ -64,10 +68,10 @@ pub fn failed(t: &Theme, view: &str, message: &str, retry: Stateful<Div>) -> Any
                 .flex_col()
                 .items_center()
                 .gap(px(10.))
-                .child(div().text_size(px(28.)).text_color(t.error).child("⚠"))
+                .child(div().text_size(px(GLYPH)).text_color(t.error).child("⚠"))
                 .child(
                     div()
-                        .text_size(px(16.))
+                        .text_size(px(TITLE))
                         .text_color(t.text)
                         .child("Something went wrong"),
                 )

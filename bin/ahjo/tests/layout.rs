@@ -185,11 +185,133 @@ fn an_areas_tests_build_no_binary() {
     }
 }
 
-/// Every scroll area is `pane::scroll` (or `scroll_x`): a column that
-/// gives way in its parent and shows its thumb. One built by hand in a
-/// row measures nothing past its height, as Desk's document once did.
+/// A hand-rolled form of an interaction the kit owns, as one line of
+/// source shows it.
+struct HandRolled {
+    /// What the line builds by hand.
+    what: &'static str,
+    finds: fn(&str) -> bool,
+    /// The only files (or folders, ending in `/`) where it may stand: the
+    /// kit element's own. Empty where it stands nowhere.
+    home: &'static [&'static str],
+    /// The kit's element to use instead.
+    instead: &'static str,
+}
+
+/// `call(` with a number written straight into its `px(..)`: `text_size(px(12.))`.
+fn literal_px(line: &str, call: &str) -> bool {
+    let call = format!("{call}(px(");
+    line.match_indices(&call).any(|(at, _)| {
+        let rest = &line[at + call.len()..];
+        rest.starts_with(|c: char| c.is_ascii_digit() || c == '-')
+    })
+}
+
+const HAND_ROLLED: &[HandRolled] = &[
+    HandRolled {
+        what: "a scroll area built by hand",
+        finds: |line| {
+            [
+                "overflow_y_scroll",
+                "overflow_x_scroll",
+                "overflow_scroll()",
+            ]
+            .iter()
+            .any(|bare| line.contains(bare))
+        },
+        home: &["kit/app-kit/src/widgets/pane.rs"],
+        instead: "pane::scroll, pane::scroll_x or pane::scroll_both",
+    },
+    HandRolled {
+        what: "a scrollbar drawn by hand",
+        finds: |line| {
+            let lower = line.to_lowercase();
+            lower.contains("scrollbar") || lower.contains("scroll_bar")
+        },
+        home: &["kit/app-kit/src/widgets/pane.rs"],
+        instead: "pane::scroll, which draws its own thumb",
+    },
+    HandRolled {
+        what: "a popup placed by hand (anchored)",
+        finds: |line| line.contains("anchored("),
+        home: &["kit/"],
+        instead: "Host::popup (Popup::beside, a menu or popup::form), placed by popup::beside",
+    },
+    HandRolled {
+        what: "something drawn over the page by hand (deferred)",
+        finds: |line| line.contains("deferred("),
+        home: &["kit/"],
+        instead: "Host::popup or Host::layer on the frame's stack, kit::grip for an edge",
+    },
+    HandRolled {
+        what: "a press outside caught by hand (on_mouse_down_out)",
+        finds: |line| line.contains("on_mouse_down_out"),
+        home: &["kit/"],
+        instead: "a popup's Outside::Close or Outside::Keep",
+    },
+    HandRolled {
+        what: "a type size written as a number",
+        finds: |line| literal_px(line, "text_size") || literal_px(line, "line_height"),
+        home: &[],
+        instead: "theme::size (TEXT, NOTE, SMALL, TINY), theme::ty, or the page's tokens",
+    },
+    HandRolled {
+        what: "a corner written as a number",
+        finds: |line| literal_px(line, "rounded"),
+        home: &[],
+        instead: "theme::size::RADIUS and its kin, rounded_full, or the page's tokens",
+    },
+    HandRolled {
+        what: "a colour written as a number",
+        finds: |line| {
+            ["rgb(0x", "rgba(0x", "hsla("]
+                .iter()
+                .any(|literal| line.contains(literal))
+        },
+        home: &[],
+        instead: "the theme's colours, or a colour token in the page's tokens",
+    },
+];
+
+/// Hand-rolled forms kept for now, by file and what was found: each a
+/// debt, with the reason it stands. One that no longer finds anything is
+/// refused too, so the list only shrinks.
+const ALLOWED: &[(&str, &str, &str)] = &[
+    (
+        "areas/terminals/app/src/ui/tiles.rs",
+        "something drawn over the page by hand (deferred)",
+        "the divider between two tiled windows shares a split along either \
+         axis; kit::grip sizes one edge's width across, so the kit has no \
+         element for it yet",
+    ),
+    (
+        "areas/terminals/app/src/ui/rail.rs",
+        "a press outside caught by hand (on_mouse_down_out)",
+        "Peek closes on any press outside it and lets that press act where \
+         it lands (ARCHITECTURE.md, The panel); a popup's Outside::Close \
+         swallows it",
+    ),
+    (
+        "bin/ahjo-brain/src/editor.rs",
+        "a popup placed by hand (anchored)",
+        "the pages offered for a `[[` follow the caret and change with each \
+         key while the keyboard stays in the text; a popup stands still \
+         and takes the keyboard",
+    ),
+    (
+        "bin/ahjo-brain/src/editor.rs",
+        "something drawn over the page by hand (deferred)",
+        "the same pages offered at the caret, drawn over the text",
+    ),
+];
+
+/// Every interaction is the kit's element (AGENTS.md, Code;
+/// ARCHITECTURE.md, Kit): its hand-rolled forms stand only in the kit's
+/// own files. A scroll area built by hand in a row measured nothing past
+/// its height, as Desk's document once did; a popup placed by hand had
+/// its own Escape, outside press and focus, each different.
 #[test]
-fn every_scroll_area_is_the_kits() {
+fn every_interaction_is_the_kits() {
     fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
@@ -203,26 +325,62 @@ fn every_scroll_area_is_the_kits() {
             }
         }
     }
-    let root = root();
-    let the_one = root.join("kit/app-kit/src/widgets/pane.rs");
+    let root = fs::canonicalize(root()).unwrap();
     let mut files = vec![];
     for top in ["kit", "areas", "bin", "engine"] {
         sources(&root.join(top), &mut files);
     }
-    // Spelled in parts, so this file is not found by its own words.
-    let bare = ["y_scroll", "x_scroll", "scroll()"].map(|end| format!("overflow_{end}"));
     let mut found = vec![];
-    for file in files.iter().filter(|file| **file != the_one) {
-        let text = fs::read_to_string(file).unwrap();
+    let mut used = vec![false; ALLOWED.len()];
+    for file in files {
+        let shown = file
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        // This file names what it looks for.
+        if shown == "bin/ahjo/tests/layout.rs" {
+            continue;
+        }
+        let text = fs::read_to_string(&file).unwrap();
         for (n, line) in text.lines().enumerate() {
-            if bare.iter().any(|bare| line.contains(bare.as_str())) {
-                let shown = file.strip_prefix(&root).unwrap().display();
-                found.push(format!("{shown}:{}", n + 1));
+            // What a comment says is not code.
+            let code = line.split_once("//").map_or(line, |(code, _)| code);
+            for rolled in HAND_ROLLED.iter().filter(|rolled| (rolled.finds)(code)) {
+                let at_home = rolled.home.iter().any(|home| match home.strip_suffix('/') {
+                    Some(dir) => shown.starts_with(&format!("{dir}/")),
+                    None => shown == *home,
+                });
+                if at_home {
+                    continue;
+                }
+                let allowed = ALLOWED
+                    .iter()
+                    .position(|(path, what, _)| *path == shown && *what == rolled.what);
+                match allowed {
+                    Some(i) => used[i] = true,
+                    None => found.push(format!(
+                        "{shown}:{}: {}; use {}",
+                        n + 1,
+                        rolled.what,
+                        rolled.instead
+                    )),
+                }
             }
+        }
+    }
+    for ((path, what, _), used) in ALLOWED.iter().zip(used) {
+        if !used {
+            found.push(format!(
+                "{path}: allowed {what}, but it is gone: take it off ALLOWED"
+            ));
         }
     }
     assert!(
         found.is_empty(),
-        "scroll areas built by hand, not with pane::scroll: {found:?}"
+        "hand-rolled forms of what the kit owns; ARCHITECTURE.md (Kit) lists \
+         each kit element and when to use it, and where the kit falls short, \
+         extend it in kit/:\n  {}",
+        found.join("\n  ")
     );
 }

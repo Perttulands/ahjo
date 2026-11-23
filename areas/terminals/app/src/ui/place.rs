@@ -4,7 +4,7 @@
 //! in `theme::place`.
 
 use crate::theme::place::{self, Texture};
-use crate::theme::{Theme, alpha, rgb};
+use crate::theme::{Theme, alpha, rgb, size};
 use gpui::{Bounds, Div, FontWeight, Hsla, PathBuilder, canvas, div, point, prelude::*, px};
 
 /// The plate's fill and the ink on it. The device's colour is a deep one:
@@ -14,7 +14,7 @@ use gpui::{Bounds, Div, FontWeight, Hsla, PathBuilder, canvas, div, point, prelu
 fn plate_colours(t: &Theme, device: &str) -> (Hsla, Hsla) {
     let deep = rgb(place::device_colour(device));
     if t.light {
-        return (deep, rgb(0xffffff));
+        return (deep, rgb(place::PLATE_INK_LIGHT));
     }
     let bright = Hsla {
         l: place::PLATE_BRIGHT,
@@ -32,10 +32,10 @@ pub fn plate(t: &Theme, device: &str) -> Div {
         .px(px(6.))
         .flex()
         .items_center()
-        .rounded(px(2.))
+        .rounded(px(size::RADIUS_TAG))
         .bg(fill)
         .text_color(ink)
-        .text_size(px(11.))
+        .text_size(px(size::SMALL))
         .font_weight(FontWeight::BOLD)
         .child(device.to_uppercase())
 }
@@ -54,8 +54,8 @@ pub fn strip(t: &Theme, environment: &str, width: f32) -> Div {
         .gap(px(6.))
         .border_1()
         .border_color(alpha(t.text2, place::STRIP_EDGE))
-        .rounded(px(2.))
-        .text_size(px(10.))
+        .rounded(px(size::RADIUS_TAG))
+        .text_size(px(size::TINY))
         .text_color(t.text2)
         .child(word)
         .child(

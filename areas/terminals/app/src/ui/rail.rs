@@ -147,7 +147,7 @@ impl Terminals {
             div()
                 .px(px(16.))
                 .pb(px(8.))
-                .text_size(px(12.))
+                .text_size(px(size::NOTE))
                 .text_color(t.dim)
                 .child(text)
         };
@@ -267,7 +267,7 @@ impl Terminals {
             .child(
                 div()
                     .w(px(10.))
-                    .text_size(px(8.))
+                    .text_size(px(size::FOLD_GLYPH))
                     .text_color(t.dim)
                     .child(if collapsed { "▶" } else { "▼" }),
             )
@@ -413,7 +413,7 @@ impl Terminals {
                                 let question = question.lines().find(|l| !l.trim().is_empty());
                                 div()
                                     .debug_selector(|| "row-asks".into())
-                                    .text_size(px(11.))
+                                    .text_size(px(size::SMALL))
                                     .text_color(t.needs)
                                     .overflow_hidden()
                                     .text_ellipsis()
@@ -424,7 +424,7 @@ impl Terminals {
                             }))
                             .children(mark.as_ref().filter(|e| !e.summary.is_empty()).map(|e| {
                                 div()
-                                    .text_size(px(11.))
+                                    .text_size(px(size::SMALL))
                                     .text_color(t.dim)
                                     .overflow_hidden()
                                     .text_ellipsis()
@@ -442,7 +442,7 @@ impl Terminals {
             .child(
                 div()
                     .flex_none()
-                    .text_size(px(10.))
+                    .text_size(px(size::TINY))
                     .text_color(if activity == "active" {
                         t.running
                     } else {
@@ -465,7 +465,7 @@ impl Terminals {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(3.))
+                    .rounded(px(size::RADIUS_SMALL))
                     .text_color(t.dim)
                     .group_hover(group.clone(), |d| d.text_color(t.text2))
                     .hover(|d| d.bg(t.raised).text_color(t.text))
@@ -608,7 +608,7 @@ impl Terminals {
             .children(word.map(|w| {
                 div()
                     .flex_none()
-                    .text_size(px(12.))
+                    .text_size(px(size::NOTE))
                     .text_color(t.dim)
                     .child(w)
             }))
@@ -647,7 +647,7 @@ impl Terminals {
                     .child(
                         div()
                             .flex_none()
-                            .text_size(px(11.))
+                            .text_size(px(size::SMALL))
                             .text_color(t.dim)
                             .child("Shift+Esc"),
                     ),
@@ -760,7 +760,7 @@ fn waiting_word(t: &Theme, away: bool) -> gpui::Div {
     div()
         .flex_none()
         .when(!away, |d| d.opacity(0.))
-        .text_size(px(10.))
+        .text_size(px(size::TINY))
         .text_color(t.dim)
         .child("waiting")
 }
@@ -784,7 +784,7 @@ fn command_word(t: &Theme, s: &Session) -> Option<AnyElement> {
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .text_size(px(10.))
+                        .text_size(px(size::TINY))
                         .text_color(t.dim)
                         .child(c.to_string()),
                 )
@@ -805,7 +805,7 @@ pub(super) fn running_mark(t: &Theme, s: &Session, cx: &gpui::App) -> Option<Any
                 .max_w(px(64.))
                 .overflow_hidden()
                 .whitespace_nowrap()
-                .text_size(px(10.))
+                .text_size(px(size::TINY))
                 .text_color(t.dim)
                 .child(c.to_string())
                 .into_any_element(),
@@ -901,7 +901,7 @@ fn ask_mark(t: &Theme, key: &Key) -> AnyElement {
         .rounded_full()
         .bg(t.needs)
         .text_color(t.bg)
-        .text_size(px(10.))
+        .text_size(px(size::TINY))
         .font_weight(gpui::FontWeight::BOLD)
         .flex()
         .items_center()
@@ -918,7 +918,7 @@ fn glyph(t: &Theme, id: String, mark: &'static str, why: String) -> AnyElement {
     div()
         .id(gpui::SharedString::from(format!("glyph-{id}")))
         .flex_none()
-        .text_size(px(11.))
+        .text_size(px(size::SMALL))
         .text_color(t.text2)
         .tooltip(move |_, cx| cx.new(|_| kit::Tip(why.clone().into())).into())
         .child(mark)
