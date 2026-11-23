@@ -58,7 +58,10 @@ heavy run --memory 8 -- cargo nextest run -p ahjo --test layout --test areas
 Make style edits before the checks: a recheck waits for `heavy` again.
 
 When they pass, push and bring the shared checkout up to it, which only
-moves `/srv/ahjo` when it is on `main` with nothing changed:
+moves `/srv/ahjo` when it is on `main` with no tracked file changed.
+Untracked files do not count: a fast-forward refuses to overwrite one, and
+the operator keeps some there, so counting them would block every
+fast-forward:
 
 ```sh
 git fetch origin && git rebase origin/main && git push origin HEAD:main
@@ -93,8 +96,11 @@ that started them, whatever runs your shell:
    With `HOME` and the roots in your scratch folder, nothing of the
    operator's shows in a screenshot. `$B/ahjo version --node
    127.0.0.1:<port>` answers when it is up.
-4. `$R new-window -t node "Xvfb :<n> -screen 0 1600x1000x24 -nolisten tcp"`,
-   then
+4. Start the display and keep its process id:
+   `X=$($R new-window -P -F '#{pane_pid}' -t node "exec Xvfb :<n> -screen 0 1600x1000x24 -nolisten tcp")`.
+   It is up, and yours, once `/tmp/.X<n>-lock` holds `$X`
+   (`test "$(tr -d ' ' </tmp/.X<n>-lock)" = "$X"`); another id there means
+   another lane took the display, so pick a new number. Then
    `$R new-window -t node "env -u WAYLAND_DISPLAY DISPLAY=:<n> VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json XDG_CONFIG_HOME=$S/xdg AHJO_SWARM_CONFIG=$S/app.json AHJO_SWARM_BOUNDS=0,0,1600,1000 $B/ahjo-swarm --node http://127.0.0.1:<port> 2>$S/app.log"`.
 5. Open the page with `$B/ahjo view open <page> --node http://127.0.0.1:<port>`
    (every `ahjo` call names your node with `--node`, or it reaches the
@@ -106,6 +112,5 @@ that started them, whatever runs your shell:
    next screenshot. Walk a journey this way, not by opening pages alone:
    clicks, keys and typing are what show focus, order and dead ends.
 6. Stop what you started: `$R kill-server` ends the app and the node,
-   `kill $(cat /tmp/.X<n>-lock)` the display (Xvfb outlives the tmux
-   server's hangup), and `$AHJO_TMUX -S $S/tmux.sock kill-server` the
+   `kill $X` the display (Xvfb outlives the tmux server's hangup), and `$AHJO_TMUX -S $S/tmux.sock kill-server` the
    terminals.
