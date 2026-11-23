@@ -191,9 +191,10 @@ impl Server {
 
 impl Server {
     /// Ends the server as `kill-server` does, returning only once its
-    /// process has exited: `kill-server` answers before the server is gone,
-    /// so a command sent right after it can reach the exiting server. The
-    /// next command that needs a server starts a new one on the same socket.
+    /// process has exited and its socket refuses connections: `kill-server`
+    /// answers before the server is gone, so a command sent right after it
+    /// can reach the exiting server. The next command that needs a server
+    /// starts a new one on the same socket.
     pub fn kill(&self) {
         if let Err(error) = self.stop() {
             panic!("tmux server in {}: {error}", self.dir.display());
@@ -201,8 +202,9 @@ impl Server {
     }
 
     /// Stops this test's server, if one runs, and waits until its process has
-    /// exited. The socket is in this test's private directory, so whatever
-    /// answers there is this test's; it is stopped by its process id.
+    /// exited and nothing listens on its socket. The socket is in this test's
+    /// private directory, so whatever answers there is this test's; it is
+    /// stopped by its process id.
     fn stop(&self) -> Result<(), String> {
         let deadline = Instant::now() + crate::timeout(Duration::from_secs(10));
         let pid = loop {
@@ -241,12 +243,35 @@ impl Server {
             if unsafe { libc::kill(pid, 0) } != 0
                 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
             {
-                return Ok(());
+                break;
             }
             if Instant::now() > deadline {
                 return Err(format!("server {pid} still runs after SIGTERM"));
             }
             std::thread::sleep(Duration::from_millis(20));
+        }
+        // A process the server forked (a pane's, on its way to exec) holds a
+        // copy of the listening socket until it closes its descriptors, so
+        // the socket may outlive the server. A client connecting meanwhile is queued on it
+        // and told the server exited unexpectedly once that pane lets go.
+        loop {
+            match std::os::unix::net::UnixStream::connect(self.socket_path()) {
+                Err(error)
+                    if matches!(
+                        error.raw_os_error(),
+                        Some(libc::ECONNREFUSED | libc::ENOENT)
+                    ) =>
+                {
+                    return Ok(());
+                }
+                Err(error) => return Err(format!("reaching its socket: {error}")),
+                Ok(_) if Instant::now() > deadline => {
+                    return Err(format!(
+                        "its socket still listens after server {pid} exited"
+                    ));
+                }
+                Ok(_) => std::thread::sleep(Duration::from_millis(20)),
+            }
         }
     }
 }
