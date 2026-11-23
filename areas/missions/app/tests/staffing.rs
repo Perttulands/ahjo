@@ -226,6 +226,11 @@ fn catalog_pickers_offer_sorted_agents_and_model_efforts_and_save_the_choice(
     click(cx, "undo");
     until(cx, "staffing undo saved", |_| read().0 == rev + 2);
     assert_eq!(read().1, original, "undo must restore the exact seat");
+    // The node has the undo before the page has its answer; a pick made
+    // meanwhile waits for a write that has already gone.
+    until(cx, "redo ready after the undo", |cx| {
+        cx.debug_bounds("redo").is_some()
+    });
     // Harness default is a distinct explicit choice when the agent has a model.
     click(cx, "staffing-model-harness-default");
     until(cx, "harness default saved", |_| {

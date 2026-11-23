@@ -125,6 +125,11 @@ fn canvas_note_pin_opens_thread_and_preserves_edits(cx: &mut TestAppContext) {
     until(cx, "edited note", |_| {
         read()["notes"]["elements"][0]["entries"][0]["text"] == "Changed note"
     });
+    // The node has the note before the page has its answer, and until it
+    // does the draft is unsaved and the thread refuses to close.
+    until(cx, "the page took the save", |cx| {
+        !has(cx, "canvas-note-discard")
+    });
     click(cx, "canvas-note-close-fmn_work");
     until(cx, "closed thread", |cx| !has(cx, "canvas-note-field"));
     // Closed, the thread is its count on the mark, which opens it again.

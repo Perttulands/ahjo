@@ -110,6 +110,11 @@ fn agent_view_reads_a_folder_and_saves_an_instruction_in_place(cx: &mut TestAppC
     until(cx, "the edit on disk", |_| {
         std::fs::read_to_string(&mine).is_ok_and(|s| s.ends_with("Be brief.\nSay why.\n"))
     });
+    // The node writes the file before the page has its answer, and until it
+    // does the page is still editing and refuses another pick.
+    until(cx, "the editor closed", |cx| {
+        cx.debug_bounds("shape-edit").is_some()
+    });
     // A hook added in place lands in the operator's settings.
     click(cx, "shape-hook-add");
     click(cx, "shape-hook-field-Run");

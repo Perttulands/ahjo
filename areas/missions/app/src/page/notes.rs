@@ -652,6 +652,7 @@ impl MissionsPage {
                     |d| {
                         d.child(
                             kit::button(t, "canvas-note-discard", "Discard", Kind::Quiet)
+                                .debug_selector(|| "canvas-note-discard".into())
                                 .on_click(cx.listener(|page, _, _, cx| page.discard_note(cx))),
                         )
                     },
