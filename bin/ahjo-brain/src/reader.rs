@@ -10,6 +10,7 @@
 use crate::app::{BrainApp, Data};
 use crate::corpus;
 use crate::tokens::reader as r;
+use ahjo_app_kit::Error;
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, theme};
 use ahjo_app_kit::widgets::markdown::{Block, Span, inline, parse};
 use ahjo_app_kit::widgets::{kit, pane};
@@ -26,7 +27,7 @@ pub struct Reader {
     app: WeakEntity<BrainApp>,
     data: Option<Rc<Data>>,
     page: Option<usize>,
-    body: Option<Result<Vec<Block>, String>>,
+    body: Option<Result<Vec<Block>, Error>>,
     scroll: ScrollHandle,
     asked: u64,
     /// The body's size as zoomed (`ahjo_app_kit::zoom`); the rest of the
@@ -124,7 +125,7 @@ impl Reader {
                     let text = String::from_utf8_lossy(&bytes);
                     without_title(corpus::body(&text), &title)
                 })
-                .map_err(|e| format!("{}: {e}", file.display()))
+                .map_err(|e| Error::new("page_unreadable", format!("{}: {e}", file.display())))
         });
         cx.spawn(async move |me, cx| {
             // The links take their pages' titles here, where the brain is;
@@ -749,7 +750,7 @@ impl Render for Reader {
             None => div().text_color(t.dim).child("…").into_any_element(),
             Some(Err(e)) => div()
                 .text_color(t.error)
-                .child(format!("This page did not read: {e}"))
+                .child(format!("This page did not read: {}", e.message))
                 .into_any_element(),
             Some(Ok(blocks)) if blocks.is_empty() => div()
                 .text_color(t.dim)

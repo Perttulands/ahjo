@@ -10,6 +10,7 @@
 
 use crate::front;
 use crate::history;
+use ahjo_app_kit::Error;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -44,7 +45,7 @@ struct Out {
 
 /// The inbox notes that agents filed, newest first. Blocking: run it
 /// off the UI.
-pub fn read(root: &Path) -> Result<Vec<Filed>, String> {
+pub fn read(root: &Path) -> Result<Vec<Filed>, Error> {
     let out = run(
         history::git(root).args([
             "log",
@@ -107,7 +108,7 @@ pub fn read(root: &Path) -> Result<Vec<Filed>, String> {
         .collect())
 }
 
-fn run(cmd: &mut std::process::Command, input: Option<&[u8]>) -> Result<String, String> {
+fn run(cmd: &mut std::process::Command, input: Option<&[u8]>) -> Result<String, Error> {
     use std::process::Stdio;
     let mut child = cmd
         .stdin(if input.is_some() {
@@ -118,7 +119,7 @@ fn run(cmd: &mut std::process::Command, input: Option<&[u8]>) -> Result<String, 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("git did not run: {e}"))?;
+        .map_err(|e| Error::new("git_unavailable", format!("git did not run: {e}")))?;
     if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
         // Written from another thread, so a long answer cannot stall it.
         let bytes = bytes.to_vec();
@@ -128,11 +129,14 @@ fn run(cmd: &mut std::process::Command, input: Option<&[u8]>) -> Result<String, 
     }
     let out = child
         .wait_with_output()
-        .map_err(|e| format!("git did not answer: {e}"))?;
+        .map_err(|e| Error::new("git_failed", format!("git did not answer: {e}")))?;
     if !out.status.success() {
-        return Err(format!(
-            "git could not read the brain's history: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+        return Err(Error::new(
+            "git_failed",
+            format!(
+                "git could not read the brain's history: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
         ));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())

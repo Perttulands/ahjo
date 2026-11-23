@@ -7,6 +7,7 @@
 //! collections, a reformatting pass), not attention paid to them, so it is
 //! left out and only counted.
 
+use ahjo_app_kit::Error;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -30,7 +31,7 @@ pub struct History {
 }
 
 /// Reads the brain's log with Git. Blocking: run it off the UI.
-pub fn read(root: &Path) -> Result<History, String> {
+pub fn read(root: &Path) -> Result<History, Error> {
     let mut git = git(root);
     git.args(["-c", "diff.renameLimit=20000"]).args([
         "log",
@@ -41,12 +42,18 @@ pub fn read(root: &Path) -> Result<History, String> {
         "*.md",
     ]);
     let out = git.output().map_err(|e| {
-        format!("the replay reads the brain's history with git, which did not run: {e}")
+        Error::new(
+            "git_unavailable",
+            format!("the replay reads the brain's history with git, which did not run: {e}"),
+        )
     })?;
     if !out.status.success() {
-        return Err(format!(
-            "git could not read the brain's history: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+        return Err(Error::new(
+            "git_failed",
+            format!(
+                "git could not read the brain's history: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
         ));
     }
     Ok(parse(&String::from_utf8_lossy(&out.stdout)))

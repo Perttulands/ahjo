@@ -13,6 +13,7 @@
 use crate::citadel;
 use crate::front::{self, Head};
 use crate::tokens::editor as e;
+use ahjo_app_kit::Error;
 use ahjo_app_kit::theme::{FAMILY, alpha, size, theme};
 use ahjo_app_kit::widgets::code::{Code, CodeEvent};
 use ahjo_app_kit::widgets::field::{self, FieldEvent, TextField};
@@ -339,7 +340,7 @@ enum NotSaved {
     Changed(String),
     /// Citadel's words: a check that refused, a writer mid-change, or no
     /// Citadel.
-    Refused(String),
+    Refused(Error),
 }
 
 /// The open `[[`: where its typed words start, and the pages offered.
@@ -1015,7 +1016,7 @@ impl Editor {
                         if named {
                             me.path = draft_path.clone();
                         }
-                        me.said = Some(Said::Refused(plain_refusal(&why)));
+                        me.said = Some(Said::Refused(plain_refusal(&why.message)));
                         cx.emit(EditorEvent::NotSaved);
                     }
                 }

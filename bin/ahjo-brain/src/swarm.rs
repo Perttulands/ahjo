@@ -9,6 +9,7 @@
 
 use crate::citadel::{post_to, split_answer};
 use crate::mirror::Remote;
+use ahjo_app_kit::Error;
 use ahjo_app_kit::settings::{self, DEFAULT_NODE, Settings};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -83,7 +84,7 @@ pub fn file_on_node(root: &str, path: &str) -> String {
 }
 
 /// Hands `text` to Swarm's Send. Blocking: run it off the UI.
-pub fn send(node: &str, text: &str) -> Result<(), String> {
+pub fn send(node: &str, text: &str) -> Result<(), Error> {
     let call = json!({
         "jsonrpc": "2.0", "id": 1, "method": "tools/call",
         "params": { "name": "view_send", "arguments": { "text": text } },
@@ -91,24 +92,34 @@ pub fn send(node: &str, text: &str) -> Result<(), String> {
     let raw = post_to("Ahjo Swarm's node", node, "/mcp", &call, WAIT)?;
     let (status, body) = split_answer(&raw)?;
     if status != 200 {
-        return Err(format!("Ahjo Swarm's node refused it ({status})"));
+        return Err(Error::new(
+            "send_refused",
+            format!("Ahjo Swarm's node refused it ({status})"),
+        ));
     }
     read_answer(body)
 }
 
 /// A tool call's answer: done, or the node's words for why not.
-fn read_answer(body: &[u8]) -> Result<(), String> {
-    let answer: Value =
-        serde_json::from_slice(body).map_err(|_| "the node answered in a way not understood")?;
+fn read_answer(body: &[u8]) -> Result<(), Error> {
+    let answer: Value = serde_json::from_slice(body).map_err(|_| {
+        Error::new(
+            "unreadable_answer",
+            "the node answered in a way not understood",
+        )
+    })?;
     let result = &answer["result"];
     if result["isError"] == false {
         return Ok(());
     }
     if let Some(m) = answer["error"]["message"].as_str() {
         return Err(if m.starts_with("Unknown tool") {
-            "Ahjo Swarm's node is older than this Send; update Ahjo.".into()
+            Error::new(
+                "node_outdated",
+                "Ahjo Swarm's node is older than this Send; update Ahjo.",
+            )
         } else {
-            m.to_string()
+            Error::new("send_refused", m)
         });
     }
     let said: Value = result["content"][0]["text"]
@@ -116,11 +127,14 @@ fn read_answer(body: &[u8]) -> Result<(), String> {
         .and_then(|t| serde_json::from_str(t).ok())
         .unwrap_or(Value::Null);
     Err(match said["code"].as_str() {
-        Some("no_app") => "Ahjo Swarm is not open on its node; open it and Send again.".into(),
-        _ => said["message"]
-            .as_str()
-            .unwrap_or("the node refused it")
-            .to_string(),
+        Some("no_app") => Error::new(
+            "no_app",
+            "Ahjo Swarm is not open on its node; open it and Send again.",
+        ),
+        _ => Error::new(
+            "send_refused",
+            said["message"].as_str().unwrap_or("the node refused it"),
+        ),
     })
 }
 
@@ -136,15 +150,16 @@ mod tests {
         assert!(
             read_answer(none)
                 .unwrap_err()
+                .message
                 .starts_with("Ahjo Swarm is not open")
         );
         let other = br#"{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"code\":\"timeout\",\"message\":\"The app did not answer within 5 s.\"}"}],"isError":true}}"#;
         assert_eq!(
             read_answer(other).unwrap_err(),
-            "The app did not answer within 5 s."
+            Error::new("send_refused", "The app did not answer within 5 s.")
         );
         let old = br#"{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Unknown tool: view_send"}}"#;
-        assert!(read_answer(old).unwrap_err().contains("older"));
+        assert_eq!(read_answer(old).unwrap_err().code, "node_outdated");
         assert_eq!(
             reference("/srv/data/context/knowledge/a/b.md"),
             "brain page /srv/data/context/knowledge/a/b.md"

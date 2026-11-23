@@ -170,7 +170,7 @@ impl Replay {
 
 enum Replaying {
     Reading,
-    Failed(String),
+    Failed(Error),
     Ready(Replay),
 }
 
@@ -315,7 +315,7 @@ pub struct BrainApp {
     syncing: bool,
     /// Why the copy read is as last copied: the other machine did not
     /// answer.
-    away_from: Option<String>,
+    away_from: Option<Error>,
     data: Option<Rc<Data>>,
     entries: Vec<Entry>,
     marker: Option<SystemTime>,
@@ -327,7 +327,7 @@ pub struct BrainApp {
     results: Vec<Found>,
     /// Why Citadel did not answer the last search, which was then matched
     /// here against titles and aliases.
-    away: Option<String>,
+    away: Option<Error>,
     pick: Option<usize>,
     reading: Option<usize>,
     back: Vec<usize>,
@@ -396,7 +396,7 @@ pub struct BrainApp {
     inbox_focus: FocusHandle,
     /// The notes caught here that agents filed, as the brain's history last
     /// told it, or why it did not.
-    filed: Option<Result<Vec<inbox::Filed>, String>>,
+    filed: Option<Result<Vec<inbox::Filed>, Error>>,
 }
 
 impl KeepsSettings for BrainApp {
@@ -1255,7 +1255,7 @@ impl BrainApp {
             .collect()
     }
 
-    fn found(&mut self, hits: Result<Vec<Hit>, String>, cx: &mut Context<Self>) {
+    fn found(&mut self, hits: Result<Vec<Hit>, Error>, cx: &mut Context<Self>) {
         let Some(data) = self.data.clone() else {
             return;
         };
@@ -1373,7 +1373,7 @@ impl BrainApp {
             let words = match sent.await {
                 Ok(()) => "In Ahjo Swarm's Send: pick the session there.".to_string(),
                 Err(e) => {
-                    let words = format!("Not sent: {e}");
+                    let words = format!("Not sent: {}", e.message);
                     let _ = me.update(cx, |me, cx| me.fail(words, cx));
                     return;
                 }
@@ -3856,7 +3856,7 @@ impl BrainApp {
                     .bg(veil(t, chrome::PANEL_ALPHA))
                     .text_size(px(search::SNIPPET))
                     .text_color(t.text2)
-                    .tooltip(kit::tip(e.clone()))
+                    .tooltip(kit::tip(e.message.clone()))
                     .child(
                         div()
                             .flex_none()
@@ -4171,7 +4171,7 @@ impl BrainApp {
                             .justify_between()
                             .items_center()
                             .gap(px(12.))
-                            .child(div().text_color(t.error).child(e.clone()))
+                            .child(div().text_color(t.error).child(e.message.clone()))
                             .child(close),
                     )
                     .into_any_element(),
@@ -4347,7 +4347,7 @@ impl BrainApp {
     fn source_switch(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let label = self.source_label();
         let tip = match &self.away_from {
-            Some(e) => format!("{e}. Read another machine's brain"),
+            Some(e) => format!("{}. Read another machine's brain", e.message),
             None => "Read another machine's brain".to_string(),
         };
         div()
@@ -4627,7 +4627,10 @@ impl BrainApp {
                         .py(px(search::ROW_PAD_Y))
                         .text_size(px(search::SNIPPET))
                         .text_color(t.dim)
-                        .child(format!("Which notes agents filed did not read: {e}")),
+                        .child(format!(
+                            "Which notes agents filed did not read: {}",
+                            e.message
+                        )),
                 )
             }
             _ => {}

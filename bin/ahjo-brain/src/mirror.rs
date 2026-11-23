@@ -7,6 +7,7 @@
 //! its own machine, so what changed lately reads as it does there.
 
 use crate::citadel::{self, Hit};
+use ahjo_app_kit::Error;
 use ahjo_brain_contract::commands::{BrainListFiles, BrainReadTexts, BrainSearch};
 use ahjo_brain_contract::{File, TypedCommand};
 use serde::Deserialize;
@@ -67,10 +68,11 @@ impl Synced {
 
 /// Brings the copy in `home` up to the node at `url`. Blocking: run it off
 /// the UI.
-pub fn sync(url: &str, home: &Path) -> Result<Synced, String> {
+pub fn sync(url: &str, home: &Path) -> Result<Synced, Error> {
     let listed = call(url, BrainListFiles {})?;
     let root = pages(home);
-    std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
+    std::fs::create_dir_all(&root)
+        .map_err(|e| Error::new("copy_unwritable", format!("{}: {e}", root.display())))?;
     let mut kept = read_manifest(home);
     let wanted: BTreeMap<&str, &File> = listed
         .files
@@ -119,7 +121,7 @@ pub fn sync(url: &str, home: &Path) -> Result<Synced, String> {
 
 /// The pages matching `query` on the node at `url`, best first, as its
 /// Citadel ranks them.
-pub fn search(url: &str, query: &str) -> Result<Vec<Hit>, String> {
+pub fn search(url: &str, query: &str) -> Result<Vec<Hit>, Error> {
     let answer = call(
         url,
         BrainSearch {
@@ -169,9 +171,9 @@ fn safe(path: &str) -> bool {
         })
 }
 
-fn write(root: &Path, file: &File, text: &str) -> Result<(), String> {
+fn write(root: &Path, file: &File, text: &str) -> Result<(), Error> {
     let to = root.join(&file.path);
-    let fail = |e: std::io::Error| format!("{}: {e}", to.display());
+    let fail = |e: std::io::Error| Error::new("copy_unwritable", format!("{}: {e}", to.display()));
     if let Some(dir) = to.parent() {
         std::fs::create_dir_all(dir).map_err(fail)?;
     }
@@ -192,20 +194,25 @@ fn read_manifest(home: &Path) -> BTreeMap<String, File> {
 }
 
 /// Writes beside and renames, so a crash never leaves half a file.
-fn write_manifest(home: &Path, kept: &BTreeMap<String, File>) -> Result<(), String> {
+fn write_manifest(home: &Path, kept: &BTreeMap<String, File>) -> Result<(), Error> {
     let tmp = home.join(format!("{MANIFEST}.{}", std::process::id()));
-    let bytes = serde_json::to_vec(kept).map_err(|e| e.to_string())?;
+    let bytes =
+        serde_json::to_vec(kept).map_err(|e| Error::new("copy_unwritable", e.to_string()))?;
     std::fs::write(&tmp, bytes)
         .and_then(|_| std::fs::rename(&tmp, home.join(MANIFEST)))
-        .map_err(|e| format!("{}: {e}", home.display()))
+        .map_err(|e| Error::new("copy_unwritable", format!("{}: {e}", home.display())))
 }
 
 /// The node's answer as `T`, or its own words for a refusal.
-fn parse<T: serde::de::DeserializeOwned>(raw: &[u8]) -> Result<T, String> {
+fn parse<T: serde::de::DeserializeOwned>(raw: &[u8]) -> Result<T, Error> {
     let (status, body) = citadel::split_answer(raw)?;
     if status == 200 {
-        return serde_json::from_slice(body)
-            .map_err(|_| format!("{WHO} answered in a way not understood"));
+        return serde_json::from_slice(body).map_err(|_| {
+            Error::new(
+                "unreadable_answer",
+                format!("{WHO} answered in a way not understood"),
+            )
+        });
     }
     #[derive(Deserialize)]
     struct Refused {
@@ -216,18 +223,25 @@ fn parse<T: serde::de::DeserializeOwned>(raw: &[u8]) -> Result<T, String> {
         message: String,
     }
     match serde_json::from_slice::<Refused>(body) {
-        Ok(r) => Err(format!("The other machine: {}", r.error.message)),
-        Err(_) if status == 404 => Err(
-            "The other machine's node is older and cannot share its brain; update Ahjo there."
-                .into(),
-        ),
-        Err(_) => Err(format!("{WHO} refused ({status})")),
+        Ok(r) => Err(Error::new(
+            "node_refused",
+            format!("The other machine: {}", r.error.message),
+        )),
+        Err(_) if status == 404 => Err(Error::new(
+            "node_outdated",
+            "The other machine's node is older and cannot share its brain; update Ahjo there.",
+        )),
+        Err(_) => Err(Error::new(
+            "node_refused",
+            format!("{WHO} refused ({status})"),
+        )),
     }
 }
 
 /// Call one typed command on the other node.
-fn call<C: TypedCommand>(url: &str, input: C) -> Result<C::Output, String> {
-    let body = serde_json::to_value(input).map_err(|error| error.to_string())?;
+fn call<C: TypedCommand>(url: &str, input: C) -> Result<C::Output, Error> {
+    let body = serde_json::to_value(input)
+        .map_err(|error| Error::new("bad_command", error.to_string()))?;
     let raw = citadel::ask(
         WHO,
         "POST",
