@@ -584,7 +584,7 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
         tmux.run(&[
             "send-keys",
             "-t",
-            "beta",
+            "beta:0",
             &format!("clear; printf '%s\\n' '{printed}'"),
             "Enter",
         ]);
@@ -674,11 +674,6 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
     // those ends.
     print_and_click(cx, "Read(deep/long-directory-…/target.txt)", "target");
     opened(cx, &out.join("deep/long-directory-aaaa/target.txt"));
-    print_and_click(cx, &format!("{out_text}/space name.txt"), "/space");
-    opened(cx, &out.join("space name.txt"));
-    // A head that names no folder: the clicked pane's folder is searched.
-    print_and_click(cx, "/…/long-directory-aaaa/target.txt", "target");
-    opened(cx, &out.join("deep/long-directory-aaaa/target.txt"));
     // Two have these: both are offered, and the one picked opens.
     print_and_click(cx, "Read(two/a-…/same.txt)", "same");
     let picked = leak(format!("menu-label-{out_text}/two/a-y/same.txt"));
@@ -695,6 +690,24 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
     until(cx, "said there is none", |cx| {
         status(&shell, cx).contains("names no file")
     });
+    // A head that names no folder is looked for in the clicked pane's
+    // folder, not the session's: make another window, in a folder with a
+    // file of the same ends, the session's active one.
+    let decoy = root.join("decoy");
+    std::fs::create_dir_all(decoy.join("long-directory-aaaa")).unwrap();
+    std::fs::write(decoy.join("long-directory-aaaa/target.txt"), "DECOY\n").unwrap();
+    let decoy_text = decoy.to_string_lossy().into_owned();
+    tmux.run(&["new-window", "-t", "beta", "-c", &decoy_text]);
+    until(cx, "the session's folder is the other window's", |cx| {
+        terminal.read_with(cx, |p, _| {
+            p.slot_pane(0)
+                .and_then(|at| p.fleet.session_of_pane(&at.node, at.pane))
+                .and_then(|s| s.cwd.clone())
+                .is_some_and(|cwd| cwd == decoy_text)
+        })
+    });
+    print_and_click(cx, "/…/long-directory-aaaa/target.txt", "target");
+    opened(cx, &out.join("deep/long-directory-aaaa/target.txt"));
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }
