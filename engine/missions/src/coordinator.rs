@@ -453,6 +453,15 @@ impl Coordinator {
         } else if card.id != request.input_card_id {
             return Err(AdmissionFailure::NotFound("input card not found".into()));
         }
+        let rerun = if request.rerun_of.is_empty() {
+            None
+        } else if single {
+            Some(crate::run_rerun::prepare(self, &mut request)?)
+        } else {
+            return Err(AdmissionFailure::Invalid(
+                "a rerun starts one step; name it".into(),
+            ));
+        };
         let root = if single {
             &request.step_id
         } else {
@@ -578,8 +587,15 @@ impl Coordinator {
         let bindings =
             BindingsSnapshot::capture(&id, &mission, &request.input_card_id, &store.agents())
                 .map_err(|error| AdmissionFailure::Invalid(error.message))?;
-        let workspace =
-            crate::run_storage::create(self, &id, &slug, &mission, &bindings, &request)?;
+        let workspace = crate::run_storage::create(
+            self,
+            &id,
+            &slug,
+            &mission,
+            &bindings,
+            &request,
+            rerun.as_ref(),
+        )?;
         let control = Arc::new(Control::default());
         self.inner
             .controls

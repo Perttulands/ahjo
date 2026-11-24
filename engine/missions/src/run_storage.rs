@@ -67,6 +67,7 @@ pub fn create(
     mission: &Mission,
     bindings: &BindingsSnapshot,
     req: &RunStart,
+    rerun: Option<&crate::run_rerun::Rerun>,
 ) -> Result<PathBuf, AdmissionFailure> {
     let mission_data = crate::links::read_definition(
         &c.inner
@@ -117,7 +118,12 @@ pub fn create(
         binding_created = true;
         if !req.repository.is_empty() {
             let prepared = workspaces
-                .prepare(id, &req.repository, &req.base)
+                .prepare(
+                    id,
+                    &req.repository,
+                    &req.base,
+                    rerun.map_or("", |rerun| rerun.commit.as_str()),
+                )
                 .map_err(crate::error::to_io)?;
             workspace = prepared.path.clone();
             tree = Some(prepared);
@@ -138,6 +144,10 @@ pub fn create(
             &req.actor
         };
         let event=RunEvent{kind:"run_started".into(),timestamp:now(),actor:actor.into(),mission_id:mission.id.clone(),mission_rev:mission.rev,input_card_id:req.input_card_id.clone(),issue:req.issue.clone(),data:json!({"mission_slug":mission.slug,"mission_rev":mission.rev,"input_card_id":req.input_card_id,"step_id":req.step_id,"issue":req.issue,"snapshot":snapshot,"bindings_snapshot":binding_file,"cwd":workspace,"repository":req.repository,"request_id":req.request_id,"keep_sessions":req.keep_sessions,"base":tree.as_ref().map(|t| t.base.as_str()).unwrap_or(""),"checkout":tree.as_ref().map(|t| t.checkout.as_path()),"context_paths":req.context_paths,"inputs":resolve_run_inputs(mission,&req.inputs)}).as_object().unwrap().clone(),..Default::default()};
+        let mut event = event;
+        if let Some(rerun) = rerun {
+            rerun.record(&req.rerun_of, &mut event.data);
+        }
         c.ledger(id)?.create(event).map_err(crate::error::to_io)
     })();
     if let Err(e) = result {

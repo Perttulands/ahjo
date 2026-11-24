@@ -846,6 +846,33 @@ async fn a_repository_run_can_be_landed() {
             .unwrap()["outcome"],
         "final"
     );
+    // Its step starts again from where it started, recording which run.
+    let refused = node
+        .call("mission_run", json!({"mission":"hello","rerun_of":run}))
+        .await
+        .unwrap_err();
+    assert!(refused.message.contains("--from"), "{}", refused.message);
+    let again = node
+        .call(
+            "mission_run",
+            json!({"mission":"hello","from":"Work","rerun_of":run}),
+        )
+        .await
+        .unwrap();
+    let again = again["run_id"].as_str().unwrap();
+    assert_eq!(
+        node.call("run_wait", json!({"run":again,"until":"final","timeout":5}))
+            .await
+            .unwrap()["status"],
+        "succeeded"
+    );
+    let state = &node.call("run_show", json!({"run":again})).await.unwrap()["state"];
+    assert_eq!(state["rerun_of"], run);
+    assert_eq!(state["repository"], "example/project");
+    node.call("run_land", json!({"run":again,"force":true}))
+        .await
+        .unwrap();
+    node.call("run_delete", json!({"run":again})).await.unwrap();
     // A repository run keeps its branch until it is landed.
     let kept = node
         .call("run_delete", json!({"run":run}))

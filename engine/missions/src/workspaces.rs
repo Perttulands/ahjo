@@ -29,11 +29,14 @@ impl Workspaces {
     pub fn checkout(&self, repository: &str) -> Option<&Path> {
         self.repositories.get(repository).map(PathBuf::as_path)
     }
+    /// The run's branch starts at `commit` when one is given, else at the
+    /// head of `base`; `base` stays the branch the run lands on.
     pub fn prepare(
         &self,
         run: &str,
         repository: &str,
         base: &str,
+        commit: &str,
     ) -> Result<Worktree, crate::Error> {
         (|| -> io::Result<Worktree> {
             if !run.starts_with("run_")
@@ -66,13 +69,30 @@ impl Workspaces {
                     &format!("refs/heads/{base}^{{commit}}"),
                 ],
             )?;
+            let start = if commit.is_empty() {
+                format!("refs/heads/{base}")
+            } else {
+                if commit.starts_with('-') {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "invalid commit",
+                    ));
+                }
+                git(
+                    &checkout,
+                    ["rev-parse", "--verify", &format!("{commit}^{{commit}}")],
+                )
+                .map_err(|error| {
+                    io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("commit {commit} is not in {repository}: {error}"),
+                    )
+                })?
+            };
             fs::create_dir_all(&self.root)?;
             let path = self.root.join(run);
             reserve(&path)?;
-            if let Err(error) = git(
-                &checkout,
-                ["branch", &branch, &format!("refs/heads/{base}")],
-            ) {
+            if let Err(error) = git(&checkout, ["branch", &branch, &start]) {
                 fs::remove_dir(&path)?;
                 return Err(error);
             }

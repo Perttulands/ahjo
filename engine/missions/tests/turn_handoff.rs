@@ -65,7 +65,9 @@ fn a_placed_turn_is_published_once_and_landing_deletes_its_remote_refs() {
     let scratch = Scratch::new();
     let repositories = |side: &str| BTreeMap::from([("owner/repo".to_owned(), scratch.side(side))]);
     let workspaces = Workspaces::new(scratch.0.join("runs"), repositories("coordinator"));
-    let tree = workspaces.prepare("run_handoff", "owner/repo", "").unwrap();
+    let tree = workspaces
+        .prepare("run_handoff", "owner/repo", "", "")
+        .unwrap();
     git(
         &tree.path,
         &[
@@ -188,7 +190,9 @@ fn landing_leaves_shared_refs_that_moved_since_ahjo_pushed_them() {
         scratch.0.join("runs"),
         BTreeMap::from([("owner/repo".to_owned(), checkout.clone())]),
     );
-    let tree = workspaces.prepare("run_moved", "owner/repo", "").unwrap();
+    let tree = workspaces
+        .prepare("run_moved", "owner/repo", "", "")
+        .unwrap();
     let branch = format!("refs/heads/{}", tree.branch);
     git(
         &tree.path,

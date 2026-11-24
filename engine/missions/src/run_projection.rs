@@ -78,6 +78,7 @@ pub fn project_run(events: &[RunEvent], run_id: &str) -> Result<RunProjection, c
             base: string(first, "base"),
             request_id: string(first, "request_id"),
             context_paths: strings(first, "context_paths"),
+            rerun_of: string(first, "rerun_of"),
             inputs: first
                 .data
                 .get("inputs")

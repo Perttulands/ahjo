@@ -423,6 +423,47 @@ pub(crate) fn cut_off(
     Ok(crate::run_limit::reached(node, use_, true))
 }
 
+/// The text a step is given for the inputs routed to it, and the reason
+/// its attempt starts: a gate's response continues the seat's work.
+pub(crate) fn routed_input(refs: &[serde_json::Value]) -> io::Result<(String, &'static str)> {
+    let routed: Vec<crate::RoutedInput> = refs
+        .iter()
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<Result<_, _>>()
+        .map_err(io::Error::other)?;
+    let reason = if routed.iter().any(|input| input.response.is_some()) {
+        "continue"
+    } else {
+        "initial"
+    };
+    let mut text = if routed
+        .iter()
+        .any(|input| input.feedback.is_some() || input.response.is_some())
+    {
+        crate::port_delivery::render_inputs(&routed)
+    } else {
+        routed
+            .iter()
+            .map(|input| input.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    for input in routed
+        .iter()
+        .filter(|input| input.kind == "file" || input.kind == "folder")
+    {
+        text.push_str(&format!("\ninput path: {}\n", input.r#ref));
+    }
+    if routed
+        .iter()
+        .any(|input| input.kind == "file" || input.kind == "folder")
+    {
+        text.push_str("Input paths are kept copies of earlier work and are read-only; write new versions in your own attempt directory.\n");
+    }
+    Ok((text, reason))
+}
+
 /// Inputs and channels used to start the next ready step.
 pub(crate) struct JobContext<'a> {
     pub c: &'a Coordinator,
@@ -497,41 +538,7 @@ pub(crate) fn start_ready(
                 .map(|(input, _)| serde_json::to_value(input).unwrap())
                 .collect()
         };
-        let routed: Vec<crate::RoutedInput> = refs
-            .iter()
-            .cloned()
-            .map(serde_json::from_value)
-            .collect::<Result<_, _>>()
-            .map_err(io::Error::other)?;
-        let reason = if routed.iter().any(|input| input.response.is_some()) {
-            "continue"
-        } else {
-            "initial"
-        };
-        let mut text = if routed
-            .iter()
-            .any(|input| input.feedback.is_some() || input.response.is_some())
-        {
-            crate::port_delivery::render_inputs(&routed)
-        } else {
-            routed
-                .iter()
-                .map(|input| input.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        for input in routed
-            .iter()
-            .filter(|input| input.kind == "file" || input.kind == "folder")
-        {
-            text.push_str(&format!("\ninput path: {}\n", input.r#ref));
-        }
-        if routed
-            .iter()
-            .any(|input| input.kind == "file" || input.kind == "folder")
-        {
-            text.push_str("Input paths are kept copies of earlier work and are read-only; write new versions in your own attempt directory.\n");
-        }
+        let (text, reason) = routed_input(&refs)?;
         let attempt = replay.attempts.get(&step.id).copied().unwrap_or(0) + 1;
         let node = step.id.clone();
         if let Some(drain) = &mut drain {

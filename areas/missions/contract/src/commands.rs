@@ -198,6 +198,12 @@ pub struct MissionRun {
     pub actor: Option<String>,
     /// Return the existing run when retrying this start with the same key.
     pub request_id: Option<String>,
+    /// Start --from's step again as it started in this earlier run of a
+    /// repository: the input its first attempt got, from the commit it
+    /// started at, with that run's inputs, issue, repository, base and
+    /// context paths. The mission is as it is now, so change a seat, agent,
+    /// brief or formation first.
+    pub rerun_of: Option<String>,
     pub expected_rev: Option<i64>,
     pub expected_etag: Option<String>,
 }

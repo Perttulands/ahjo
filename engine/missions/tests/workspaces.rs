@@ -62,7 +62,9 @@ fn git(repo: &Path, args: &[&str]) -> String {
 fn landing_preserves_ignored_files_until_force() {
     let scratch = Scratch::new();
     let workspaces = scratch.workspaces();
-    let tree = workspaces.prepare("run_ignored", "owner/repo", "").unwrap();
+    let tree = workspaces
+        .prepare("run_ignored", "owner/repo", "", "")
+        .unwrap();
     std::fs::write(tree.path.join(".env"), "valuable").unwrap();
     let error = workspaces
         .remove(&tree, false, &Default::default())
@@ -81,7 +83,11 @@ fn failed_add_removes_its_worktree_and_branch_but_preserves_existing_resources()
     let scratch = Scratch::new();
     let workspaces = scratch.workspaces();
     scratch.failing_hook();
-    assert!(workspaces.prepare("run_hook", "owner/repo", "").is_err());
+    assert!(
+        workspaces
+            .prepare("run_hook", "owner/repo", "", "")
+            .is_err()
+    );
     assert!(!scratch.0.join("worktrees/run_hook").exists());
     assert!(git(&scratch.repo(), &["branch", "--list", "ahjo/run-hook"]).is_empty());
     assert_eq!(
@@ -94,12 +100,16 @@ fn failed_add_removes_its_worktree_and_branch_but_preserves_existing_resources()
     std::fs::write(scratch.0.join("worktrees/run_existing/keep"), "keep").unwrap();
     assert!(
         workspaces
-            .prepare("run_existing", "owner/repo", "")
+            .prepare("run_existing", "owner/repo", "", "")
             .is_err()
     );
     assert!(scratch.0.join("worktrees/run_existing/keep").exists());
     git(&scratch.repo(), &["branch", "ahjo/run-branch"]);
-    assert!(workspaces.prepare("run_branch", "owner/repo", "").is_err());
+    assert!(
+        workspaces
+            .prepare("run_branch", "owner/repo", "", "")
+            .is_err()
+    );
     assert!(!git(&scratch.repo(), &["branch", "--list", "ahjo/run-branch"]).is_empty());
     assert!(!scratch.0.join("worktrees/run_branch").exists());
 }
@@ -107,7 +117,9 @@ fn failed_add_removes_its_worktree_and_branch_but_preserves_existing_resources()
 fn failed_landing_checkout_cleans_its_temporary_worktree() {
     let scratch = Scratch::new();
     let workspaces = scratch.workspaces();
-    let tree = workspaces.prepare("run_land", "owner/repo", "").unwrap();
+    let tree = workspaces
+        .prepare("run_land", "owner/repo", "", "")
+        .unwrap();
     let temporary = scratch.0.join("worktrees/.land-ahjo-run-land");
     std::fs::create_dir(&temporary).unwrap();
     std::fs::write(temporary.join("keep"), "keep").unwrap();

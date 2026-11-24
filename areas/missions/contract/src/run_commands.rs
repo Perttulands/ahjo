@@ -176,6 +176,9 @@ pub struct RunState {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub request_id: String,
     pub context_paths: Vec<String>,
+    /// The earlier run whose step this run starts again, or empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub rerun_of: String,
     pub inputs: Vec<RunInput>,
     pub event_count: usize,
     pub started_by: String,

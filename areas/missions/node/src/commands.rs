@@ -713,6 +713,9 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
     if args.from.is_some() && args.input.is_some() {
         return Err(bad("use either --from or --input"));
     }
+    if args.rerun_of.is_some() && args.from.is_none() {
+        return Err(bad("--rerun-of starts one step again; name it with --from"));
+    }
     let edit = m.store.mission_edit(selector)?;
     let mission = edit.mission;
     let stale = args.expected_rev.is_some_and(|rev| rev != mission.rev)
@@ -773,6 +776,7 @@ async fn start_run(m: Missions, args: MissionRun) -> Result<MissionStarted, Erro
         base: args.base.unwrap_or_default(),
         keep_sessions: args.keep_sessions,
         request_id: args.request_id.unwrap_or_default(),
+        rerun_of: args.rerun_of.unwrap_or_default(),
         known_machines: Some(vec![]),
         inputs: args.inputs,
         context_paths: args.context_paths,

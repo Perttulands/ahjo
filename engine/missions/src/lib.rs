@@ -73,6 +73,7 @@ mod run_projection;
 mod run_reattach;
 mod run_recovery;
 mod run_replay;
+mod run_rerun;
 mod run_resume;
 mod run_scheduler;
 mod run_shutdown;

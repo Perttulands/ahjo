@@ -404,7 +404,14 @@ fn execute_inner(
         return Ok(Outcome::Succeeded(Vec::new()));
     }
     let inputs = resolve_run_inputs(mission, &req.inputs);
-    let input = render_run_inputs(mission, &inputs);
+    // A rerun gives the step the input it got in the earlier run.
+    let (refs, input, reason) = match crate::run_rerun::recorded_input(&events[0]) {
+        Some(refs) => {
+            let (text, reason) = crate::run_job::routed_input(&refs)?;
+            (refs, text, reason)
+        }
+        None => (Vec::new(), render_run_inputs(mission, &inputs), "initial"),
+    };
     let node = req.step_id.clone();
     let attempt = c
         .ledger(id)?
@@ -428,10 +435,10 @@ fn execute_inner(
         control,
         node.clone(),
         attempt,
-        Vec::new(),
+        refs,
         input,
         &inputs,
-        "initial",
+        reason,
         false,
         None,
         Vec::new(),

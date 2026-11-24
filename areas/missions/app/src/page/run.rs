@@ -828,6 +828,7 @@ impl MissionsPage {
             inputs: values,
             actor: Some("human:operator".into()),
             request_id: Some(self.run.request_id.clone()),
+            rerun_of: None,
             cwd: Some(self.run.cwd.read(cx).text.clone()),
             repository: Some(self.run.repository.read(cx).text.clone()),
             base: Some(self.run.base.read(cx).text.clone()),

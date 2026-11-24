@@ -30,6 +30,12 @@ pub struct RunStart {
     /// already made a run answers with that run instead of making another,
     /// so a client that lost the answer can safely send it again.
     pub request_id: String,
+    /// An earlier run whose `step_id` this run starts again as it started
+    /// there: the input that step got, from the commit it started at, with
+    /// that run's inputs, issue, repository, base and context paths. The
+    /// mission is as it is now, so what was changed since is what differs.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub rerun_of: String,
     /// Known machine names, including machines that are offline. A step on an
     /// unknown machine is refused. An offline environment can still be selected.
     #[serde(skip)]

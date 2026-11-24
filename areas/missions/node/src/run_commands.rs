@@ -223,6 +223,7 @@ fn state(run: &RunProjection) -> RunState {
         base: run.base.clone(),
         request_id: run.request_id.clone(),
         context_paths: run.context_paths.clone(),
+        rerun_of: run.rerun_of.clone(),
         inputs: run.inputs.clone(),
         event_count: run.event_count,
         started_by: run.started_by.clone(),
