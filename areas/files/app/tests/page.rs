@@ -8,6 +8,23 @@ thread_local! {
     static SENT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     static SEARCH_PAGE: std::cell::RefCell<Option<gpui::Entity<ahjo_files_app::FilesPage>>> = const { std::cell::RefCell::new(None) };
     static TERMINAL_PAGE: std::cell::RefCell<Option<gpui::Entity<ahjo_terminals_app::Terminals>>> = const { std::cell::RefCell::new(None) };
+    static FILES_PANEL: std::cell::RefCell<Option<gpui::Entity<ahjo_files_app::FilesPage>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Files as `ahjo_files_app::build` mounts it, its panel kept for the test.
+fn observed_files_panel(
+    host: ahjo_app_kit::Host,
+    window: &mut gpui::Window,
+    cx: &mut gpui::App,
+) -> ahjo_app_kit::Mounted {
+    ahjo_app_kit::mount(host, window, cx, |host, window, cx| {
+        let mut page = ahjo_files_app::FilesPage::new(host.clone(), window, cx);
+        let panel =
+            gpui::AppContext::new(cx, |cx| ahjo_files_app::FilesPage::panel(host, window, cx));
+        FILES_PANEL.with(|p| *p.borrow_mut() = Some(panel.clone()));
+        page.panel = Some(panel);
+        page
+    })
 }
 
 fn observed_terminals(
@@ -508,6 +525,7 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
     for dir in ["deep/long-directory-aaaa", "two/a-x", "two/a-y"] {
         std::fs::create_dir_all(out.join(dir)).unwrap();
     }
+    // Each file says which it is, so the one opened is told by its text.
     for file in [
         "space name.txt",
         "üñicode.txt",
@@ -517,6 +535,10 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
     ] {
         std::fs::write(out.join(file), format!("{file}\n")).unwrap();
     }
+    let lines: String = (1..=30)
+        .map(|n| format!("line {n:02} alpha beta\n"))
+        .collect();
+    std::fs::write(out.join("lines.txt"), &lines).unwrap();
     let out_text = out.to_string_lossy().into_owned();
     tmux.run(&[
         "new-session",
@@ -537,13 +559,14 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
     let url = running.url.clone();
     let (shell, cx) = cx.add_window_view(move |w, cx| {
         ahjo_app_shell::start(
-            &[observed_terminals, ahjo_files_app::build],
+            &[observed_terminals, observed_files_panel],
             Some(url),
             None,
             w,
             cx,
         )
     });
+    let panel = FILES_PANEL.with(|p| p.borrow().as_ref().unwrap().clone());
     let row = leak(format!("row-{}::beta", running.id));
     until(cx, "terminal session", |cx| cx.debug_bounds(row).is_some());
     click(cx, row);
@@ -555,13 +578,14 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
     });
     // Prints `printed` on a line of its own and clicks the first letter of
     // `word` in it.
+    // One command line: a second one typed while `clear` runs is not
+    // echoed, and its output would follow the prompt.
     let print_and_click = |cx: &mut VisualTestContext, printed: &str, word: &str| {
-        tmux.run(&["send-keys", "-t", "beta", "clear", "Enter"]);
         tmux.run(&[
             "send-keys",
             "-t",
             "beta",
-            &format!("printf '%s\\n' '{printed}'"),
+            &format!("clear; printf '%s\\n' '{printed}'"),
             "Enter",
         ]);
         let position = |cx: &mut VisualTestContext| {
@@ -586,11 +610,17 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
         let at = position(cx).unwrap();
         cx.simulate_click(at, Modifiers::none());
     };
-    let opened = |cx: &mut VisualTestContext, name: &str| {
-        let view = leak(format!("file-view-{name}"));
+    // The panel shows the file at `path`, its own text read from it.
+    let opened = |cx: &mut VisualTestContext, path: &std::path::Path| {
+        let want = path.to_string_lossy().into_owned();
+        let text = std::fs::read_to_string(path).unwrap();
         slid(cx);
-        until(cx, leak(format!("{name} in the panel")), |cx| {
-            cx.debug_bounds(view).is_some()
+        until(cx, leak(format!("{want} in the panel")), |cx| {
+            panel.read_with(cx, |p, cx| {
+                p.opened.as_ref().is_some_and(|o| {
+                    o.path == want && matches!(o.show, ahjo_files_app::open::Show::Text { .. })
+                }) && p.code.read(cx).text() == text
+            })
         });
     };
 
@@ -598,7 +628,7 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
     // out of it, once Ahjo has seen the pane's new folder.
     let home_path = "~/.cache/audit/home.txt";
     print_and_click(cx, home_path, "~/");
-    opened(cx, "home.txt");
+    opened(cx, &cache.join("home.txt"));
     tmux.run(&[
         "send-keys",
         "-t",
@@ -616,19 +646,39 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
     });
     // Bare, with a space: the first word alone names nothing there.
     print_and_click(cx, &format!("{out_text}/space name.txt"), "/space");
-    opened(cx, "space name.txt");
+    opened(cx, &out.join("space name.txt"));
     // Unicode, clicked on its ASCII end.
     print_and_click(cx, &format!("{out_text}/üñicode.txt"), "icode");
-    opened(cx, "üñicode.txt");
+    opened(cx, &out.join("üñicode.txt"));
     print_and_click(cx, home_path, "cache");
-    opened(cx, "home.txt");
+    opened(cx, &cache.join("home.txt"));
     // In quotes, clicked on the word after the space.
     print_and_click(cx, &format!("\"{out_text}/space name.txt\""), "name.txt");
-    opened(cx, "space name.txt");
+    opened(cx, &out.join("space name.txt"));
+    // A line and column reach a file whose tab is open already: open it,
+    // open another, then click it at `20:9`, the word `alpha` on line 20.
+    print_and_click(cx, "./lines.txt", "lines");
+    opened(cx, &out.join("lines.txt"));
+    print_and_click(cx, &format!("{out_text}/üñicode.txt"), "icode");
+    opened(cx, &out.join("üñicode.txt"));
+    print_and_click(cx, "./lines.txt:20:9", "lines");
+    opened(cx, &out.join("lines.txt"));
+    until(cx, "line 20 at column 9", |cx| {
+        panel.read_with(cx, |p, cx| {
+            let code = p.code.read(cx);
+            let at = code.selection();
+            code.selected_text() == "alpha" && code.text()[..at.start].matches('\n').count() == 19
+        })
+    });
     // Shortened by an agent, relative to the pane's folder: one file has
     // those ends.
     print_and_click(cx, "Read(deep/long-directory-…/target.txt)", "target");
-    opened(cx, "target.txt");
+    opened(cx, &out.join("deep/long-directory-aaaa/target.txt"));
+    print_and_click(cx, &format!("{out_text}/space name.txt"), "/space");
+    opened(cx, &out.join("space name.txt"));
+    // A head that names no folder: the clicked pane's folder is searched.
+    print_and_click(cx, "/…/long-directory-aaaa/target.txt", "target");
+    opened(cx, &out.join("deep/long-directory-aaaa/target.txt"));
     // Two have these: both are offered, and the one picked opens.
     print_and_click(cx, "Read(two/a-…/same.txt)", "same");
     let picked = leak(format!("menu-label-{out_text}/two/a-y/same.txt"));
@@ -639,7 +689,7 @@ fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestA
                 .is_some()
     });
     click(cx, picked);
-    opened(cx, "same.txt");
+    opened(cx, &out.join("two/a-y/same.txt"));
     // None has these: it says so, and opens nothing.
     print_and_click(cx, "Read(two/b-…/same.txt)", "same");
     until(cx, "said there is none", |cx| {

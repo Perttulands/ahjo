@@ -1459,7 +1459,9 @@ impl FilesPage {
         cx.notify();
     }
 
-    /// Opens a file at its line (from 1), and at a column (from 1) on it.
+    /// Opens a file at its line (from 1), and at a column (from 1) on it:
+    /// at once when its text is already shown (open, or its tab back as it
+    /// was left), else once it is read.
     pub fn open_at(
         &mut self,
         path: String,
@@ -1468,14 +1470,15 @@ impl FilesPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let same = self
+        let key = (self.tree.node.clone(), path.clone());
+        self.open(path, window, cx);
+        let shown = self
             .opened
             .as_ref()
-            .is_some_and(|o| o.path == path && o.node == self.tree.node);
-        self.open(path, window, cx);
+            .is_some_and(|o| o.key() == key && matches!(o.show, Show::Text { .. }));
         let column = column.filter(|_| line.is_some());
         match line {
-            Some(line) if same => self.go_to(
+            Some(line) if shown => self.go_to(
                 line.saturating_sub(1),
                 column.map(|c| c.saturating_sub(1)),
                 window,
