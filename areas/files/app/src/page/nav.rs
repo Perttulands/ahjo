@@ -531,7 +531,7 @@ impl FilesPage {
     /// The keyboard to the file shown.
     pub(crate) fn focus_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_file_due = false;
-        if self.place.is_some() || self.reading() {
+        if self.place.is_some() || self.reading() || self.runs_page() {
             window.focus(&self.focus, cx);
             return;
         }
@@ -734,7 +734,9 @@ impl FilesPage {
             self.remember(cx);
         }
         // A rendered file or laid-out JSON goes to the line in its text.
-        let source = self.reading() || self.opened.as_ref().is_some_and(|o| o.pretty.is_some());
+        let source = self.reading()
+            || self.runs_page()
+            || self.opened.as_ref().is_some_and(|o| o.pretty.is_some());
         if let Some(o) = self.opened.as_mut() {
             o.source |= source;
             o.diff_open = false;
@@ -812,8 +814,8 @@ impl FilesPage {
             return;
         }
         o.diff_open = false;
-        // Rendered, its text is found in its source.
-        if self.reading()
+        // Rendered or running, its text is found in its source.
+        if (self.reading() || self.runs_page())
             && let Some(o) = self.opened.as_mut()
         {
             o.source = true;

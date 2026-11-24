@@ -31,6 +31,31 @@ $ErrorActionPreference = "Stop"
 function Write-Utf8([string]$name, [string]$text) {
     [IO.File]::WriteAllText((Join-Path $Run $name), $text, (New-Object Text.UTF8Encoding $false))
 }
+# The answer to one script in a page, through its DevTools socket.
+function Invoke-Page($page, [string]$script) {
+    $ws = New-Object System.Net.WebSockets.ClientWebSocket
+    $none = [Threading.CancellationToken]::None
+    $ws.ConnectAsync([Uri]$page.webSocketDebuggerUrl, $none).Wait()
+    $ask = @{ id = 1; method = "Runtime.evaluate";
+              params = @{ expression = $script; returnByValue = $true; awaitPromise = $true } } | ConvertTo-Json -Compress -Depth 5
+    $bytes = [Text.Encoding]::UTF8.GetBytes($ask)
+    $ws.SendAsync((New-Object ArraySegment[byte] (,$bytes)), "Text", $true, $none).Wait()
+    # Events may come first: read messages until the answer to id 1.
+    $answer = $null
+    while (-not $answer) {
+        $text = New-Object System.Text.StringBuilder
+        do {
+            $buffer = New-Object byte[] 65536
+            $got = $ws.ReceiveAsync((New-Object ArraySegment[byte] (,$buffer)), $none)
+            if (-not $got.Wait(20000)) { throw "the page did not answer the script in 20 s" }
+            $text.Append([Text.Encoding]::UTF8.GetString($buffer, 0, $got.Result.Count)) | Out-Null
+        } until ($got.Result.EndOfMessage)
+        $message = $text.ToString() | ConvertFrom-Json
+        if ($message.id -eq 1) { $answer = $message }
+    }
+    $ws.Dispose()
+    $answer
+}
 $job = [IO.File]::ReadAllText((Join-Path $Run "job.txt"), (New-Object Text.UTF8Encoding $false))
 $words = $job -split "`t"
 try {
@@ -195,38 +220,26 @@ public static class Win {
         "eval" {
             $app, $script = $words[1], ($words[2..($words.Count - 1)] -join " ")
             $port = [int](Get-Content -LiteralPath (Join-Path $Run "$app.devtools"))
-            # The app's page, once its web view has loaded one.
+            # The app's pages, once its web views have loaded one; of
+            # several, the one shown (a hidden view's page is hidden).
             $clock = [Diagnostics.Stopwatch]::StartNew()
-            $page = $null
-            while (-not $page -and $clock.Elapsed.TotalSeconds -lt 20) {
+            $pages = @()
+            while ($pages.Count -eq 0 -and $clock.Elapsed.TotalSeconds -lt 20) {
                 try {
-                    $page = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 2 |
-                        Where-Object { $_.type -eq "page" -and $_.url -notlike "about:*" } | Select-Object -First 1
+                    $pages = @(Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 2 |
+                        Where-Object { $_.type -eq "page" -and $_.url -notlike "about:*" })
                 } catch { }
-                if (-not $page) { Start-Sleep -Milliseconds 250 }
+                if ($pages.Count -eq 0) { Start-Sleep -Milliseconds 250 }
             }
-            if (-not $page) { throw "$app has no web page loaded (DevTools port $port)" }
-            $ws = New-Object System.Net.WebSockets.ClientWebSocket
-            $none = [Threading.CancellationToken]::None
-            $ws.ConnectAsync([Uri]$page.webSocketDebuggerUrl, $none).Wait()
-            $ask = @{ id = 1; method = "Runtime.evaluate";
-                      params = @{ expression = $script; returnByValue = $true; awaitPromise = $true } } | ConvertTo-Json -Compress -Depth 5
-            $bytes = [Text.Encoding]::UTF8.GetBytes($ask)
-            $ws.SendAsync((New-Object ArraySegment[byte] (,$bytes)), "Text", $true, $none).Wait()
-            # Events may come first: read messages until the answer to id 1.
-            $answer = $null
-            while (-not $answer) {
-                $text = New-Object System.Text.StringBuilder
-                do {
-                    $buffer = New-Object byte[] 65536
-                    $got = $ws.ReceiveAsync((New-Object ArraySegment[byte] (,$buffer)), $none)
-                    if (-not $got.Wait(20000)) { throw "$app's page did not answer the script in 20 s" }
-                    $text.Append([Text.Encoding]::UTF8.GetString($buffer, 0, $got.Result.Count)) | Out-Null
-                } until ($got.Result.EndOfMessage)
-                $message = $text.ToString() | ConvertFrom-Json
-                if ($message.id -eq 1) { $answer = $message }
+            if ($pages.Count -eq 0) { throw "$app has no web page loaded (DevTools port $port)" }
+            $page = $pages[0]
+            if ($pages.Count -gt 1) {
+                foreach ($p in $pages) {
+                    $seen = (Invoke-Page $p "document.visibilityState").result.result.value
+                    if ($seen -eq "visible") { $page = $p; break }
+                }
             }
-            $ws.Dispose()
+            $answer = Invoke-Page $page $script
             if ($answer.result.exceptionDetails) {
                 throw "the script threw: $($answer.result.exceptionDetails.exception.description)"
             }

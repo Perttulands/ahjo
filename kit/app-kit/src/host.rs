@@ -130,6 +130,81 @@ impl Answer {
     }
 }
 
+/// The nodes as the app reached them when it was taken
+/// ([`Host::reach`]): a read sent through it goes to the serving node,
+/// which passes on one for another node. It works from any thread.
+#[derive(Clone)]
+pub struct Reach {
+    base: String,
+    here: Option<String>,
+    rt: tokio::runtime::Handle,
+}
+
+impl Reach {
+    /// The request's path, naming its node when that is not the serving one.
+    fn path(&self, r: &Request) -> String {
+        if r.node.as_str().is_empty() || self.here.as_deref() == Some(r.node.as_str()) {
+            r.path.clone()
+        } else {
+            let sep = if r.path.contains('?') { '&' } else { '?' };
+            format!("{}{sep}node={}", r.path, r.node)
+        }
+    }
+
+    /// Reads what the GET `r` asks for, its body to come as it is sent
+    /// ([`http::Streamed`]): `unreachable` when no answer began.
+    pub fn open(
+        &self,
+        r: Request,
+    ) -> impl std::future::Future<Output = Result<http::Streamed, Error>> + Send + 'static {
+        let reach = self.clone();
+        let opened = self.rt.spawn(async move {
+            let path = reach.path(&r);
+            let headers: Vec<(&str, &str)> = r
+                .headers
+                .iter()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect();
+            http::open(&reach.base, &path, &headers, r.within).await
+        });
+        async move {
+            match opened.await {
+                Ok(Ok(streamed)) => Ok(streamed),
+                Ok(Err(e)) => Err(Error::new("unreachable", e.message)),
+                Err(e) => Err(Error::new("unreachable", e.to_string())),
+            }
+        }
+    }
+
+    /// Whether `node`'s files are this computer's own: it is the serving
+    /// node, reached on this computer's own address.
+    pub fn on_this_computer(&self, node: &str) -> bool {
+        let serving = node.is_empty() || self.here.as_deref() == Some(node);
+        let host = self
+            .base
+            .split_once("://")
+            .map_or(self.base.as_str(), |(_, rest)| rest)
+            .split('/')
+            .next()
+            .unwrap_or_default();
+        let host = match host.rsplit_once(':') {
+            Some((h, port)) if port.chars().all(|c| c.is_ascii_digit()) => h,
+            _ => host,
+        };
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        let local = host == "localhost"
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback());
+        serving && local
+    }
+
+    /// Runs `work` on the link's own threads, where reads are sent.
+    pub fn spawn(&self, work: impl std::future::Future<Output = ()> + Send + 'static) {
+        self.rt.spawn(work);
+    }
+}
+
 impl Host {
     /// The shell's own handle on `hub`; pages get theirs from [`crate::mount`].
     pub fn new(hub: &Entity<Hub>) -> Self {
@@ -197,30 +272,19 @@ impl Host {
     /// `unreachable` when it went nowhere, `unanswered` when it may have
     /// reached the node (a write's outcome is unknown, not failed).
     pub fn request(&self, r: Request, cx: &mut App) -> Task<Result<Answer, Error>> {
-        let Some((base, here, rt)) = self.read(cx, |h| {
-            (
-                h.fleet.base().to_string(),
-                h.fleet.here_id().map(str::to_string),
-                h.fleet.here().runtime().clone(),
-            )
-        }) else {
+        let Some(reach) = self.reach(cx) else {
             return Task::ready(Err(Error::new("closed", "The app is closing.")));
         };
-        let path = if r.node.as_str().is_empty() || here.as_deref() == Some(r.node.as_str()) {
-            r.path
-        } else {
-            let sep = if r.path.contains('?') { '&' } else { '?' };
-            format!("{}{sep}node={}", r.path, r.node)
-        };
         cx.background_executor().spawn(async move {
-            let sent = rt.spawn(async move {
+            let sent = reach.rt.clone().spawn(async move {
+                let path = reach.path(&r);
                 let headers: Vec<(&str, &str)> = r
                     .headers
                     .iter()
                     .map(|(k, v)| (k.as_str(), v.as_str()))
                     .collect();
                 let body = r.body.as_ref().map(|(t, b)| (t.as_str(), b.as_slice()));
-                http::send(&base, r.method, &path, &headers, body, r.within).await
+                http::send(&reach.base, r.method, &path, &headers, body, r.within).await
             });
             match sent.await {
                 Ok(Ok((status, body))) => Ok(Answer { status, body }),
@@ -228,6 +292,16 @@ impl Host {
                 Ok(Err(e)) => Err(Error::new("unreachable", e.message)),
                 Err(e) => Err(Error::new("unreachable", e.to_string())),
             }
+        })
+    }
+
+    /// The nodes as they are reached now, to read from off the app's
+    /// thread (a web view's requests): `None` once the app is closing.
+    pub fn reach(&self, cx: &App) -> Option<Reach> {
+        self.read(cx, |h| Reach {
+            base: h.fleet.base().to_string(),
+            here: h.fleet.here_id().map(str::to_string),
+            rt: h.fleet.here().runtime().clone(),
         })
     }
 

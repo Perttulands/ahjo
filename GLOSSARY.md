@@ -107,6 +107,11 @@ A layer showing every session as a card with its screen.
 **Beside**:
 Next to something without covering it.
 
+**Web page**:
+A `.html` file in Files, shown running rather than as text, with its source a
+switch away. It loads only from the folder it was opened in.
+_Avoid_: preview, prototype view
+
 **Send**:
 Send to Session: handing a reference and a note to one or more sessions, from
 the panel.

@@ -5,6 +5,8 @@
 pub enum Kind {
     Markdown,
     Json,
+    /// A web page: it runs, its source a switch away (ADR 0006).
+    Html,
     Text,
     Image,
     Audio,
@@ -63,8 +65,6 @@ const TEXT: &[&str] = &[
     "hcl",
     "hpp",
     "hs",
-    "htm",
-    "html",
     "ics",
     "ignore",
     "ini",
@@ -179,6 +179,7 @@ pub fn kind(name: &str) -> Kind {
     match ext.as_str() {
         "md" | "markdown" => Kind::Markdown,
         "json" => Kind::Json,
+        "html" | "htm" => Kind::Html,
         "glb" => Kind::Model,
         "pdf" => Kind::Pdf,
         e if IMAGE.contains(&e) => Kind::Image,
@@ -216,6 +217,8 @@ mod tests {
         assert_eq!(kind("voice.MP3"), Kind::Audio);
         assert_eq!(kind("clip.webm"), Kind::Video);
         assert_eq!(kind("paper.pdf"), Kind::Pdf);
+        assert_eq!(kind("proto.HTML"), Kind::Html);
+        assert_eq!(kind("old.htm"), Kind::Html);
         assert_eq!(kind("data.bin"), Kind::Other);
         assert_eq!(kind(".env.local"), Kind::Text);
     }

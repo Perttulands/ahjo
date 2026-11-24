@@ -29,7 +29,6 @@ use std::rc::Rc;
 impl Render for DeskApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.take_aim(window, cx);
-        self.keep_page();
         self.keep_drafts(cx);
         let t = theme(cx).clone();
         let wide = f32::from(window.viewport_size().width);

@@ -45,7 +45,6 @@ his own words and marks.
   installed.
 - On Windows, Desk renders a published page inside its own window, in the
   kit's web view (Kit), with its own marking script, marks and Comment mode.
-  It hides the view when the selected item is not a page.
 - On Linux, Desk opens a published page in the browser, where the kit's web
   view cannot show.
 
@@ -400,6 +399,15 @@ the real list.
   Only Peek still opens over the page. Peek is a glance that any click outside
   closes. The reasons for one panel are in
   [ADR 0001](docs/adr/0001-one-panel-beside-the-page.md).
+- **Web pages in Files.** A `.html` or `.htm` file opened in Files, in the
+  reader or the panel, runs; Source in its head switches to its text. On
+  Windows it runs in the kit's web view, loaded from the app's own scheme,
+  which serves only the folder it was opened in: Files' `live::Live` reads
+  each request over the link from the node's read-only folder route
+  (`/api/files/folder/file`, streamed, one byte range at a time). On Linux it
+  opens in the system's browser, once each time the operator opens it. The
+  reasons, the folder's confinement and the Escape order are in
+  [ADR 0006](docs/adr/0006-web-pages-run-in-a-web-view.md).
 - **Popups.** Every menu, confirm and small form that a page opens over itself
   is a popup on the dismissal stack (`Host::popup`, `app-kit`'s `popup`). The
   shell handles everything except the popup's content, the same way on every
@@ -543,7 +551,7 @@ means `widgets::pane`.
 | Markdown | prose drawn in the theme. Its links go to the page | `widgets::markdown` |
 | Selectable text | prose that can be selected and copied across a column | `widgets::select::Selectable` |
 | Tokens | every colour, size, corner, type size and motion | `theme` (`size`, `ty`, `board`, `fade`, `motion`), and a page's own tokens beside the page |
-| Web view | a web page inside the window, on Windows: WebView2 (`wry`) as a child window laid over a surface's bounds and following them. A child window draws over everything the app draws there, so its owner hides it when the surface shows something else. The owner gives it an optional script that runs before the page's own and hears what the page posts. On Linux it cannot show (a system web view would need GTK's event loop, which a GPUI window does not run): `SHOWS_INSIDE` is false and opening fails with `web_view_unsupported` | `web_view::WebSurface`, `WebViewSetup` |
+| Web view | a web page inside the window, on Windows: WebView2 (`wry`) as a child window laid over a surface's bounds. A child window draws over everything the app draws there, so the kit decides once a frame, after the stack is drawn, whether it shows: where its surface was painted this frame and no popup, menu or layer overlaps it (`frame::stack` calls `web_view::settle`). The owner gives it an optional script that runs before the page's own, hears what the page posts, may serve it from a scheme of the app's own (`Scheme`, `scheme_url`), and names the focus that stands for the page's keyboard: an Escape the page leaves unhandled is pressed there, once (ADR 0006). On Linux it cannot show (a system web view would need GTK's event loop, which a GPUI window does not run): `SHOWS_INSIDE` is false and opening fails with `web_view_unsupported` | `web_view::WebSurface`, `WebViewSetup`, `Scheme` |
 | Window evidence | what a report attaches: the window's own pixels, and its page, panel, open surfaces, builds and size. Windows captures with `PrintWindow`, X11 with the X window's image. On Wayland it reports that it cannot | `Host::capture` (`capture::Picture`; the binary names the capture method, as Swarm's `capture` does), `Host::window_state` |
 | AppFrame and Hub | `AppFrame` is a window's stack, status line and toast, with no node. Swarm's `Hub` holds one, beside the fleet and settings. Brain and Desk hold an `AppFrame` alone (see App pages, Host, Hub and AppFrame) | `frame::AppFrame`, `hub::Hub` |
 

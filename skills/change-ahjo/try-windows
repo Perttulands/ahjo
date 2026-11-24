@@ -26,13 +26,18 @@ usage: try-windows [<commit>] [--page <page>]... [--step <step>]... [--app swarm
               type <text>        typed into what has the keyboard
               key <key>          enter, escape, tab, backspace, up, down,
                                  left or right
-              eval <script>      the script's value in the app's web page,
+              eval <script>      the script's value in the app's web page
+                                 (the shown one, when it has several),
                                  printed and kept in eval.txt
               shot <name>        captured as <app>-<name>.png
             Keys with Alt or Ctrl cannot be sent to a window that is not in
             front: run a chord from the Keys panel (click Keys, then its row).
             The fake desk's asks: a choice (try-pick), a document (try-doc)
-            and a published HTML page (try-page).
+            and a published HTML page (try-page). The scratch files hold two
+            HTML prototypes, protos/counter (its own css, js, an asset in
+            'my assets', a <dialog>) and protos/cdn (lodash from a CDN), each
+            counting its button's clicks in window.count; the session
+            'protos' prints both paths, to click.
   --app     which apps to start (default all three)
   --out     where the screenshots go (default
             ~/.cache/ahjo-dev/try-shots/<commit>-<time>)
@@ -180,6 +185,51 @@ summary: Nothing here is the operator's.
 
 Pages for the screenshot, written by try-windows.
 EOF
+# Two HTML prototypes for Files to run: one with its own css and js, an
+# asset in a folder whose name has a space, and a dialog of its own; one
+# with a library from a CDN. Each counts its button's clicks in
+# window.count, which an eval step reads back.
+mkdir -p "$S/files/protos/counter/my assets" "$S/files/protos/cdn"
+cat > "$S/files/protos/counter/index.html" <<'HTML'
+<!doctype html><html><head><meta charset="utf-8"><title>Counter</title>
+<link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script></head>
+<body><img id="dot" src="my assets/dot one.svg" alt="dot" width="48" height="48">
+<h1>Counter prototype</h1><button id="count">Clicked 0 times</button>
+<button id="ask">Open dialog</button>
+<dialog id="dialog"><p>A dialog of the page's own.</p><button id="shut">Close</button></dialog>
+</body></html>
+HTML
+cat > "$S/files/protos/counter/style.css" <<'CSS'
+body { font: 18px system-ui, sans-serif; margin: 32px; background: #e8f0e4; color: #1d2b1a }
+button { font: inherit; padding: 14px 24px; margin-right: 12px }
+CSS
+cat > "$S/files/protos/counter/app.js" <<'JS'
+window.count = 0;
+const button = document.getElementById("count");
+button.addEventListener("click", () => {
+  window.count += 1;
+  button.textContent = `Clicked ${window.count} times`;
+});
+document.getElementById("ask").addEventListener("click", () => document.getElementById("dialog").showModal());
+document.getElementById("shut").addEventListener("click", () => document.getElementById("dialog").close());
+JS
+cat > "$S/files/protos/counter/my assets/dot one.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><circle cx="24" cy="24" r="20" fill="#c0392b"/></svg>
+SVG
+cat > "$S/files/protos/cdn/index.html" <<'HTML'
+<!doctype html><html><head><meta charset="utf-8"><title>CDN</title>
+<script src="https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js"></script>
+<style>body { font: 18px system-ui, sans-serif; margin: 32px; background: #e4ecf4 } button { font: inherit; padding: 14px 24px }</style></head>
+<body><h1>CDN prototype</h1><p id="lib"></p><button id="count">Clicked 0 times</button>
+<script>
+window.count = 0;
+document.getElementById("lib").textContent = "lodash " + _.VERSION;
+document.getElementById("count").addEventListener("click", (e) => {
+  window.count = _.add(window.count, 1);
+  e.target.textContent = `Clicked ${window.count} times`;
+});
+</script></body></html>
+HTML
 git -C "$S/brain" init -q && git -C "$S/brain" add -A &&
   git -C "$S/brain" -c user.name=try -c user.email=try@localhost commit -qm "scratch brain"
 cat > "$S/xdg/ahjo/config.toml" <<EOF
@@ -197,6 +247,8 @@ HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s build -c "$S/files" \
 HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s agent -c "$S/files" \
   "printf '%s\n' '# Plan' '' '1. Read DESIGN.md' '2. Change the page' '3. Look at it on Windows'; exec bash --norc"
 HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s shell -c "$S/files" "ls -la; exec bash --norc"
+HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s protos -c "$S/files" \
+  "printf '%s\\n' 'Prototypes:' '' '$S/files/protos/counter/index.html' '' '$S/files/protos/cdn/index.html'; exec bash --norc"
 HOME=$S XDG_CONFIG_HOME=$S/xdg "$AHJO" serve > "$out/node.log" 2>&1 &
 pids+=($!)
 for i in $(seq 1 100); do "$AHJO" version --node $node >/dev/null 2>&1 && break; sleep 0.2; done

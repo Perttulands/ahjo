@@ -7,6 +7,11 @@ pub mod commands;
 /// HTTP route serving the bytes of a file.
 pub const FILE_BYTES_PATH: &str = "/api/files/file";
 
+/// HTTP route reading a file inside an opened folder ([`InFolder`]), whole
+/// or one byte range, streamed: what a web view showing a file of that
+/// folder loads, through the app. Read-only.
+pub const FOLDER_FILE_PATH: &str = "/api/files/folder/file";
+
 /// HTTP route writing an attachment ([`DropAt`]) for an agent on the node
 /// to read by the path it answers ([`Dropped`]).
 pub const DROPS_PATH: &str = "/api/drops";
@@ -130,6 +135,17 @@ pub struct At {
     pub path: String,
 }
 
+/// A file named from the folder it was opened in: `path` is relative to
+/// `folder`, with `/` between its parts, and must stay inside `folder`
+/// once every link is followed.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct InFolder {
+    #[serde(default)]
+    pub node: String,
+    pub folder: String,
+    pub path: String,
+}
+
 /// A save may name the version it was edited from.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct SaveAt {
@@ -169,5 +185,6 @@ pub const PERMISSION_DENIED: &str = "permission_denied";
 pub const NOT_FOLDER: &str = "not_folder";
 pub const NOT_FILE: &str = "not_file";
 pub const TOO_LARGE: &str = "too_large";
+pub const RANGE_NOT_SATISFIABLE: &str = "range_not_satisfiable";
 pub const UNKNOWN_NODE: &str = "unknown_node";
 pub const IO_ERROR: &str = "io_error";

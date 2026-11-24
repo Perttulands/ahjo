@@ -828,6 +828,7 @@ impl DeskApp {
                 on_message: Some(Box::new(move |m| {
                     let _ = said.try_send(m);
                 })),
+                ..WebViewSetup::default()
             })
             .into_any_element()
     }

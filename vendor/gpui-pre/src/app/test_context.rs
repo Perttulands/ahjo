@@ -436,6 +436,12 @@ impl TestAppContext {
         self.test_platform.opened_url.borrow().clone()
     }
 
+    /// Ahjo: every path the app handed to the system's own program, in
+    /// order.
+    pub fn opened_paths(&self) -> Vec<std::path::PathBuf> {
+        self.test_platform.opened_paths.borrow().clone()
+    }
+
     /// Returns the application identity configured during this test.
     pub fn app_identity(&self) -> Option<(SharedString, SharedString)> {
         self.test_platform.app_identity()

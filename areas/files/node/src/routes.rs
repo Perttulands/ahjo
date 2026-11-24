@@ -3,11 +3,16 @@
 
 use std::sync::Arc;
 
-use ahjo_files_contract::{At, DropAt, Dropped, FILE_BYTES_PATH, Job, SaveAt};
+use ahjo_files_contract::{
+    At, DropAt, Dropped, FILE_BYTES_PATH, FOLDER_FILE_PATH, InFolder, Job, SaveAt,
+};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::StatusCode;
-use axum::http::header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HeaderValue};
+use axum::http::header::{
+    ACCEPT_RANGES, CACHE_CONTROL, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_SECURITY_POLICY,
+    CONTENT_TYPE, HeaderMap, HeaderValue, RANGE, X_CONTENT_TYPE_OPTIONS,
+};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -25,6 +30,7 @@ pub fn routes(files: Arc<Files>, drops: Arc<Drops>) -> Router {
         .route("/api/files/bridge/start", post(bridge_start))
         .route("/api/files/bridge/events", get(bridge_events))
         .route(FILE_BYTES_PATH, get(read).put(save).post(create_file))
+        .route(FOLDER_FILE_PATH, get(read_in_folder))
         .layer(DefaultBodyLimit::max(MAX_BYTES as usize))
         .with_state(files)
         .merge(drop_routes(drops))
@@ -90,12 +96,164 @@ async fn read(State(files): Shared, Query(at): Query<At>) -> Result<Response, Fi
         (CONTENT_TYPE, HeaderValue::from_static(kind)),
         (CACHE_CONTROL, HeaderValue::from_static("no-store")),
         (CONTENT_SECURITY_POLICY, HeaderValue::from_static("sandbox")),
-        (
-            axum::http::header::X_CONTENT_TYPE_OPTIONS,
-            HeaderValue::from_static("nosniff"),
-        ),
+        (X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
     ];
     Ok((headers, bytes).into_response())
+}
+
+/// A file of an opened folder, whole or the one byte range asked for,
+/// streamed from the disk as it is sent: never read whole, so any size
+/// serves. Typed by its name, as a browser needs it to run a script or play
+/// a video. Opened on the node's own address it still runs nothing (the
+/// policy sandboxes it); the app serves it to its web view under its own
+/// scheme.
+async fn read_in_folder(
+    State(files): Shared,
+    Query(at): Query<InFolder>,
+    headers: HeaderMap,
+) -> Result<Response, FilesError> {
+    let kind = served_type(&at.path);
+    let (file, length) = blocking(&files, &at.node, move |f| {
+        let path = f.roots.in_folder(&at.folder, &at.path)?;
+        let file = std::fs::File::open(&path)?;
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            return Err(FilesError::NotFile);
+        }
+        Ok((file, meta.len()))
+    })
+    .await?;
+    let asked = headers.get(RANGE).and_then(|v| v.to_str().ok());
+    let mut out = HeaderMap::new();
+    out.insert(CONTENT_TYPE, HeaderValue::from_static(kind));
+    out.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    out.insert(CONTENT_SECURITY_POLICY, HeaderValue::from_static("sandbox"));
+    out.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    out.insert(ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    let (status, start, end) = match asked.map(|a| byte_range(a, length)) {
+        None | Some(Range::Whole) => (StatusCode::OK, 0, length),
+        Some(Range::Part(start, end)) => {
+            let shown = format!("bytes {start}-{}/{length}", end - 1);
+            out.insert(CONTENT_RANGE, header(&shown));
+            (StatusCode::PARTIAL_CONTENT, start, end)
+        }
+        Some(Range::Unsatisfiable) => {
+            let mut refused = ahjo_node_kit::serve::Failure(
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                ahjo_core::Error::new(
+                    ahjo_files_contract::RANGE_NOT_SATISFIABLE,
+                    format!("No bytes there: the file has {length}"),
+                ),
+            )
+            .into_response();
+            refused
+                .headers_mut()
+                .insert(CONTENT_RANGE, header(&format!("bytes */{length}")));
+            return Ok(refused);
+        }
+    };
+    out.insert(CONTENT_LENGTH, header(&(end - start).to_string()));
+    let body = axum::body::Body::from_stream(stream_from(file, start, end - start));
+    Ok((status, out, body).into_response())
+}
+
+fn header(text: &str) -> HeaderValue {
+    HeaderValue::from_str(text).expect("digits and words are a header")
+}
+
+/// What a `Range` header asks of a file `length` bytes long.
+#[derive(Debug, PartialEq)]
+enum Range {
+    /// No range this route serves (several, or not bytes): the whole file.
+    Whole,
+    /// Bytes `start..end`.
+    Part(u64, u64),
+    /// A range wholly past the end, or of nothing.
+    Unsatisfiable,
+}
+
+/// One `bytes=` range: `a-b`, `a-` or the last `n` bytes, `-n`. An end
+/// past the file is the file's end.
+fn byte_range(asked: &str, length: u64) -> Range {
+    let Some(spec) = asked.trim().strip_prefix("bytes=") else {
+        return Range::Whole;
+    };
+    if spec.contains(',') {
+        return Range::Whole;
+    }
+    let Some((first, last)) = spec.trim().split_once('-') else {
+        return Range::Whole;
+    };
+    let (first, last) = (first.trim(), last.trim());
+    let parsed = |n: &str| n.parse::<u64>().ok();
+    let (start, end) = match (first.is_empty(), last.is_empty()) {
+        (true, true) => return Range::Whole,
+        (true, false) => match parsed(last) {
+            Some(0) => return Range::Unsatisfiable,
+            Some(n) => (length.saturating_sub(n), length),
+            None => return Range::Whole,
+        },
+        (false, _) => {
+            let Some(start) = parsed(first) else {
+                return Range::Whole;
+            };
+            let end = if last.is_empty() {
+                length
+            } else {
+                match parsed(last) {
+                    Some(last) if last >= start => last.saturating_add(1).min(length),
+                    _ => return Range::Whole,
+                }
+            };
+            (start, end)
+        }
+    };
+    if start >= length {
+        Range::Unsatisfiable
+    } else {
+        Range::Part(start, end)
+    }
+}
+
+/// `count` bytes of `file` from `start`, read a piece at a time as the
+/// body is sent.
+fn stream_from(
+    file: std::fs::File,
+    start: u64,
+    count: u64,
+) -> impl futures_util::Stream<Item = std::io::Result<Vec<u8>>> + Send {
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    const PIECE: u64 = 256 << 10;
+    let file = tokio::fs::File::from_std(file);
+    futures_util::stream::unfold(
+        (file, count, false),
+        move |(mut file, left, sought)| async move {
+            if left == 0 {
+                return None;
+            }
+            if !sought && let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+                return Some((Err(e), (file, 0, true)));
+            }
+            let mut piece = vec![0; PIECE.min(left) as usize];
+            match file.read(&mut piece).await {
+                // The file shrank since it was measured: what was promised
+                // cannot be sent, so the body ends short and the client
+                // sees it fail.
+                Ok(0) => Some((
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "the file shrank while it was read",
+                    )),
+                    (file, 0, true),
+                )),
+                Ok(n) => {
+                    piece.truncate(n);
+                    Some((Ok(piece), (file, left - n as u64, true)))
+                }
+                Err(e) => Some((Err(e), (file, 0, true))),
+            }
+        },
+    )
 }
 
 async fn save(
@@ -137,6 +295,38 @@ async fn blocking<T: Send + 'static>(
     tokio::task::spawn_blocking(move || work(&files))
         .await
         .map_err(|error| FilesError::Io(std::io::Error::other(error)))?
+}
+
+/// What a browser needs to know a file of a page as: a page, a script
+/// (modules too), a style, media, a document or a font; else bytes.
+fn served_type(path: &str) -> &'static str {
+    let extension = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("html" | "htm") => "text/html; charset=utf-8",
+        Some("js" | "mjs" | "cjs") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("json" | "map") => "application/json",
+        Some("wasm") => "application/wasm",
+        Some("txt" | "md" | "csv") => "text/plain; charset=utf-8",
+        Some("xml") => "application/xml",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("ogv") => "video/ogg",
+        Some("mov") => "video/quicktime",
+        Some("mp3") => "audio/mpeg",
+        Some("m4a" | "aac") => "audio/mp4",
+        Some("wav") => "audio/wav",
+        Some("ogg" | "oga" | "opus") => "audio/ogg",
+        Some("flac") => "audio/flac",
+        Some("pdf") => "application/pdf",
+        Some("glb") => "model/gltf-binary",
+        Some("gltf") => "model/gltf+json",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        Some("ttf") => "font/ttf",
+        Some("otf") => "font/otf",
+        _ => content_type(path),
+    }
 }
 
 /// The type a picture needs to show in an `img`; everything else is bytes.
@@ -214,4 +404,24 @@ async fn coded_rejection(response: Response) -> Response {
         "bad_request"
     };
     ahjo_node_kit::serve::Failure(status, ahjo_core::Error::new(code, message)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Range, byte_range};
+
+    #[test]
+    fn a_range_header_reads_as_one_range_or_the_whole() {
+        assert_eq!(byte_range("bytes=0-9", 100), Range::Part(0, 10));
+        assert_eq!(byte_range("bytes=90-", 100), Range::Part(90, 100));
+        assert_eq!(byte_range("bytes=90-500", 100), Range::Part(90, 100));
+        assert_eq!(byte_range("bytes=-10", 100), Range::Part(90, 100));
+        assert_eq!(byte_range("bytes=-500", 100), Range::Part(0, 100));
+        assert_eq!(byte_range("bytes=100-", 100), Range::Unsatisfiable);
+        assert_eq!(byte_range("bytes=-0", 100), Range::Unsatisfiable);
+        assert_eq!(byte_range("bytes=0-", 0), Range::Unsatisfiable);
+        assert_eq!(byte_range("bytes=0-1,5-6", 100), Range::Whole);
+        assert_eq!(byte_range("bytes=9-3", 100), Range::Whole);
+        assert_eq!(byte_range("lines=1-2", 100), Range::Whole);
+    }
 }

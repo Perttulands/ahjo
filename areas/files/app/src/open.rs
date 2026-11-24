@@ -72,6 +72,8 @@ pub struct Opened {
     pub diff_at: usize,
     /// The file changed on disk under an unsaved edit.
     pub changed_on_disk: bool,
+    /// A web page this open ran in the system's browser (ADR 0006).
+    pub ran_outside: bool,
 }
 
 /// A diff's lines, and the same paired side by side; and for colouring
@@ -159,6 +161,7 @@ impl Opened {
             diff_folds: Default::default(),
             diff_at: 0,
             changed_on_disk: false,
+            ran_outside: false,
         }
     }
 

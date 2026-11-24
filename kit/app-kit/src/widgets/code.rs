@@ -582,6 +582,11 @@ impl Code {
     }
 
     /// Colours the text as `lang`, or not at all.
+    /// The language its text is coloured as, when any.
+    pub fn lang(&self) -> Option<&'static Lang> {
+        self.lang
+    }
+
     pub fn set_lang(&mut self, lang: Option<&'static Lang>, cx: &mut Context<Self>) {
         self.lang = lang;
         self.reindex();

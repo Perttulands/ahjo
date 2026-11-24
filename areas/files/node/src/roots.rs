@@ -114,6 +114,37 @@ impl Roots {
         }
     }
 
+    /// An existing file named from the folder it was opened in, with every
+    /// link resolved, that stays inside that folder. `relative` is the
+    /// file's path from the folder, its parts split by `/`; a part that
+    /// climbs (`..`), an absolute path, or a link whose target lies outside
+    /// the folder is refused as outside, even when the target is elsewhere
+    /// under a root.
+    pub fn in_folder(&self, folder: &str, relative: &str) -> Result<PathBuf, FilesError> {
+        let folder = self.existing(folder)?;
+        if !folder.is_dir() {
+            return Err(FilesError::NotFolder);
+        }
+        let mut path = folder.clone();
+        for part in relative.split('/') {
+            let part = Path::new(part);
+            match part.components().collect::<Vec<_>>().as_slice() {
+                [] => {}
+                [Component::Normal(name)] => path.push(name),
+                _ => return Err(FilesError::Outside),
+            }
+        }
+        if path == folder || relative.as_bytes().contains(&0) {
+            return Err(FilesError::NotFile);
+        }
+        let canonical = path.canonicalize()?;
+        if canonical.starts_with(&folder) && self.contains(&canonical) {
+            Ok(canonical)
+        } else {
+            Err(FilesError::Outside)
+        }
+    }
+
     pub fn contains(&self, canonical: &Path) -> bool {
         self.roots
             .iter()

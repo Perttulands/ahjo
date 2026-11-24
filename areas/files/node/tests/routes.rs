@@ -563,3 +563,131 @@ async fn status_names_every_file_that_differs_from_head_and_a_whole_diff_has_eve
     let none: ahjo_files_contract::RepoStatus = serde_json::from_slice(&body).unwrap();
     assert_eq!(none, Default::default());
 }
+
+fn in_folder(folder: &Path, path: &str) -> String {
+    format!(
+        "/api/files/folder/file?node={NODE}&folder={}&path={}",
+        encode(folder.to_str().unwrap()),
+        encode(path)
+    )
+}
+
+async fn ranged(
+    app: &Router,
+    uri: &str,
+    range: &str,
+) -> (StatusCode, Vec<u8>, axum::http::HeaderMap) {
+    let request = Request::builder()
+        .uri(uri)
+        .header("range", range)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let (status, headers) = (response.status(), response.headers().clone());
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    (status, body.to_vec(), headers)
+}
+
+#[tokio::test]
+async fn a_folder_serves_its_files_typed_for_a_browser() {
+    let scratch = Scratch::new("folder-types");
+    let folder = scratch.0.join("proto");
+    std::fs::create_dir_all(folder.join("my assets")).unwrap();
+    let app = app(&scratch.0);
+    for (name, kind) in [
+        ("index.html", "text/html; charset=utf-8"),
+        ("app.mjs", "text/javascript; charset=utf-8"),
+        ("my assets/style one.css", "text/css; charset=utf-8"),
+        ("clip.mp4", "video/mp4"),
+        ("paper.pdf", "application/pdf"),
+    ] {
+        std::fs::write(folder.join(name), name).unwrap();
+        let (status, body, headers) =
+            call(&app, "GET", &in_folder(&folder, name), Body::empty()).await;
+        assert_eq!(status, StatusCode::OK, "{name}");
+        assert_eq!(body, name.as_bytes(), "{name}");
+        assert_eq!(headers["content-type"], kind, "{name}");
+        assert_eq!(headers["accept-ranges"], "bytes", "{name}");
+        // Opened on the node's own address, nothing of it runs.
+        assert_eq!(headers["content-security-policy"], "sandbox", "{name}");
+    }
+}
+
+#[tokio::test]
+async fn a_range_past_64_mib_is_served_from_where_it_starts() {
+    let scratch = Scratch::new("folder-range");
+    let folder = scratch.0.join("media");
+    std::fs::create_dir(&folder).unwrap();
+    // A sparse file past the most one whole read carries, with known bytes
+    // beyond that.
+    let length = MAX_BYTES + (2 << 20);
+    let at = MAX_BYTES + (1 << 20);
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut file = std::fs::File::create(folder.join("big.mp4")).unwrap();
+        file.set_len(length).unwrap();
+        file.seek(SeekFrom::Start(at)).unwrap();
+        file.write_all(b"far bytes").unwrap();
+    }
+    let app = app(&scratch.0);
+    let uri = in_folder(&folder, "big.mp4");
+    let (status, body, headers) = ranged(&app, &uri, &format!("bytes={at}-{}", at + 8)).await;
+    assert_eq!(status, StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body, b"far bytes");
+    assert_eq!(
+        headers["content-range"],
+        format!("bytes {at}-{}/{length}", at + 8).as_str()
+    );
+    assert_eq!(headers["content-length"], "9");
+    assert_eq!(headers["content-type"], "video/mp4");
+
+    let (status, _, headers) = ranged(&app, &uri, &format!("bytes={length}-")).await;
+    assert_eq!(status, StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(
+        headers["content-range"],
+        format!("bytes */{length}").as_str()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_folder_serves_nothing_outside_itself() {
+    let scratch = Scratch::new("folder-confined");
+    let root = scratch.0.join("root");
+    let folder = root.join("proto");
+    let other = root.join("other");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("secret.txt"), "theirs").unwrap();
+    std::fs::write(scratch.0.join("outside.txt"), "not a root's").unwrap();
+    std::fs::write(folder.join("index.html"), "mine").unwrap();
+    // A link to a file of another folder under the same root, and one out
+    // of every root.
+    std::os::unix::fs::symlink(other.join("secret.txt"), folder.join("next door.txt")).unwrap();
+    std::os::unix::fs::symlink(&other, folder.join("door")).unwrap();
+    std::os::unix::fs::symlink(scratch.0.join("outside.txt"), folder.join("out.txt")).unwrap();
+    let app = app(&root);
+    let status = |path: &'static str, folder: &Path| {
+        let uri = in_folder(folder, path);
+        let app = app.clone();
+        async move { call(&app, "GET", &uri, Body::empty()).await.0 }
+    };
+    assert_eq!(status("index.html", &folder).await, StatusCode::OK);
+    for path in [
+        "next door.txt",
+        "door/secret.txt",
+        "out.txt",
+        "../other/secret.txt",
+        "a/../../other/secret.txt",
+    ] {
+        assert_eq!(status(path, &folder).await, StatusCode::FORBIDDEN, "{path}");
+    }
+    // A folder outside the roots is refused, its files with it.
+    assert_eq!(
+        status("outside.txt", &scratch.0).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(status("missing.js", &folder).await, StatusCode::NOT_FOUND);
+    // A leading slash names a file of the folder too, not of the disk.
+    assert_eq!(status("/etc/passwd", &folder).await, StatusCode::NOT_FOUND);
+}

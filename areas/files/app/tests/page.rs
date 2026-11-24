@@ -3031,3 +3031,203 @@ fn ctrl_wheel_and_ctrl_keys_zoom_the_code_and_keep_it(cx: &mut TestAppContext) {
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+/// A web page opened here runs: on this system, where the app has no web
+/// view inside its window, in the system's browser, once for each time it
+/// is opened, not again as the page draws, nor when it opens at a line or
+/// comes back as a tab. Its source is a switch away, coloured, and keeps
+/// what was typed in it.
+#[gpui::test]
+fn a_web_page_runs_once_and_its_source_is_a_switch_away(cx: &mut TestAppContext) {
+    if ahjo_app_kit::web_view::SHOWS_INSIDE {
+        return;
+    }
+    let root = ahjo_testkit::fresh_dir("files-live");
+    std::fs::write(root.join("index.html"), "<p>one</p>\n<p>two</p>\n").unwrap();
+    std::fs::write(root.join("other.html"), "<p>other</p>\n<p>line two</p>\n").unwrap();
+    std::fs::write(root.join("note.txt"), "plain").unwrap();
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    tree(cx, "file-row-index.html");
+    click(cx, "file-row-index.html");
+    until(cx, "the page, in the browser", |cx| {
+        cx.debug_bounds("files-live-outside").is_some()
+    });
+    for _ in 0..3 {
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+    }
+    let index = root.canonicalize().unwrap().join("index.html");
+    assert_eq!(cx.opened_paths(), vec![index.clone()], "opened once");
+
+    // Its source, coloured.
+    click(cx, "files-source");
+    until(cx, "its source", |cx| {
+        cx.debug_bounds("files-live-outside").is_none() && cx.debug_bounds("files-edit").is_some()
+    });
+    page.read_with(cx, |p, cx| {
+        let code = p.code.read(cx);
+        assert!(code.text().starts_with("<p>one</p>"));
+        assert!(code.lang().is_some(), "coloured as markup");
+    });
+    // And back.
+    click(cx, "files-source");
+    until(cx, "the page again", |cx| {
+        cx.debug_bounds("files-live-outside").is_some()
+    });
+    click(cx, "files-source");
+    click(cx, "files-edit");
+    until(cx, "editing", |cx| cx.debug_bounds("files-save").is_some());
+    cx.simulate_keystrokes("ctrl-a");
+    cx.simulate_input("<p>draft</p>");
+
+    // Away to another file and back as its tab: the draft, in its source,
+    // and the browser not opened again.
+    click(cx, "file-row-note.txt");
+    until(cx, "the other file", |cx| {
+        cx.debug_bounds("file-view-note.txt").is_some()
+    });
+    click(cx, "file-row-index.html");
+    until(cx, "the draft back", |cx| {
+        cx.debug_bounds("files-unsaved").is_some()
+    });
+    assert!(cx.debug_bounds("files-live-outside").is_none());
+    page.read_with(cx, |p, cx| {
+        assert_eq!(p.code.read(cx).text(), "<p>draft</p>");
+    });
+
+    // Asked at a line: its source at that line, not the browser.
+    let other = root.canonicalize().unwrap().join("other.html");
+    let other_path = other.to_str().unwrap().to_string();
+    cx.update(|window, cx| {
+        page.update(cx, |p, cx| p.open_at(other_path, Some(2), window, cx));
+    });
+    until(cx, "its source at the line", |cx| {
+        page.read_with(cx, |p, cx| {
+            p.opened
+                .as_ref()
+                .is_some_and(|o| o.name == "other.html" && o.source)
+                && p.code.read(cx).text().contains("line two")
+                && p.code.read(cx).cursor_line() == 1
+        })
+    });
+    assert!(cx.debug_bounds("files-live-outside").is_none());
+    assert_eq!(cx.opened_paths(), vec![index], "not opened again");
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// The app's scheme serves the open page's folder through the node: a file
+/// in a folder of it, a range of a large file, bounded and said so, and
+/// nothing outside the folder or for another site.
+#[gpui::test]
+fn the_page_scheme_serves_its_folder_and_nothing_else(cx: &mut TestAppContext) {
+    use ahjo_app_kit::web_view::{SchemeRequest, SchemeResponse};
+    use ahjo_files_app::live::{Live, MOST, SCHEME};
+    let root = ahjo_testkit::fresh_dir("files-scheme");
+    let folder = root.join("proto");
+    std::fs::create_dir_all(folder.join("my assets")).unwrap();
+    std::fs::write(folder.join("index.html"), "<script src=app.js></script>").unwrap();
+    std::fs::write(folder.join("my assets/style one.css"), "p { color: red }").unwrap();
+    std::fs::write(root.join("secret.txt"), "secret").unwrap();
+    // Larger than any one answer holds, and sparse: nothing reads it all.
+    let big = std::fs::File::create(folder.join("clip.mp4")).unwrap();
+    let length = 200u64 << 20;
+    big.set_len(length).unwrap();
+    drop(big);
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    tree(cx, "file-row-proto");
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    let (node, reach) = page.read_with(cx, |p, cx| (p.tree.node.clone(), p.host.reach(cx)));
+    let reach = reach.expect("the link");
+    let live = Live::default();
+    let folder = folder.canonicalize().unwrap();
+    let page_url = live.serve(&node, folder.to_str().unwrap(), "index.html", reach);
+    let site = SchemeRequest::of(SCHEME, "GET", &page_url, vec![])
+        .unwrap()
+        .site;
+    let ask = |path: &str, headers: Vec<(String, String)>| -> SchemeResponse {
+        let asked = SchemeRequest::of(
+            SCHEME,
+            "GET",
+            &format!("http://{SCHEME}.{site}.localhost/{path}"),
+            headers,
+        )
+        .unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        live.scheme().serve.as_ref()(asked, Box::new(move |r| tx.send(r).unwrap()));
+        rx.recv_timeout(Duration::from_secs(10)).expect("an answer")
+    };
+
+    let page_answer = ask("index.html", vec![]);
+    assert_eq!(page_answer.status, 200);
+    assert_eq!(
+        page_answer.header("content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    let nested = ask("my%20assets/style%20one.css", vec![]);
+    assert_eq!(nested.status, 200);
+    assert_eq!(nested.body, b"p { color: red }");
+    assert_eq!(
+        nested.header("content-type"),
+        Some("text/css; charset=utf-8")
+    );
+
+    let from = 100u64 << 20;
+    let part = ask("clip.mp4", vec![("Range".into(), format!("bytes={from}-"))]);
+    assert_eq!(part.status, 206);
+    assert_eq!(part.header("content-type"), Some("video/mp4"));
+    assert_eq!(
+        part.header("content-range").map(str::to_string),
+        Some(format!("bytes {from}-{}/{length}", from + MOST - 1))
+    );
+    assert_eq!(part.body.len() as u64, MOST);
+    let small = ask("clip.mp4", vec![("Range".into(), "bytes=10-19".into())]);
+    assert_eq!(small.status, 206);
+    assert_eq!(small.body.len(), 10);
+    assert_eq!(
+        small.header("content-range"),
+        Some(&*format!("bytes 10-19/{length}"))
+    );
+    // Asked whole, it comes as its first part, said so.
+    let whole = ask("clip.mp4", vec![]);
+    assert_eq!(whole.status, 206);
+    assert_eq!(whole.body.len() as u64, MOST);
+    assert_eq!(
+        whole.header("content-range"),
+        Some(&*format!("bytes 0-{}/{length}", MOST - 1))
+    );
+
+    for escape in ["%2E%2E/secret.txt", "my%20assets/%2E%2E/%2E%2E/secret.txt"] {
+        let refused = ask(escape, vec![]);
+        assert_eq!(refused.status, 403, "{escape}");
+        assert!(!refused.body.starts_with(b"secret"));
+    }
+    let elsewhere = SchemeRequest::of(
+        SCHEME,
+        "GET",
+        &format!("http://{SCHEME}.0000.localhost/index.html"),
+        vec![],
+    )
+    .unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    live.answer(elsewhere, Box::new(move |r| tx.send(r).unwrap()));
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(10)).unwrap().status,
+        403
+    );
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}

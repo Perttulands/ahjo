@@ -14,10 +14,12 @@ use crate::popup::{self, Content, Outside, Popup, PopupId, Spot};
 use crate::theme::{Theme, alpha, motion, size, theme};
 use crate::widgets::{kit, pane};
 use gpui::{
-    Animation, AnimationExt, AnyElement, AnyView, App, Context, Div, ElementId, Entity,
-    EventEmitter, ExternalPaths, FocusHandle, KeyDownEvent, MouseButton, Pixels, Point, Task,
-    Window, deferred, div, ease_out_quint, prelude::*, px,
+    Animation, AnimationExt, AnyElement, AnyView, App, Bounds, Context, Div, ElementId, Entity,
+    EventEmitter, ExternalPaths, FocusHandle, KeyDownEvent, MouseButton, MouseDownEvent, Pixels,
+    Point, Task, Window, canvas, deferred, div, ease_out_quint, prelude::*, px,
 };
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -29,6 +31,9 @@ pub const NOTICE_SHOWN: Duration = Duration::from_secs(8);
 /// depth.
 pub const NOTICES: usize = 25;
 pub const STACK: usize = 40;
+/// After everything the stack draws: where the kit decides whether each web
+/// view shows ([`crate::web_view::settle`]).
+const WEB_VIEWS: usize = STACK + 10_000;
 
 /// A line for the status line: what happened, whether it failed, and a
 /// button that acts on it. A failure stays until it is closed or replaced;
@@ -273,6 +278,9 @@ pub struct AppFrame {
     toast_task: Option<Task<()>>,
     /// Draws again when words that are not a failure go stale.
     status_task: Option<Task<()>>,
+    /// Where each surface on the stack was last drawn, by its name: what a
+    /// web view under it must not cover.
+    drawn: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
 }
 
 impl EventEmitter<FrameEvent> for AppFrame {}
@@ -286,6 +294,7 @@ impl Default for AppFrame {
             toast: None,
             toast_task: None,
             status_task: None,
+            drawn: Rc::default(),
         }
     }
 }
@@ -769,7 +778,53 @@ pub fn stack(
             _ => {}
         }
     }
+    if cover == Cover::Window {
+        out.push(web_views(frame));
+    }
     out
+}
+
+/// Drawn after the whole stack, every frame: each web view shows where it
+/// was painted unless something on the stack overlaps it, and a press on
+/// the app takes the keyboard back from a page.
+fn web_views(frame: &Entity<AppFrame>) -> AnyElement {
+    let frame = frame.clone();
+    deferred(
+        canvas(
+            |_, _, _| {},
+            move |_, _, window, cx| {
+                let f = frame.read(cx);
+                let names: Vec<&str> = f.stack.iter().map(layers::Layer::kind).collect();
+                let mut drawn = f.drawn.borrow_mut();
+                drawn.retain(|name, _| names.contains(&name.as_str()));
+                let covers: Vec<Bounds<Pixels>> = drawn.values().copied().collect();
+                drop(drawn);
+                crate::web_view::settle(&covers, window);
+                window.on_mouse_event(|_: &MouseDownEvent, phase, window, _| {
+                    if phase == gpui::DispatchPhase::Capture {
+                        crate::web_view::pressed(window);
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_0(),
+    )
+    .with_priority(WEB_VIEWS)
+    .into_any_element()
+}
+
+/// Keeps where the surface `name` is drawn, filling what holds it.
+fn record(frame: &Entity<AppFrame>, name: String, cx: &App) -> impl IntoElement {
+    let drawn = frame.read(cx).drawn.clone();
+    canvas(
+        move |bounds, _, _| {
+            drawn.borrow_mut().insert(name, bounds);
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .inset_0()
 }
 
 /// A layer as its [`Shape`] says, with the close control the shell draws
@@ -799,6 +854,7 @@ fn render_layer(frame: &Entity<AppFrame>, layer: Layer, cx: &mut App) -> AnyElem
     match layer.shape {
         Shape::InPlace => layer.view.into_any_element(),
         Shape::Cover => drops(div().absolute().inset_0())
+            .child(record(frame, layer.name.clone(), cx))
             .child(layer.view)
             .child(
                 close
@@ -826,8 +882,11 @@ fn render_layer(frame: &Entity<AppFrame>, layer: Layer, cx: &mut App) -> AnyElem
                 });
             }
             // The card occludes the room under it, so it takes drops too.
+            let drawn = record(frame, layer.name.clone(), cx);
             room.child(
                 drops(kit::panel(&t))
+                    .relative()
+                    .child(drawn)
                     .id(ElementId::Name(format!("{short}-card").into()))
                     .debug_selector(move || format!("{short}-card"))
                     .occlude()
@@ -895,6 +954,8 @@ fn render_popup(
                 // The shell's frame, its content and its close control
                 // at the top right, where it stays as the content scrolls.
                 kit::panel(&t)
+                    .relative()
+                    .child(record(frame, popup.name.clone(), cx))
                     .id(id.element("popup-frame"))
                     .debug_selector(|| "popup".into())
                     .occlude()

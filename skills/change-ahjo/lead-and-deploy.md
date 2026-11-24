@@ -36,7 +36,7 @@ skills/change-ahjo/try-windows <commit> --page 'sessions --session agent' \
 It builds the commit's node (in `~/.cache/ahjo-dev/try`) and Windows apps
 (in `C:\Users\pertt\ahjo-try`), never the deploy builds, starts a scratch
 node on a free port from 7350 with its own tmux server (sessions `shell`,
-`agent`, `build`), files and brain, and a fake desk, then Swarm, Desk and
+`agent`, `build`, `protos`), files and brain, and a fake desk, then Swarm, Desk and
 Brain on his desktop with settings, logs and caches in a scratch
 `%APPDATA%` and `%LOCALAPPDATA%` (his theme and size are copied, nothing of
 his is written). Each `--page` is what `ahjo view open` takes, a `--path`
@@ -72,6 +72,17 @@ HTML page (`try-page`, shown first); Comment, then a mark on its heading
 skills/change-ahjo/try-windows <commit> --app desk --step 'desk eval document.title' \
   --step 'desk click 850 51' --step 'desk click 900 120' --step 'desk shot marked' \
   --step "desk eval document.querySelectorAll('[data-desk-mark]').length"
+```
+
+The scratch files hold two HTML prototypes for Files to run (ADR 0006):
+`protos/counter/index.html` (its own css and js, an image in `my assets`, a
+`<dialog>`) and `protos/cdn/index.html` (lodash from a CDN). Each counts its
+button's clicks in `window.count`; the session `protos` prints both paths
+to click. With several web views open, `eval` reads the one shown:
+
+```sh
+skills/change-ahjo/try-windows <commit> --app swarm --page 'files --path protos/counter/index.html' \
+  --step 'click 700 160' --step 'eval window.count' --step 'shot counted'
 ```
 
 His desktop sees little: each window shows on his main screen for about

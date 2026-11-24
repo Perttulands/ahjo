@@ -7,10 +7,11 @@ mod zoomed;
 
 use crate::open::Show;
 use crate::page::{FilesPage, Naming, Pick, Rename, RenameIn};
-use crate::store::Side;
+use crate::store::{self, Side};
 use crate::store::{format, paths, tree::Row};
 use ahjo_app_kit::drag::NodeFile;
 use ahjo_app_kit::theme::{Theme, size, theme};
+use ahjo_app_kit::web_view::WebViewSetup;
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use ahjo_core::NodeId;
@@ -1163,6 +1164,20 @@ impl FilesPage {
                 .on_click(cx.listener(|p, _, _, cx| p.toggle_diff(cx))),
             );
         }
+        let page = store::kinds::kind(&o.name) == store::kinds::Kind::Html;
+        if page && !dirty && !matches!(o.show, Show::Failed(_) | Show::Gone) {
+            let running = self.runs_page();
+            head = head.child(
+                pane::act(t, "files-source", if running { "Source" } else { "Page" })
+                    .debug_selector(|| "files-source".into())
+                    .tooltip(kit::tip(if running {
+                        "Its source, as text"
+                    } else {
+                        "The page, running"
+                    }))
+                    .on_click(cx.listener(|p, _, w, cx| p.toggle_source(w, cx))),
+            );
+        }
         if o.editable() {
             head = head.child(
                 pane::act(t, "files-edit", "Edit")
@@ -1290,6 +1305,9 @@ impl FilesPage {
             let truncated = o.diff.as_ref().is_some_and(|d| d.truncated);
             return self.diff_view(t, sides, truncated, cx);
         }
+        if self.runs_page() {
+            return self.live_page(t, cx);
+        }
         match &o.show {
             Show::Reading => pane::empty(t, "Reading…", None).into_any_element(),
             Show::Failed(why) => div()
@@ -1355,6 +1373,65 @@ impl FilesPage {
                 self.with_outline(t, code, cx)
             }
         }
+    }
+
+    /// The open web page, running (ADR 0006): inside the window where the
+    /// system has a web view the app can lay there, else in the system's
+    /// browser, opened when the file was.
+    fn live_page(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let Some(o) = &self.opened else {
+            return div().into_any_element();
+        };
+        let source = || {
+            pane::act(t, "files-live-source", "Source")
+                .debug_selector(|| "files-live-source".into())
+                .on_click(cx.listener(|p, _, w, cx| p.toggle_source(w, cx)))
+                .into_any_element()
+        };
+        let reach = self.host.reach(cx);
+        if !ahjo_app_kit::web_view::SHOWS_INSIDE {
+            let local = reach.is_some_and(|r| r.on_this_computer(&o.node));
+            return pane::empty(
+                t,
+                if local {
+                    "It runs in this computer's browser, opened beside Ahjo"
+                } else {
+                    "It runs inside Ahjo on Windows; this computer's browser cannot reach that device's folder"
+                },
+                Some(source()),
+            )
+            .debug_selector(|| "files-live-outside".into())
+            .into_any_element();
+        }
+        if let Some(e) = self.web.failed() {
+            return pane::empty(
+                t,
+                format!("The page did not open here: {}", e.message),
+                Some(source()),
+            )
+            .into_any_element();
+        }
+        let Some(reach) = reach else {
+            return div().into_any_element();
+        };
+        let url = self
+            .served
+            .serve(&o.node, &paths::parent(&o.path), &o.name, reach);
+        let live = self.served.clone();
+        let focus = self.focus.clone();
+        div()
+            .size_full()
+            .debug_selector(|| "files-live-page".into())
+            .child(self.web.element(url, move || {
+                WebViewSetup {
+                    data_dir: std::env::var_os("LOCALAPPDATA")
+                        .map(|d| std::path::PathBuf::from(d).join("Ahjo").join("files-web")),
+                    scheme: Some(live.scheme()),
+                    focus: Some(focus),
+                    ..WebViewSetup::default()
+                }
+            }))
+            .into_any_element()
     }
 
     fn model(&self, t: &Theme, m: &crate::model::Preview, cx: &mut Context<Self>) -> AnyElement {

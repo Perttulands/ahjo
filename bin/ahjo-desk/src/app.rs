@@ -1085,14 +1085,6 @@ impl DeskApp {
         self.page.run(&script);
     }
 
-    /// Hides the page view unless the surface shows a page: it lies over
-    /// whatever the window draws there.
-    pub fn keep_page(&self) {
-        if self.shown_item().and_then(|i| i.kind()) != Some(MediaKind::Page) {
-            self.page.hide();
-        }
-    }
-
     pub fn media_key(&self, desk: usize, ask: &Ask, m: &Media) -> String {
         format!("{desk}/{}/{}/{}", ask.id, ask.round(), m.id)
     }

@@ -291,6 +291,14 @@ pub struct FilesPage {
     pub place_readme: Option<Vec<ahjo_app_kit::widgets::markdown::Block>>,
     /// Ctrl+wheel over the open file, a step not yet taken.
     pub(crate) zoom_wheel: std::rc::Rc<std::cell::Cell<ahjo_app_kit::zoom::Wheel>>,
+    /// The web page the open file runs as, when it is one (ADR 0006).
+    pub web: ahjo_app_kit::web_view::WebSurface,
+    /// The folder that page is served from.
+    pub served: crate::live::Live,
+    /// The file opening now was not asked for as a page to see: shown at
+    /// start or unasked, or asked at a line. A web page does not open in
+    /// the system's browser for it.
+    unasked: bool,
 }
 
 /// The line, and the column if any, a revealed path's part names: `12` or
@@ -441,7 +449,7 @@ impl Page for FilesPage {
                     .filter(|o| o.node == node.as_str() && matches!(o.show, Show::Failed(_)))
                     .map(|o| o.path.clone())
                 {
-                    page.open(path, window, cx);
+                    page.open_unasked(path, true, window, cx);
                 }
             });
         }
@@ -458,12 +466,12 @@ impl Page for FilesPage {
             }
             if let Some(file) = kept.file.clone() {
                 self.show_in_tree(&file, cx);
-                self.open(file, window, cx);
+                self.open_unasked(file, true, window, cx);
                 self.tab_into_view_soon(window, cx);
             }
             if let (Some(panel), Some(file)) = (&self.panel, kept.panel_file) {
                 panel.update(cx, |p, cx| {
-                    p.open(file, window, cx);
+                    p.open_unasked(file, true, window, cx);
                     p.watch(window, cx);
                 });
             }
@@ -738,6 +746,9 @@ impl FilesPage {
             zoom_wheel: Default::default(),
             jump_due: false,
             place_readme: None,
+            web: Default::default(),
+            served: Default::default(),
+            unasked: false,
         }
     }
 
@@ -1045,7 +1056,7 @@ impl FilesPage {
         if let Some(path) = newest.map(|c| c.path.clone()) {
             self.pick = Some(Pick::Recent(path.clone()));
             // Shown unasked, so a preview the next file takes the place of.
-            self.open_as(path, false, window, cx);
+            self.open_unasked(path, false, window, cx);
             self.shown_newest = true;
             self.keep(cx);
         }
@@ -1471,7 +1482,12 @@ impl FilesPage {
         cx: &mut Context<Self>,
     ) {
         let key = (self.tree.node.clone(), path.clone());
-        self.open(path, window, cx);
+        // At a line it opens to its source.
+        if line.is_some() {
+            self.open_unasked(path, true, window, cx);
+        } else {
+            self.open(path, window, cx);
+        }
         let shown = self
             .opened
             .as_ref()
@@ -1493,6 +1509,18 @@ impl FilesPage {
     /// Opens a file in a tab of its own, and shows it in the tree.
     pub fn open(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
         self.open_as(path, true, window, cx)
+    }
+    /// Opens a file the operator did not ask to see as a page now.
+    fn open_unasked(
+        &mut self,
+        path: String,
+        keep: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.unasked = true;
+        self.open_as(path, keep, window, cx);
+        self.unasked = false;
     }
     /// Opens a file in a tab, kept or (`keep` false) a preview the next
     /// one previewed replaces; a tab left before comes back as it was.
@@ -1521,6 +1549,7 @@ impl FilesPage {
         self.place = None;
         if same {
             // Asked for now, so it is the file to come back to.
+            self.run_outside(cx);
             self.shown_newest = false;
             self.follow_open(&path);
             self.keep(cx);
@@ -1564,6 +1593,7 @@ impl FilesPage {
             cx.notify();
             return;
         }
+        self.run_outside(cx);
         self.read(node, path, false, cx);
         cx.notify();
     }
@@ -2772,6 +2802,57 @@ impl FilesPage {
             },
             cx,
         );
+    }
+    /// Where the app cannot run a page inside its window: the open web
+    /// page opens in the system's browser, from its own folder so what it
+    /// loads comes with it, once for each time it is asked for. Only this
+    /// computer's own files can.
+    fn run_outside(&mut self, cx: &mut Context<Self>) {
+        if ahjo_app_kit::web_view::SHOWS_INSIDE || self.unasked {
+            return;
+        }
+        let local = |node: &str, cx: &mut Context<Self>| {
+            self.host
+                .reach(cx)
+                .is_some_and(|r| r.on_this_computer(node))
+        };
+        let Some(o) = self
+            .opened
+            .as_ref()
+            .filter(|o| !o.ran_outside && store::kinds::kind(&o.name) == store::kinds::Kind::Html)
+        else {
+            return;
+        };
+        let file = std::path::PathBuf::from(&o.path);
+        if local(&o.node.clone(), cx) && file.is_file() {
+            cx.open_with_system(&file);
+        }
+        if let Some(o) = self.opened.as_mut() {
+            o.ran_outside = true;
+        }
+    }
+    /// The open file runs as a web page: one, not asked for at a line, not
+    /// being edited.
+    pub(crate) fn runs_page(&self) -> bool {
+        self.opened.as_ref().is_some_and(|o| {
+            store::kinds::kind(&o.name) == store::kinds::Kind::Html
+                && !o.editing
+                && !o.source
+                && !o.diff_open
+                && !self.drafts.contains_key(&o.key())
+                && !matches!(o.show, Show::Failed(_) | Show::Gone)
+        })
+    }
+    /// Between the page running and its source.
+    pub fn toggle_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(o) = self.opened.as_mut() else {
+            return;
+        };
+        o.source = !o.source;
+        if o.source {
+            self.focus_file(window, cx);
+        }
+        cx.notify();
     }
     pub fn play(&mut self, cx: &mut Context<Self>) {
         let Some(opened) = self.opened.as_ref() else {
