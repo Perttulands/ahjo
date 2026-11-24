@@ -43,10 +43,11 @@ his own words and marks.
 - Desk keeps marks in the desk's one format.
 - Desk decodes H.264 video itself, so clips step frame by frame with nothing
   installed.
-- On Windows, Desk renders a published page inside its own window, in WebView2
-  (`wry`), as a child window laid over the surface.
-- On Linux, Desk opens a published page in the browser. A system web view there
-  would need GTK's event loop, and a GPUI window does not run it.
+- On Windows, Desk renders a published page inside its own window, in the
+  kit's web view (Kit), with its own marking script, marks and Comment mode.
+  It hides the view when the selected item is not a page.
+- On Linux, Desk opens a published page in the browser, where the kit's web
+  view cannot show.
 
 ```
 areas/<area>/
@@ -542,6 +543,7 @@ means `widgets::pane`.
 | Markdown | prose drawn in the theme. Its links go to the page | `widgets::markdown` |
 | Selectable text | prose that can be selected and copied across a column | `widgets::select::Selectable` |
 | Tokens | every colour, size, corner, type size and motion | `theme` (`size`, `ty`, `board`, `fade`, `motion`), and a page's own tokens beside the page |
+| Web view | a web page inside the window, on Windows: WebView2 (`wry`) as a child window laid over a surface's bounds and following them. A child window draws over everything the app draws there, so its owner hides it when the surface shows something else. The owner gives it an optional script that runs before the page's own and hears what the page posts. On Linux it cannot show (a system web view would need GTK's event loop, which a GPUI window does not run): `SHOWS_INSIDE` is false and opening fails with `web_view_unsupported` | `web_view::WebSurface`, `WebViewSetup` |
 | Window evidence | what a report attaches: the window's own pixels, and its page, panel, open surfaces, builds and size. Windows captures with `PrintWindow`, X11 with the X window's image. On Wayland it reports that it cannot | `Host::capture` (`capture::Picture`; the binary names the capture method, as Swarm's `capture` does), `Host::window_state` |
 | AppFrame and Hub | `AppFrame` is a window's stack, status line and toast, with no node. Swarm's `Hub` holds one, beside the fleet and settings. Brain and Desk hold an `AppFrame` alone (see App pages, Host, Hub and AppFrame) | `frame::AppFrame`, `hub::Hub` |
 

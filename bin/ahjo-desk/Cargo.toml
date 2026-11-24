@@ -32,11 +32,6 @@ image = { version = "0.25", default-features = false }
 async-channel = "2"
 log = "0.4"
 
-# A published page renders inside the window on Windows, in WebView2 (part
-# of Windows), laid over the surface as a child window.
-[target.'cfg(windows)'.dependencies]
-wry = { version = "0.57", default-features = false }
-
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["x11"] }
 

@@ -17,6 +17,7 @@ use ahjo_app_kit::frame::{self, AppFrame, Cover, FrameEvent, Layer, Status};
 use ahjo_app_kit::menu::MenuRow;
 use ahjo_app_kit::popup::Spot;
 use ahjo_app_kit::settings_file::{self, KeepsSettings, SettingsFile};
+use ahjo_app_kit::web_view::WebSurface;
 use ahjo_app_kit::widgets::field::{self, AttachmentEvent, FieldEvent, TextField};
 use ahjo_app_kit::widgets::theme_picker::{self, Picker};
 use gpui::{
@@ -299,12 +300,8 @@ pub struct DeskApp {
     /// The pen's words on the paper: a rewrite or a note.
     pub pen: Entity<TextField>,
     /// The page view and what the page says to the app.
-    #[cfg(windows)]
-    pub page: Rc<RefCell<Option<page::WebPage>>>,
-    #[cfg_attr(not(windows), allow(dead_code))]
+    pub page: WebSurface,
     pub page_said: async_channel::Sender<String>,
-    #[cfg(windows)]
-    pub page_failed: Rc<RefCell<Option<String>>>,
 }
 
 impl DeskApp {
@@ -488,11 +485,8 @@ impl DeskApp {
             grading: Default::default(),
             paper_width: Rc::default(),
             pen,
-            #[cfg(windows)]
-            page: Rc::new(RefCell::new(None)),
+            page: WebSurface::default(),
             page_said,
-            #[cfg(windows)]
-            page_failed: Rc::default(),
         };
         app.discover(cx);
         app.refresh_all(cx);
@@ -1075,35 +1069,27 @@ impl DeskApp {
 
     /// Draws the page's marks on it and sets its mode.
     pub fn tell_page(&self) {
-        #[cfg(windows)]
-        {
-            let Some(item) = self
-                .shown_item()
-                .filter(|i| i.kind() == Some(MediaKind::Page))
-            else {
-                return;
-            };
-            let numbered = self.numbered();
-            let on: Vec<(usize, &Mark)> = numbered
-                .iter()
-                .filter(|(_, m)| m.media.as_deref() == Some(item.media.id.as_str()))
-                .map(|(n, m)| (*n, m))
-                .collect();
-            let script = page::show_script(&on, self.selected.as_deref(), self.page_comment);
-            if let Some(p) = self.page.borrow().as_ref() {
-                p.run(&script);
-            }
-        }
+        let Some(item) = self
+            .shown_item()
+            .filter(|i| i.kind() == Some(MediaKind::Page))
+        else {
+            return;
+        };
+        let numbered = self.numbered();
+        let on: Vec<(usize, &Mark)> = numbered
+            .iter()
+            .filter(|(_, m)| m.media.as_deref() == Some(item.media.id.as_str()))
+            .map(|(n, m)| (*n, m))
+            .collect();
+        let script = page::show_script(&on, self.selected.as_deref(), self.page_comment);
+        self.page.run(&script);
     }
 
     /// Hides the page view unless the surface shows a page: it lies over
     /// whatever the window draws there.
     pub fn keep_page(&self) {
-        #[cfg(windows)]
-        if self.shown_item().and_then(|i| i.kind()) != Some(MediaKind::Page)
-            && let Some(p) = self.page.borrow_mut().as_mut()
-        {
-            p.hide();
+        if self.shown_item().and_then(|i| i.kind()) != Some(MediaKind::Page) {
+            self.page.hide();
         }
     }
 

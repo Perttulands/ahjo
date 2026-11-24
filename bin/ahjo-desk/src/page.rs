@@ -1,13 +1,12 @@
 //! A page an agent published (an HTML prototype), rendered inside the
 //! window and marked element by element.
 //!
-//! On Windows the page is a WebView2 view (through `wry`) laid over the
-//! surface as a child of the app's window, with [`LAYER`] in it: in Comment
-//! mode a click marks the element under it and the page tells the app
-//! ([`FromPage`]); the app draws its marks back over the page
-//! ([`show_script`]). Elsewhere there is no system web view the app can lay
-//! inside its window (on Linux one needs GTK's loop, which the window does
-//! not run), so the page opens in the browser and is answered in words.
+//! The page shows in the kit's web view (`ahjo_app_kit::web_view`, Windows
+//! only) with [`LAYER`] in it: in Comment mode a click marks the element
+//! under it and the page tells the app ([`FromPage`]); the app draws its
+//! marks back over the page ([`show_script`]). Where the kit cannot show a
+//! page inside the window, the page opens in the browser and is answered in
+//! words.
 
 use crate::model::Mark;
 use serde::Deserialize;
@@ -52,114 +51,6 @@ pub fn show_script(marks: &[(usize, &Mark)], selected: Option<&str>, comment: bo
         serde_json::Value::Array(list),
         json!(selected)
     )
-}
-
-/// Whether this system can show a page inside the window.
-pub const INSIDE: bool = cfg!(windows);
-
-#[cfg(windows)]
-pub use inside::WebPage;
-
-#[cfg(windows)]
-mod inside {
-    use gpui::{Bounds, Pixels, Window};
-    use wry::dpi::{LogicalPosition, LogicalSize};
-    use wry::{Rect, WebContext, WebView, WebViewBuilder};
-
-    /// The page view laid over the surface. It is a child window: it draws
-    /// above everything the app draws where it lies, so the app keeps it
-    /// to the surface's bounds and hides it when the surface shows
-    /// something else.
-    pub struct WebPage {
-        view: WebView,
-        _context: WebContext,
-        url: String,
-        at: Option<Bounds<Pixels>>,
-        shown: bool,
-        /// The window's zoom, set before the view opens: the app's pixels
-        /// are this many of the system's.
-        ui: f32,
-    }
-
-    impl WebPage {
-        /// A view in `window` loading `url`; each message the page posts
-        /// goes to `message`.
-        pub fn new(
-            window: &Window,
-            url: &str,
-            message: impl Fn(String) + 'static,
-        ) -> Result<Self, ahjo_app_kit::Error> {
-            let dir = std::env::var_os("LOCALAPPDATA")
-                .map(|d| std::path::PathBuf::from(d).join("Ahjo").join("desk-web"));
-            let mut context = WebContext::new(dir);
-            let view = WebViewBuilder::new_with_web_context(&mut context)
-                .with_url(url)
-                .with_initialization_script(super::LAYER)
-                .with_ipc_handler(move |req| message(req.into_body()))
-                .with_visible(false)
-                .build_as_child(window)
-                .map_err(|e| {
-                    ahjo_app_kit::Error::new(
-                        "page_view_unopened",
-                        format!("the page view did not open: {e}"),
-                    )
-                })?;
-            Ok(Self {
-                view,
-                _context: context,
-                url: url.into(),
-                at: None,
-                shown: false,
-                ui: window.ui_scale(),
-            })
-        }
-
-        /// Shows `url` (loading it when it is another page) over `bounds`.
-        pub fn show(&mut self, url: &str, bounds: Bounds<Pixels>) {
-            if self.url != url {
-                self.url = url.into();
-                if let Err(e) = self.view.load_url(url) {
-                    log::warn!("the page did not load: {e}");
-                }
-            }
-            if self.at != Some(bounds) {
-                self.at = Some(bounds);
-                let ui = self.ui;
-                let rect = Rect {
-                    position: LogicalPosition::new(
-                        f32::from(bounds.origin.x) * ui,
-                        f32::from(bounds.origin.y) * ui,
-                    )
-                    .into(),
-                    size: LogicalSize::new(
-                        f32::from(bounds.size.width) * ui,
-                        f32::from(bounds.size.height) * ui,
-                    )
-                    .into(),
-                };
-                if let Err(e) = self.view.set_bounds(rect) {
-                    log::warn!("the page did not move: {e}");
-                }
-            }
-            if !self.shown {
-                self.shown = true;
-                let _ = self.view.set_visible(true);
-            }
-        }
-
-        pub fn hide(&mut self) {
-            if self.shown {
-                self.shown = false;
-                let _ = self.view.set_visible(false);
-            }
-        }
-
-        pub fn run(&self, script: &str) {
-            if let Err(e) = self.view.evaluate_script(script) {
-                log::warn!("the page did not take the app's marks: {e}");
-            }
-        }
-    }
 }
 
 #[cfg(test)]

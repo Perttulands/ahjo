@@ -9,14 +9,29 @@
 #   click <app> <x> <y>          a left click at the screenshot's pixel x, y
 #   type <app> <text>            the text, as typed characters
 #   key <app> <key>              one key without modifiers (enter, escape...)
-#
-# Clicks and keys are posted to the app's own window, so it need not be in
-# front and nothing else on the desktop sees them. A posted key carries no
-# Alt or Ctrl: Windows reads those from the keyboard itself.
+#   eval <app> <script>          the value of a script in the app's web page,
+#                                as JSON in result.txt
 #   stop                         stop every app this run started
+#
+# Clicks and keys are posted to the app's own windows, so it need not be in
+# front and nothing else on the desktop sees them. A click goes to the
+# deepest child window under its pixel, such as a web view's, as a real one
+# would. A posted key carries no Alt or Ctrl: Windows reads those from the
+# keyboard itself, and goes to the window that has the keyboard, the app's
+# or a child's.
+#
+# An app's web view answers eval through its DevTools port: start gives each
+# app a free one (WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS), kept in
+# <app>.devtools.
 param([string]$Run)
 $ErrorActionPreference = "Stop"
-$job = Get-Content -LiteralPath (Join-Path $Run "job.txt")
+# Words cross between WSL and here as UTF-8 without a BOM, both ways:
+# Windows PowerShell's own default is the system code page, which turns a
+# page's or a step's other characters into "?".
+function Write-Utf8([string]$name, [string]$text) {
+    [IO.File]::WriteAllText((Join-Path $Run $name), $text, (New-Object Text.UTF8Encoding $false))
+}
+$job = [IO.File]::ReadAllText((Join-Path $Run "job.txt"), (New-Object Text.UTF8Encoding $false))
 $words = $job -split "`t"
 try {
     Add-Type -AssemblyName System.Windows.Forms, System.Drawing
@@ -31,8 +46,14 @@ public static class Win {
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr h, ref POINT p);
+  [DllImport("user32.dll")] public static extern IntPtr ChildWindowFromPointEx(IntPtr h, POINT p, uint flags);
+  [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder name, int max);
   public struct RECT { public int L, T, R, B; }
   public struct POINT { public int X, Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct GUITHREADINFO {
+    public int cbSize; public uint flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public RECT caretRect;
+  }
 }
 "@
     [Win]::SetProcessDPIAware() | Out-Null
@@ -56,6 +77,36 @@ public static class Win {
         throw "process $id opened no window in 60 s"
     }
 
+    # The deepest visible child of window $h under screen point $x, $y, or
+    # $h itself, as the point in that window's client area.
+    function Target-At([IntPtr]$h, [int]$x, [int]$y) {
+        while ($true) {
+            $p = New-Object Win+POINT; $p.X = $x; $p.Y = $y
+            [Win]::ScreenToClient($h, [ref]$p) | Out-Null
+            # 1 | 4: skip invisible and transparent children.
+            $c = [Win]::ChildWindowFromPointEx($h, $p, 0x0001 -bor 0x0004)
+            if ($c -eq [IntPtr]::Zero -or $c -eq $h) { return $h, $p }
+            $h = $c
+        }
+    }
+
+    function Class-Of([IntPtr]$h) {
+        $name = New-Object System.Text.StringBuilder 256
+        [Win]::GetClassName($h, $name, 256) | Out-Null
+        $name.ToString()
+    }
+
+    # The window of the app's that has the keyboard (a web view's child when
+    # it does), else its own.
+    function Focus-Of([IntPtr]$h) {
+        $id = 0
+        $thread = [Win]::GetWindowThreadProcessId($h, [ref]$id)
+        $info = New-Object Win+GUITHREADINFO
+        $info.cbSize = [Runtime.InteropServices.Marshal]::SizeOf($info)
+        if ([Win]::GetGUIThreadInfo($thread, [ref]$info) -and $info.focus -ne [IntPtr]::Zero) { return $info.focus }
+        $h
+    }
+
     switch ($words[0]) {
         "start" {
             $app, $exe = $words[1], $words[2]
@@ -66,6 +117,11 @@ public static class Win {
                 $k, $v = $line -split "=", 2
                 [Environment]::SetEnvironmentVariable($k, $v, "Process")
             }
+            # A free port for the app's web views' DevTools, for eval.
+            $l = New-Object System.Net.Sockets.TcpListener ([Net.IPAddress]::Loopback), 0
+            $l.Start(); $devtools = $l.LocalEndpoint.Port; $l.Stop()
+            [Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--remote-debugging-port=$devtools", "Process")
+            Set-Content -LiteralPath (Join-Path $Run "$app.devtools") -Value $devtools
             $right = [System.Windows.Forms.SystemInformation]::VirtualScreen.Right
             $p = if ($rest.Count) { Start-Process -FilePath $exe -ArgumentList $rest -PassThru } else { Start-Process -FilePath $exe -PassThru }
             Set-Content -LiteralPath (Join-Path $Run "$app.pid") -Value $p.Id, $p.Path
@@ -103,10 +159,11 @@ public static class Win {
             $app, $x, $y = $words[1], [int]$words[2], [int]$words[3]
             $h = Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0]))
             # A screenshot is the whole window: its pixel is the window's
-            # corner plus x, y on the screen, made the client area's.
+            # corner plus x, y on the screen, made the client area's of the
+            # deepest child there.
             $r = New-Object Win+RECT; [Win]::GetWindowRect($h, [ref]$r) | Out-Null
-            $p = New-Object Win+POINT; $p.X = $r.L + $x; $p.Y = $r.T + $y
-            [Win]::ScreenToClient($h, [ref]$p) | Out-Null
+            $h, $p = Target-At $h ($r.L + $x) ($r.T + $y)
+            Write-Utf8 "result.txt" (Class-Of $h)
             $at = [IntPtr](($p.Y -shl 16) -bor ($p.X -band 0xffff))
             [Win]::PostMessage($h, 0x0200, [IntPtr]::Zero, $at) | Out-Null  # WM_MOUSEMOVE
             Start-Sleep -Milliseconds 150
@@ -117,7 +174,7 @@ public static class Win {
         }
         "type" {
             $app, $text = $words[1], ($words[2..($words.Count - 1)] -join " ")
-            $h = Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0]))
+            $h = Focus-Of (Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0])))
             foreach ($c in $text.ToCharArray()) {
                 [Win]::PostMessage($h, 0x0102, [IntPtr][int]$c, [IntPtr]1) | Out-Null  # WM_CHAR
                 Start-Sleep -Milliseconds 20
@@ -129,11 +186,51 @@ public static class Win {
             $vk = @{ enter = 0x0D; escape = 0x1B; tab = 0x09; backspace = 0x08;
                      left = 0x25; up = 0x26; right = 0x27; down = 0x28 }[$name]
             if (-not $vk) { throw "no key '$name'" }
-            $h = Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0]))
+            $h = Focus-Of (Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0])))
             [Win]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr]1) | Out-Null           # WM_KEYDOWN
             Start-Sleep -Milliseconds 50
             [Win]::PostMessage($h, 0x0101, [IntPtr]$vk, [IntPtr]0xC0000001) | Out-Null  # WM_KEYUP
             Start-Sleep -Milliseconds 500
+        }
+        "eval" {
+            $app, $script = $words[1], ($words[2..($words.Count - 1)] -join " ")
+            $port = [int](Get-Content -LiteralPath (Join-Path $Run "$app.devtools"))
+            # The app's page, once its web view has loaded one.
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            $page = $null
+            while (-not $page -and $clock.Elapsed.TotalSeconds -lt 20) {
+                try {
+                    $page = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 2 |
+                        Where-Object { $_.type -eq "page" -and $_.url -notlike "about:*" } | Select-Object -First 1
+                } catch { }
+                if (-not $page) { Start-Sleep -Milliseconds 250 }
+            }
+            if (-not $page) { throw "$app has no web page loaded (DevTools port $port)" }
+            $ws = New-Object System.Net.WebSockets.ClientWebSocket
+            $none = [Threading.CancellationToken]::None
+            $ws.ConnectAsync([Uri]$page.webSocketDebuggerUrl, $none).Wait()
+            $ask = @{ id = 1; method = "Runtime.evaluate";
+                      params = @{ expression = $script; returnByValue = $true; awaitPromise = $true } } | ConvertTo-Json -Compress -Depth 5
+            $bytes = [Text.Encoding]::UTF8.GetBytes($ask)
+            $ws.SendAsync((New-Object ArraySegment[byte] (,$bytes)), "Text", $true, $none).Wait()
+            # Events may come first: read messages until the answer to id 1.
+            $answer = $null
+            while (-not $answer) {
+                $text = New-Object System.Text.StringBuilder
+                do {
+                    $buffer = New-Object byte[] 65536
+                    $got = $ws.ReceiveAsync((New-Object ArraySegment[byte] (,$buffer)), $none)
+                    if (-not $got.Wait(20000)) { throw "$app's page did not answer the script in 20 s" }
+                    $text.Append([Text.Encoding]::UTF8.GetString($buffer, 0, $got.Result.Count)) | Out-Null
+                } until ($got.Result.EndOfMessage)
+                $message = $text.ToString() | ConvertFrom-Json
+                if ($message.id -eq 1) { $answer = $message }
+            }
+            $ws.Dispose()
+            if ($answer.result.exceptionDetails) {
+                throw "the script threw: $($answer.result.exceptionDetails.exception.description)"
+            }
+            Write-Utf8 "result.txt" (ConvertTo-Json -InputObject $answer.result.result.value -Compress -Depth 10)
         }
         "stop" {
             foreach ($f in Get-ChildItem -LiteralPath $Run -Filter "*.pid") {
@@ -151,5 +248,5 @@ public static class Win {
     }
     Set-Content -LiteralPath (Join-Path $Run "done.txt") -Value "ok"
 } catch {
-    Set-Content -LiteralPath (Join-Path $Run "failed.txt") -Value "$($words[0]): $_"
+    Write-Utf8 "failed.txt" "$($words[0]): $_"
 }

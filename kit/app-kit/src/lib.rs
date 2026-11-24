@@ -23,6 +23,7 @@ pub mod settings_file;
 pub mod text;
 pub mod theme;
 pub mod update;
+pub mod web_view;
 pub mod widgets;
 pub mod zoom;
 

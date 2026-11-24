@@ -15,6 +15,7 @@ use crate::model::{Ask, Mark, MediaKind};
 use crate::tokens::{self, CAP_TEXT, GAP, GAP_SMALL, META};
 use crate::views::{button, icon_button};
 use ahjo_app_kit::theme::{FAMILY, Theme, alpha, rgb, theme};
+use ahjo_app_kit::web_view::{self, WebViewSetup};
 use ahjo_app_kit::widgets::kit::{self, Kind};
 use ahjo_app_kit::widgets::pane;
 use gpui::{
@@ -232,7 +233,7 @@ impl DeskApp {
         let read_only = self.read_only();
         if item.kind() == Some(MediaKind::Page) {
             let comment = self.page_comment;
-            let inside = crate::page::INSIDE;
+            let inside = web_view::SHOWS_INSIDE;
             let bar = bar
                 .when(inside && !read_only, |d| {
                     d.child(
@@ -808,48 +809,27 @@ impl DeskApp {
         let Some(url) = self.page_url(item) else {
             return quiet("The page has no address".into(), t.error);
         };
-        #[cfg(windows)]
-        {
-            if let Some(e) = self.page_failed.borrow().clone() {
-                return self.page_outside(t, format!("The page did not open here: {e}"), cx);
-            }
-            let page = self.page.clone();
-            let failed = self.page_failed.clone();
-            let said = self.page_said.clone();
-            canvas(
-                move |b, _, _| b,
-                move |_, b: Bounds<Pixels>, window, _| {
-                    let mut slot = page.borrow_mut();
-                    if slot.is_none() {
-                        let said = said.clone();
-                        match crate::page::WebPage::new(window, &url, move |m| {
-                            let _ = said.try_send(m);
-                        }) {
-                            Ok(p) => *slot = Some(p),
-                            Err(e) => {
-                                log::error!("{e}");
-                                *failed.borrow_mut() = Some(e.message);
-                                return;
-                            }
-                        }
-                    }
-                    if let Some(p) = slot.as_mut() {
-                        p.show(&url, b);
-                    }
-                },
-            )
-            .size_full()
-            .into_any_element()
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = url;
-            self.page_outside(
+        if !web_view::SHOWS_INSIDE {
+            return self.page_outside(
                 t,
                 "This page renders inside the Desk on Windows. Here it opens in your browser: say what you think of it in your words.".into(),
                 cx,
-            )
+            );
         }
+        if let Some(e) = self.page.failed() {
+            return self.page_outside(t, format!("The page did not open here: {}", e.message), cx);
+        }
+        let said = self.page_said.clone();
+        self.page
+            .element(url, move || WebViewSetup {
+                data_dir: std::env::var_os("LOCALAPPDATA")
+                    .map(|d| std::path::PathBuf::from(d).join("Ahjo").join("desk-web")),
+                script: Some(crate::page::LAYER.into()),
+                on_message: Some(Box::new(move |m| {
+                    let _ = said.try_send(m);
+                })),
+            })
+            .into_any_element()
     }
 
     fn page_outside(&self, t: &Theme, why: String, cx: &mut Context<Self>) -> AnyElement {

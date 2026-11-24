@@ -16,21 +16,29 @@ usage: try-windows [<commit>] [--page <page>]... [--step <step>]... [--app swarm
             (sessions, files, harness, agents, issue, missions, scheduled,
             host, settings) and what to reveal on it, e.g.
             --page 'files --path README.md' (default 'sessions --session agent')
-  --step    one step of a journey in Swarm, run in order after the pages:
+  --step    one step of a journey, run in order after the pages, in Swarm
+            or in the app it starts with (`desk click 400 300`):
               open <page> [...]  what `ahjo view open` takes, as --page
-              click <x> <y>      a left click at the last screenshot's pixels
+                                 (Swarm only)
+              click <x> <y>      a left click at the last screenshot's pixels,
+                                 in the deepest window there: a web view's
+                                 page too
               type <text>        typed into what has the keyboard
               key <key>          enter, escape, tab, backspace, up, down,
                                  left or right
-              shot <name>        captured as swarm-<name>.png
+              eval <script>      the script's value in the app's web page,
+                                 printed and kept in eval.txt
+              shot <name>        captured as <app>-<name>.png
             Keys with Alt or Ctrl cannot be sent to a window that is not in
             front: run a chord from the Keys panel (click Keys, then its row).
+            The fake desk's asks: a choice (try-pick), a document (try-doc)
+            and a published HTML page (try-page).
   --app     which apps to start (default all three)
   --out     where the screenshots go (default
             ~/.cache/ahjo-dev/try-shots/<commit>-<time>)
 
 Prints the folder with swarm-<page>.png, desk.png and brain.png, the apps'
-logs and the node's log.
+logs, the node's log and what eval steps read.
 EOF
 }
 
@@ -84,7 +92,7 @@ pids=()
 # session 0, where a window never shows, so the step goes through a one-off
 # scheduled task with /IT, run by a headless console (no window of its own).
 step() {
-  rm -f "$RUN/done.txt" "$RUN/failed.txt"
+  rm -f "$RUN/done.txt" "$RUN/failed.txt" "$RUN/result.txt"
   (IFS=$'\t'; printf '%s' "$*") > "$RUN/job.txt"
   $W/schtasks.exe /Create /F /TN $TASK /SC ONCE /ST 23:59 /IT \
     /TR "conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RUNW\\try-windows.ps1 -Run $RUNW" >/dev/null
@@ -214,7 +222,15 @@ asks = [
                  {"name": "Left", "why": "Nearer the page list"}], recommend="Right: where it is today"),
     ask("try-doc", "look", "The try-windows step", "Mark what is wrong.",
         doc={"name": "try.md", "text": "# Try it on Windows\n\nThe lead runs it and looks before every upgrade.\n"}),
+    ask("try-page", "look", "A published page", "Mark what should change on the page.",
+        media=[{"id": "p1", "path": "/try/prototype.html", "caption": "The prototype"}]),
 ]
+page = b"""<!doctype html><html><head><meta charset="utf-8"><title>Try page</title>
+<style>body{font:16px system-ui,sans-serif;margin:0;background:#f4f1ea;color:#222}
+main{padding:32px}h1{margin:0 0 16px}button{font:inherit;padding:12px 20px}
+.card{background:#fff;border:1px solid #ccc;border-radius:8px;padding:24px;margin-top:24px;width:420px}</style></head>
+<body><main><h1 id="title">A published page</h1><p>try-windows serves this page from its fake desk.</p>
+<div class="card"><h2>Choose a plan</h2><p>Two ways to go.</p><button id="go">Go</button></div></main></body></html>"""
 class Desk(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
@@ -229,10 +245,23 @@ class Desk(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/api/asks": self.reply(200, asks)
         elif path == "/api/desks": self.reply(200, [])
+        elif path == "/media/try-page/r1/p1":
+            self.send_response(200)
+            self.send_header("content-type", "text/html; charset=utf-8")
+            self.send_header("content-length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
         else: self.reply(404, {"error": "not found"})
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("content-length") or 0))
-        self.reply(503, {"error": "This is try-windows' fake desk; it keeps nothing"})
+        body = self.rfile.read(int(self.headers.get("content-length") or 0))
+        path = self.path.split("?")[0]
+        # Marks are kept for the run, so a mark made on the Desk stays.
+        for a in asks:
+            if path == f"/api/asks/{a['id']}/marks":
+                a["marks"] = json.loads(body)["marks"]
+                a["revision"] += 1
+                return self.reply(200, a)
+        self.reply(503, {"error": "This is try-windows' fake desk; it keeps only marks"})
 class Server(ThreadingHTTPServer):
     def handle_error(self, request, address):
         pass  # the Desk stopping mid-request
@@ -286,25 +315,38 @@ if wants swarm; then
     step shot swarm "$RUNW\\$name.png"
     mv "$RUN/$name.png" "$out/"
   done
-  for walked in "${walk[@]}"; do
-    read -r verb rest <<< "$walked"
-    case $verb in
-      open)
-        read -ra words <<< "$rest"
-        for i in "${!words[@]}"; do
-          [ "${words[$i]}" = --path ] && [ "${words[$((i + 1))]:0:1}" != / ] && words[$((i + 1))]=$S/files/${words[$((i + 1))]}
-        done
-        "$AHJO" view open "${words[@]}" --node $node >/dev/null || die "step '$walked' refused"
-        sleep 1 ;;
-      click) step click swarm $rest ;;
-      type|key) step "$verb" swarm "$rest" ;;
-      shot)
-        step shot swarm "$RUNW\\swarm-$rest.png"
-        mv "$RUN/swarm-$rest.png" "$out/" ;;
-      *) die "unknown step '$walked'" ;;
-    esac
-  done
 fi
+for walked in "${walk[@]}"; do
+  read -r app verb rest <<< "$walked"
+  case $app in
+    swarm|desk|brain) ;;
+    *) rest="$verb${rest:+ $rest}" verb=$app app=swarm ;;
+  esac
+  wants "$app" || die "step '$walked' is in $app, which this try does not start"
+  case $verb in
+    open)
+      [ "$app" = swarm ] || die "step '$walked': open is Swarm's"
+      read -ra words <<< "$rest"
+      for i in "${!words[@]}"; do
+        [ "${words[$i]}" = --path ] && [ "${words[$((i + 1))]:0:1}" != / ] && words[$((i + 1))]=$S/files/${words[$((i + 1))]}
+      done
+      "$AHJO" view open "${words[@]}" --node $node >/dev/null || die "step '$walked' refused"
+      sleep 1 ;;
+    click)
+      step click "$app" $rest
+      say "$app click $rest landed in $(tr -d '\r' < "$RUN/result.txt")" ;;
+    type|key) step "$verb" "$app" "$rest" ;;
+    eval)
+      step eval "$app" "$rest"
+      value=$(tr -d '\r' < "$RUN/result.txt")
+      printf '%s\t%s\t%s\n' "$app" "$rest" "$value" >> "$out/eval.txt"
+      say "$app eval $rest => $value" ;;
+    shot)
+      step shot "$app" "$RUNW\\$app-$rest.png"
+      mv "$RUN/$app-$rest.png" "$out/" ;;
+    *) die "unknown step '$walked'" ;;
+  esac
+done
 # The Desk and Brain have been loading while Swarm was captured.
 sleep 2
 for a in desk brain; do

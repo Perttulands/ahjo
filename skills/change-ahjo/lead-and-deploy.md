@@ -60,6 +60,20 @@ skills/change-ahjo/try-windows <commit> --app swarm --page 'sessions --session a
   --step 'type This panel will not close' --step 'shot report' --step 'key escape'
 ```
 
+A step that starts with `desk` or `brain` runs in that app instead
+(`shot <name>` then saves `desk-<name>.png`). A click lands in the deepest
+window under its pixel, so a click on a web view's page reaches the page,
+and `eval <script>` reads a value back from the app's web page through its
+DevTools port, printed and kept in `eval.txt`. The fake desk publishes an
+HTML page (`try-page`, shown first); Comment, then a mark on its heading
+(the pixels are for the default size):
+
+```sh
+skills/change-ahjo/try-windows <commit> --app desk --step 'desk eval document.title' \
+  --step 'desk click 850 51' --step 'desk click 900 120' --step 'desk shot marked' \
+  --step "desk eval document.querySelectorAll('[data-desk-mark]').length"
+```
+
 His desktop sees little: each window shows on his main screen for about
 30 ms before it is moved right of every screen, without taking focus, and
 has a taskbar button while the try runs. A second Swarm beside his is
