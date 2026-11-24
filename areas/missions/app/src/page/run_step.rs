@@ -508,6 +508,13 @@ impl MissionsPage {
                     )
                     .child(small(attempts::timing(attempt, now), t.dim)),
             );
+        for seat in &attempt.seats {
+            let (who, spent) = attempts::seat_lines(seat);
+            entry = entry.child(small(who, t.text2));
+            if let Some(spent) = spent {
+                entry = entry.child(small(spent, t.dim));
+            }
+        }
         if let Some(reason) = &attempt.stop_reason {
             entry = entry.child(small(reason.text.clone(), t.text2));
         }

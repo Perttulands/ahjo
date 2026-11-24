@@ -9,11 +9,12 @@
 //! read through Files.
 use crate::RunEvent;
 use ahjo_mission_model::{
-    AttemptOutput, AttemptPick, AttemptVerdict, EvidenceItem, EvidenceText, Mission, RunAttempts,
-    StepAttempt, StepAttempts, StepPort,
+    AttemptOutput, AttemptPick, AttemptSeat, AttemptTokens, AttemptVerdict, EvidenceItem,
+    EvidenceText, Mission, RunAttempts, StepAttempt, StepAttempts, StepPort,
 };
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 /// The whole answer's cap (Archon's `EvidenceNodeBudgetBytes`); one
 /// served text's is `EvidenceText::of`'s.
@@ -41,6 +42,18 @@ fn origin(event: &RunEvent) -> Option<(String, i64)> {
 
 /// Where one evaluation's verdict is: step, attempt and index.
 type At = (String, i64, usize);
+/// One seat in one attempt: step, attempt and seat.
+type SeatAt = (String, i64, String);
+
+/// Milliseconds from one RFC 3339 time to a later one; 0 when either is
+/// missing or unreadable.
+fn wall_ms(from: &str, to: &str) -> u64 {
+    let at = |t: &str| OffsetDateTime::parse(t, &Rfc3339).ok();
+    at(from)
+        .zip(at(to))
+        .map(|(from, to)| (to - from).whole_milliseconds().max(0) as u64)
+        .unwrap_or(0)
+}
 
 struct Walk<'a> {
     mission: &'a Mission,
@@ -53,6 +66,10 @@ struct Walk<'a> {
     asked: HashMap<u64, At>,
     /// Steps a pick settled: a resume carries none of their attempts on.
     picking: HashMap<String, bool>,
+    /// When each seat of each attempt was first sent work and last finished.
+    seat_times: HashMap<SeatAt, (String, String)>,
+    /// Dispatches whose result is counted, so a replayed result counts once.
+    finished: HashSet<String>,
 }
 
 impl Walk<'_> {
@@ -138,7 +155,101 @@ impl Walk<'_> {
             outputs: Vec::new(),
             verdicts: Vec::new(),
             picked: None,
+            seats: Vec::new(),
+            wall_ms: 0,
         });
+    }
+
+    /// The seat of the attempt an event of one of its dispatches belongs to.
+    fn seat(&mut self, event: &RunEvent) -> Option<&mut AttemptSeat> {
+        let attempt = self.find(&event.card_id, event.attempt.max(1))?;
+        let at = match attempt
+            .seats
+            .iter()
+            .position(|s| s.seat_id == event.seat_id)
+        {
+            Some(at) => at,
+            None => {
+                attempt.seats.push(AttemptSeat {
+                    seat_id: event.seat_id.clone(),
+                    ..AttemptSeat::default()
+                });
+                attempt.seats.len() - 1
+            }
+        };
+        Some(&mut attempt.seats[at])
+    }
+
+    /// A seat is sent work: who sits there, on which harness and session.
+    fn dispatched(&mut self, event: &RunEvent) {
+        if event.seat_id.is_empty() {
+            return;
+        }
+        let Some(seat) = self.seat(event) else {
+            return;
+        };
+        for (field, key) in [
+            (&mut seat.agent, "agent"),
+            (&mut seat.harness, "harness"),
+            (&mut seat.session, "session"),
+        ] {
+            let value = text(event, key);
+            if !value.is_empty() {
+                *field = value;
+            }
+        }
+        let key = (
+            event.card_id.clone(),
+            event.attempt.max(1),
+            event.seat_id.clone(),
+        );
+        self.seat_times
+            .entry(key)
+            .or_insert_with(|| (event.timestamp.clone(), String::new()));
+    }
+
+    /// A seat's turn finished: the model and effort its transcript names,
+    /// the harness's conversation, and the tokens the turn spent.
+    fn seat_finished(&mut self, event: &RunEvent) {
+        let dispatch = text(event, "dispatch_id");
+        if event.seat_id.is_empty() || !self.finished.insert(dispatch) {
+            return;
+        }
+        let Some(seat) = self.seat(event) else {
+            return;
+        };
+        for (field, key) in [
+            (&mut seat.model, "model"),
+            (&mut seat.effort, "effort"),
+            (&mut seat.harness_session, "native_session_id"),
+        ] {
+            let value = text(event, key);
+            if !value.is_empty() {
+                *field = value;
+            }
+        }
+        if let Some(usage) = event.data.get("usage") {
+            let part = |key: &str| usage.get(key).and_then(Value::as_i64).unwrap_or(0);
+            let tokens = seat.tokens.get_or_insert_with(AttemptTokens::default);
+            tokens.input += part("input");
+            tokens.cache_write += part("cache_write");
+            tokens.cache_read += part("cache_read");
+            tokens.output += part("output");
+        }
+        let mut finished = text(event, "finished_at");
+        if finished.is_empty() {
+            finished.clone_from(&event.timestamp);
+        }
+        let key = (
+            event.card_id.clone(),
+            event.attempt.max(1),
+            event.seat_id.clone(),
+        );
+        let times = self
+            .seat_times
+            .entry(key)
+            .or_insert_with(|| (event.timestamp.clone(), String::new()));
+        times.1 = finished;
     }
 
     fn output(&mut self, event: &RunEvent) {
@@ -375,6 +486,8 @@ pub fn project_attempts(
             open: HashMap::new(),
             asked: HashMap::new(),
             picking: HashMap::new(),
+            seat_times: HashMap::new(),
+            finished: HashSet::new(),
         };
         for event in events {
             match event.kind.as_str() {
@@ -392,6 +505,8 @@ pub fn project_attempts(
                 "gate_verdict" => walk.gate_verdict(event),
                 "run_blocked" | "run_failed" | "run_canceled" => walk.stopped(event),
                 "run_resumed" => walk.resumed(event),
+                "seat_dispatch" => walk.dispatched(event),
+                "seat_result" => walk.seat_finished(event),
                 _ => {}
             }
         }
@@ -402,6 +517,19 @@ pub fn project_attempts(
                     attempt.status = STOPPED.into();
                     attempt.ended_at.clone_from(&status.updated_at);
                     attempt.stop_reason = Some(EvidenceText::of(&end));
+                }
+            }
+        }
+        for step in &mut walk.steps {
+            for attempt in &mut step.attempts {
+                if !attempt.ended_at.is_empty() {
+                    attempt.wall_ms = wall_ms(&attempt.started_at, &attempt.ended_at);
+                }
+                for seat in &mut attempt.seats {
+                    let key = (step.step_id.clone(), attempt.attempt, seat.seat_id.clone());
+                    if let Some((from, to)) = walk.seat_times.get(&key) {
+                        seat.wall_ms = wall_ms(from, to);
+                    }
                 }
             }
         }

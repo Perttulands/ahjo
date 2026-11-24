@@ -83,10 +83,61 @@ pub struct StepAttempt {
     /// The pick that took this attempt as its step's best.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picked: Option<AttemptPick>,
+    /// Who sat in each of the step's seats for this attempt and what it
+    /// spent, in the order the seats were first sent work.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub seats: Vec<AttemptSeat>,
+    /// From start to end, once the attempt ended.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub wall_ms: u64,
 }
 
 fn is_zero(n: &u64) -> bool {
     *n == 0
+}
+
+/// One seat's part in an attempt: the agent, harness, model, effort and
+/// session it ran on, the tokens its finished turns spent and how long it
+/// worked. Every turn the seat was sent in the attempt counts.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct AttemptSeat {
+    pub seat_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub agent: String,
+    pub harness: String,
+    /// The model exactly as the harness's transcript names it, which a seat
+    /// set to the harness default learns only here; empty until a turn
+    /// finished.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
+    /// The effort the transcript names, or the one the seat was started
+    /// with where the harness does not record it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub effort: String,
+    /// The tmux session the seat's agent worked in.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub session: String,
+    /// The harness's own id for the conversation, which resumes it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub harness_session: String,
+    /// Summed over the seat's finished turns; absent until one finished.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<AttemptTokens>,
+    /// From the first turn sent to the last one finished.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub wall_ms: u64,
+}
+
+/// Tokens as the harness counted them, raw: fresh input, input written to
+/// the prompt cache, input read from it, and output.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct AttemptTokens {
+    pub input: i64,
+    pub cache_write: i64,
+    pub cache_read: i64,
+    pub output: i64,
 }
 
 /// One output port's accepted payload; `path` is a file or folder output's

@@ -26,14 +26,16 @@ pub struct TurnWatch<'a> {
     pub reminded: usize,
 }
 impl TurnWatch<'_> {
-    /// The callback durably records the native acknowledgement. It may be
-    /// called again after recovery and therefore must be idempotent.
+    /// The turn as it completed, with the model, effort and session its
+    /// transcript names. The callback durably records the native
+    /// acknowledgement. It may be called again after recovery and therefore
+    /// must be idempotent.
     pub async fn wait(
         &self,
         pointer: &mut Pointer,
         mut consumed: impl FnMut(&Pointer, &Turn) -> Result<(), String>,
         mut state_event: impl FnMut(&str, &str, String) -> Result<(), String>,
-    ) -> Result<String, crate::Error> {
+    ) -> Result<Turn, crate::Error> {
         (async {
         let Self {
             engine,
@@ -84,11 +86,11 @@ impl TurnWatch<'_> {
                 consumed(pointer, &turn)?;
                 acknowledged = true;
             }
-            if let TurnState::Completed { text } = &turn.state {
+            if let TurnState::Completed { .. } = &turn.state {
                 if let Some((state, detail, since)) = waits.observe("", Instant::now()) {
                     state_event(state, detail, since)?;
                 }
-                return Ok(text.clone());
+                return Ok(turn);
             }
             let state = match &turn.state {
                 TurnState::EndedWithoutSentinel => "turn_ended_without_sentinel",

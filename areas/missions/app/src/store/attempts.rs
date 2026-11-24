@@ -3,7 +3,7 @@
 //! attempt the loop settled on, the one the window opens on, and which two
 //! stand side by side.
 
-use ahjo_missions_contract::{AttemptVerdict, StepAttempt, StepAttempts};
+use ahjo_missions_contract::{AttemptSeat, AttemptVerdict, StepAttempt, StepAttempts};
 use std::collections::HashSet;
 use time::OffsetDateTime;
 
@@ -319,6 +319,46 @@ pub fn timing(a: &StepAttempt, now: OffsetDateTime) -> String {
         return format!("{clock} · {} so far", span((now - started).whole_seconds()));
     }
     clock
+}
+
+/// Who worked one seat of an attempt, then what it spent once a turn
+/// finished: `Builder · Claude claude-opus-5-5 · high`
+/// and `1.2k in · 5.0k cache write · 240k cache read · 3.1k out · 4m 12s`.
+pub fn seat_lines(seat: &AttemptSeat) -> (String, Option<String>) {
+    use super::words::{agent_name, harness_name, span};
+    let mut who = vec![agent_name(&seat.agent)];
+    let harness = harness_name(&seat.harness);
+    who.push(if seat.model.is_empty() {
+        harness
+    } else {
+        format!("{harness} {}", seat.model)
+    });
+    if !seat.effort.is_empty() {
+        who.push(seat.effort.clone());
+    }
+    let spent = seat.tokens.map(|t| {
+        let mut parts = vec![
+            format!("{} in", count(t.input)),
+            format!("{} cache write", count(t.cache_write)),
+            format!("{} cache read", count(t.cache_read)),
+            format!("{} out", count(t.output)),
+        ];
+        if seat.wall_ms > 0 {
+            parts.push(span((seat.wall_ms / 1000) as i64));
+        }
+        parts.join(" · ")
+    });
+    (who.join(" · "), spent)
+}
+
+/// A token count at a glance: `812`, `5.0k`, `240k`, `1.2M`.
+fn count(n: i64) -> String {
+    match n {
+        ..1000 => n.to_string(),
+        1000..10_000 => format!("{:.1}k", n as f64 / 1000.),
+        10_000..1_000_000 => format!("{}k", (n + 500) / 1000),
+        _ => format!("{:.1}M", n as f64 / 1_000_000.),
+    }
 }
 
 #[cfg(test)]

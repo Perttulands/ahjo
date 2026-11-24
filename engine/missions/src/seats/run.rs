@@ -1,7 +1,7 @@
 //! Drive one local dispatch and retain its native result.
 use super::{local::adapter, transport::stage_guarded};
 use crate::{
-    DispatchResult, LocalSeats, Pointer, SeatBinding, SeatEvent, TurnWatch,
+    DispatchResult, LocalSeats, Pointer, SeatBinding, SeatEvent, TurnState, TurnWatch,
     parse_completion_sentinel,
 };
 use serde_json::json;
@@ -160,7 +160,7 @@ impl LocalSeats {
             engine: self.engine().as_ref(),
             pane,
             kind,
-            adapter,
+            adapter: adapter.clone(),
             roots: self.roots(),
             run_id: &dispatch.run_id,
             canceled,
@@ -170,7 +170,7 @@ impl LocalSeats {
                 .count(),
         };
         let report = std::sync::Mutex::new(&mut report);
-        let answer = watch.wait(&mut pointer, |selected, turn| {
+        let turn = watch.wait(&mut pointer, |selected, turn| {
             let data = json!({"dispatch_id":id,"session_name":seat.session_name,"native_session_id":turn.session_id,"transcript":selected.transcript,"known_threads":selected.known_threads});
             let event = records.append(id, "prompt-consumed", "seat_prompt_consumed", data.as_object().cloned().unwrap_or_default()).map_err(|e| e.to_string())?;
             if consumed_reported { Ok(()) } else { report.lock().map_err(|e| e.to_string())?(&event) }
@@ -181,6 +181,9 @@ impl LocalSeats {
             let event = records.append(id, &key, kind, data.as_object().cloned().unwrap_or_default()).map_err(|e| e.to_string())?;
             report.lock().map_err(|e| e.to_string())?(&event)
         }).await.map_err(|error| error.message)?;
+        let TurnState::Completed { text: answer } = turn.state.clone() else {
+            return Err("the seat's turn ended without completing".into());
+        };
         if answer.len() > 1024 * 1024 {
             return Err("oversized_output: native seat output exceeds 1 MiB".into());
         }
@@ -190,7 +193,20 @@ impl LocalSeats {
             text: answer,
             status: sentinel.status.clone(),
         };
-        let data = json!({"dispatch_id":id,"step_id":dispatch.step_id,"seat_id":dispatch.seat_id,"status":sentinel.status,"sentinel":{"run_id":sentinel.run_id,"status":sentinel.status,"artifact":sentinel.artifact}});
+        let mut data = json!({"dispatch_id":id,"step_id":dispatch.step_id,"seat_id":dispatch.seat_id,"status":sentinel.status,"sentinel":{"run_id":sentinel.run_id,"status":sentinel.status,"artifact":sentinel.artifact}});
+        // Who did the turn and what it spent, as its transcript says, so the
+        // run's attempts record them once and never read transcripts again.
+        // A harness that does not record its effort ran on the one it was
+        // started with, which is medium when the seat named none.
+        let effort = [&turn.effort, &dispatch.effort].into_iter().find(|e| !e.is_empty()).map_or("medium", String::as_str);
+        data["model"] = json!(turn.model);
+        data["effort"] = json!(effort);
+        data["native_session_id"] = json!(turn.session_id);
+        data["finished_at"] = json!(crate::run_storage::now());
+        match adapter.tokens_since(&pointer) {
+            Ok(usage) => data["usage"] = json!({"input":usage.input,"cache_write":usage.cache_write,"cache_read":usage.cache_read,"output":usage.output}),
+            Err(error) => data["usage_error"] = json!(error.message),
+        }
         let event = records
             .append(
                 id,

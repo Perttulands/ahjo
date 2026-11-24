@@ -46,8 +46,8 @@ pub use run::{
     RunStart, RunSummary,
 };
 pub use run_attempts::{
-    AttemptOutput, AttemptPick, AttemptVerdict, EvidenceItem, EvidenceText, RunAttempts,
-    StepAttempt, StepAttempts, StepPort,
+    AttemptOutput, AttemptPick, AttemptSeat, AttemptTokens, AttemptVerdict, EvidenceItem,
+    EvidenceText, RunAttempts, StepAttempt, StepAttempts, StepPort,
 };
 pub use run_evidence::{RunArtifact, RunBrief, RunEvidence, RunProblem, WrittenFile};
 pub use run_gates::{
