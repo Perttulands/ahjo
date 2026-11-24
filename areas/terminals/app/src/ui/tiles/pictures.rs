@@ -37,20 +37,29 @@ pub struct Chip {
     pub link: Link,
 }
 
-/// Where a window's pictures are read: its session's device and folder.
+/// Where a window's pictures are read: its session's device and folder,
+/// and the node's home for a `~` the folder does not tell.
 #[derive(Clone)]
 pub struct Place {
     pub node: String,
     pub cwd: Option<String>,
+    pub home: Option<String>,
 }
 
 impl Place {
+    /// A picture a path names as printed; one shortened with `…` is found
+    /// only when clicked.
     fn key(&self, target: &Target) -> Option<Key> {
         match target {
-            Target::Path(p, _) if pictures::format(p).is_some() => Some(Key::File {
-                node: self.node.clone(),
-                path: links::resolve(self.cwd.as_deref(), p),
-            }),
+            Target::Path(p, _) if !p.contains('…') && pictures::format(p).is_some() => {
+                Some(Key::File {
+                    node: self.node.clone(),
+                    path: links::in_home(
+                        &links::resolve(self.cwd.as_deref(), p),
+                        self.home.as_deref(),
+                    ),
+                })
+            }
             Target::Diagram(source) => Some(Key::Diagram(source.clone())),
             _ => None,
         }

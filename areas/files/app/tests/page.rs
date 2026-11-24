@@ -485,6 +485,170 @@ fn a_printed_path_opens_the_one_files_panel_and_the_windows_make_room(cx: &mut T
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// Paths as agents print them that name their file only with the device's
+/// help (ahjo-uza), printed in a real shell and clicked as the operator
+/// does: each opens the whole file beside the terminal. The shell's home
+/// is not where it works, so a `~` path is the node's home.
+#[cfg(unix)]
+#[gpui::test]
+fn printed_paths_with_spaces_unicode_home_and_ellipsis_open_whole(cx: &mut TestAppContext) {
+    let Some(tmux) = ahjo_testkit::tmux::Server::start_in("files-printed-paths") else {
+        assert!(std::env::var_os("AHJO_REQUIRE_TMUX").is_none());
+        return;
+    };
+    let root = ahjo_testkit::fresh_dir("files-printed-paths-root");
+    let home = root.join("home");
+    let cache = home.join(".cache/audit");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("home.txt"), "HOME TARGET\n").unwrap();
+    // SAFETY: before the node or any other thread of this test's own
+    // process starts; the node reads its home from here.
+    unsafe { std::env::set_var("HOME", &home) };
+    let out = root.join("out");
+    for dir in ["deep/long-directory-aaaa", "two/a-x", "two/a-y"] {
+        std::fs::create_dir_all(out.join(dir)).unwrap();
+    }
+    for file in [
+        "space name.txt",
+        "üñicode.txt",
+        "deep/long-directory-aaaa/target.txt",
+        "two/a-x/same.txt",
+        "two/a-y/same.txt",
+    ] {
+        std::fs::write(out.join(file), format!("{file}\n")).unwrap();
+    }
+    let out_text = out.to_string_lossy().into_owned();
+    tmux.run(&[
+        "new-session",
+        "-d",
+        "-s",
+        "beta",
+        "-x",
+        "160",
+        "-y",
+        "40",
+        "-c",
+        &home.to_string_lossy(),
+        "env PS1='$ ' LC_ALL=C.UTF-8 sh",
+    ]);
+    let running = start_with_terminal(root.clone(), Some(tmux.socket_path()));
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (shell, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(
+            &[observed_terminals, ahjo_files_app::build],
+            Some(url),
+            None,
+            w,
+            cx,
+        )
+    });
+    let row = leak(format!("row-{}::beta", running.id));
+    until(cx, "terminal session", |cx| cx.debug_bounds(row).is_some());
+    click(cx, row);
+    until(cx, "attach", |cx| cx.debug_bounds("peek-attach").is_some());
+    click(cx, "peek-attach");
+    let terminal = TERMINAL_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    until(cx, "terminal painted", |cx| {
+        terminal.read_with(cx, |p, _| p.geo.borrow()[0].origin.is_some())
+    });
+    // Prints `printed` on a line of its own and clicks the first letter of
+    // `word` in it.
+    let print_and_click = |cx: &mut VisualTestContext, printed: &str, word: &str| {
+        tmux.run(&["send-keys", "-t", "beta", "clear", "Enter"]);
+        tmux.run(&[
+            "send-keys",
+            "-t",
+            "beta",
+            &format!("printf '%s\\n' '{printed}'"),
+            "Enter",
+        ]);
+        let position = |cx: &mut VisualTestContext| {
+            terminal.read_with(cx, |p, _| {
+                let text = p.window_text(0)?;
+                let (row, line) = text
+                    .lines()
+                    .enumerate()
+                    .find(|(_, line)| line.trim_end() == printed)?;
+                let col = line[..line.find(word)?].chars().count();
+                let geo = p.geo.borrow()[0];
+                let (origin, cell) = (geo.origin?, geo.cell?);
+                Some(gpui::point(
+                    origin.x + cell.width * (col as f32 + 0.5),
+                    origin.y + cell.height * (row as f32 + 0.5),
+                ))
+            })
+        };
+        until(cx, leak(format!("printed {printed}")), |cx| {
+            position(cx).is_some()
+        });
+        let at = position(cx).unwrap();
+        cx.simulate_click(at, Modifiers::none());
+    };
+    let opened = |cx: &mut VisualTestContext, name: &str| {
+        let view = leak(format!("file-view-{name}"));
+        slid(cx);
+        until(cx, leak(format!("{name} in the panel")), |cx| {
+            cx.debug_bounds(view).is_some()
+        });
+    };
+
+    // A `~` path where the shell's folder is its home, then after a `cd`
+    // out of it, once Ahjo has seen the pane's new folder.
+    let home_path = "~/.cache/audit/home.txt";
+    print_and_click(cx, home_path, "~/");
+    opened(cx, "home.txt");
+    tmux.run(&[
+        "send-keys",
+        "-t",
+        "beta",
+        &format!("cd '{out_text}'"),
+        "Enter",
+    ]);
+    until(cx, "the pane's folder outside home", |cx| {
+        terminal.read_with(cx, |p, _| {
+            p.slot_pane(0)
+                .and_then(|at| p.fleet.session_of_pane(&at.node, at.pane))
+                .and_then(|s| s.cwd.clone())
+                .is_some_and(|cwd| cwd == out_text)
+        })
+    });
+    // Bare, with a space: the first word alone names nothing there.
+    print_and_click(cx, &format!("{out_text}/space name.txt"), "/space");
+    opened(cx, "space name.txt");
+    // Unicode, clicked on its ASCII end.
+    print_and_click(cx, &format!("{out_text}/üñicode.txt"), "icode");
+    opened(cx, "üñicode.txt");
+    print_and_click(cx, home_path, "cache");
+    opened(cx, "home.txt");
+    // In quotes, clicked on the word after the space.
+    print_and_click(cx, &format!("\"{out_text}/space name.txt\""), "name.txt");
+    opened(cx, "space name.txt");
+    // Shortened by an agent, relative to the pane's folder: one file has
+    // those ends.
+    print_and_click(cx, "Read(deep/long-directory-…/target.txt)", "target");
+    opened(cx, "target.txt");
+    // Two have these: both are offered, and the one picked opens.
+    print_and_click(cx, "Read(two/a-…/same.txt)", "same");
+    let picked = leak(format!("menu-label-{out_text}/two/a-y/same.txt"));
+    until(cx, "a choice of the two", |cx| {
+        cx.debug_bounds(picked).is_some()
+            && cx
+                .debug_bounds(leak(format!("menu-label-{out_text}/two/a-x/same.txt")))
+                .is_some()
+    });
+    click(cx, picked);
+    opened(cx, "same.txt");
+    // None has these: it says so, and opens nothing.
+    print_and_click(cx, "Read(two/b-…/same.txt)", "same");
+    until(cx, "said there is none", |cx| {
+        status(&shell, cx).contains("names no file")
+    });
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// The whole job: find a file by name, edit it, save it, send it.
 #[cfg(unix)]
 #[gpui::test]

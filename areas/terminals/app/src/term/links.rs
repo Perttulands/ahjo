@@ -9,11 +9,16 @@
 //! Claude Code and Codex break long lines themselves, so a path they print
 //! often goes on over several rows with a hanging indentation: Claude Code
 //! at the edge of its box, in the middle of a name; Codex after a `/` or a
-//! `-`. Such a break is taken out when the rows read as one path by the
-//! rules of [`Text::continues`], strict enough that prose after a path
-//! stays prose. A path either agent shortened with `…` names no file that
-//! can be found from it, so neither it nor a part of it is a link; nor is
-//! a path cut off by the rows read.
+//! `-`, or inside a name too long for a row. Such a break is taken out
+//! when the rows read as one path by the rules of [`Text::continues`],
+//! strict enough that prose after a path stays prose. A path cut off by
+//! the rows read is no link.
+//!
+//! Some paths name their file only with the device's help, which the click
+//! asks for: one an agent shortened with `…` (`areas/termin…/x.rs`) is
+//! found by its ends, and one followed by more words may go on over the
+//! spaces (`/tmp/space name.txt`, [`Link::spaced`]). A path in quotes is
+//! the whole quoted text, spaces and all.
 
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point};
@@ -35,6 +40,24 @@ pub struct Link {
     pub target: Target,
     /// The cells the link is drawn on, in grid lines.
     pub cells: Vec<Point>,
+    /// The column named after a path's line (`main.rs:12:5`).
+    pub column: Option<u32>,
+    /// Longer readings of a path, over the spaces after it or before it
+    /// (`/tmp/space name.txt` clicked on either word), longest first: a
+    /// file's name may hold spaces, and only the device can say whether it
+    /// does.
+    pub spaced: Vec<String>,
+}
+
+impl Link {
+    fn new(target: Target, cells: Vec<Point>) -> Self {
+        Link {
+            target,
+            cells,
+            column: None,
+            spaced: Vec::new(),
+        }
+    }
 }
 
 /// How many rows either side of the pointer are read: enough for any path
@@ -58,7 +81,7 @@ pub fn at<T>(term: &Term<T>, p: Point) -> Option<Link> {
 /// A path as the session's device reads it: one relative to the session's
 /// folder `cwd` is joined to it, `~` is the home the folder is in (`/root`
 /// or `/home/<name>`), and `.` and `..` are taken out. A `~` path from a
-/// folder outside a home stays as it is, for Files to say it is not found.
+/// folder outside a home stays as it is, for [`in_home`].
 pub fn resolve(cwd: Option<&str>, path: &str) -> String {
     let joined = match (cwd, path.strip_prefix('~')) {
         (_, _) if path.starts_with('/') => path.to_string(),
@@ -80,6 +103,18 @@ pub fn resolve(cwd: Option<&str>, path: &str) -> String {
         }
     }
     format!("/{}", parts.join("/"))
+}
+
+/// A `~` path the folder did not tell the home of ([`resolve`]), in the
+/// node's own home: the session runs as the node's user unless its folder
+/// says otherwise.
+pub fn in_home(path: &str, home: Option<&str>) -> String {
+    match (path.strip_prefix('~'), home) {
+        (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
+            resolve(None, &format!("{}{rest}", home.trim_end_matches('/')))
+        }
+        _ => path.to_string(),
+    }
 }
 
 /// The home folder `cwd` is in.
@@ -254,10 +289,14 @@ impl Text {
     /// - the row could not have held the next row's first piece (up to
     ///   its first `/` or `-`, where programs break a path), give or take
     ///   a program's own box ([`BOX_MARGIN`]);
-    /// - the rest has a slash in it, or completes the name of a file that
-    ///   the row alone did not (`…_tes` then `ts.rs`, `out.lo` then `g`),
-    ///   so a file named at the end of a row is not joined to the word that
-    ///   starts the next.
+    /// - the rest has a slash in it, completes the name of a file that the
+    ///   row alone did not (`…_tes` then `ts.rs`, `out.lo` then `g`),
+    ///   fills its own row to the edge, a name too long for one row that
+    ///   the program broke inside (Codex's `long-directory-` then a row of
+    ///   `aaaa`), or is all of its row and breaks again after a dash
+    ///   (Codex's `more-` then `directory-` then `bbbb/long-`), so a file
+    ///   named at the end of a row is not joined to the word that starts
+    ///   the next.
     fn continues(&self, before: &[char], cells: &[Option<Point>], k: usize) -> Option<usize> {
         let line_start = before.iter().rposition(|c| *c == '\n').map_or(0, |i| i + 1);
         let r1 = (line_start..before.len())
@@ -300,7 +339,11 @@ impl Text {
                 None => extension(&whole).is_some(),
                 Some(_) => !common(head) && common(&whole),
             };
-            if !completes {
+            let fills_row = t.get(to).is_none_or(|c| *c == '\n')
+                && rest.iter().any(|c| c.is_alphanumeric())
+                && self.cells[to - 1]?.column.0 + 1 >= self.cols.saturating_sub(slack);
+            let breaks_again = t.get(to).is_none_or(|c| *c == '\n') && rest.last() == Some(&'-');
+            if !completes && !fills_row && !breaks_again {
                 return None;
             }
         }
@@ -323,62 +366,66 @@ impl Text {
     }
 
     fn links(&self) -> Vec<Link> {
-        let mut links: Vec<Link> = urls(&self.chars)
+        let t = &self.chars;
+        let mut links: Vec<Link> = urls(t)
             .into_iter()
-            .map(|(i, n)| Link {
-                target: Target::Url(self.chars[i..i + n].iter().collect()),
-                cells: self.cells(i, n),
-            })
+            .map(|(i, n)| Link::new(Target::Url(t[i..i + n].iter().collect()), self.cells(i, n)))
             .collect();
         links.extend(
-            super::mermaid::blocks(&self.chars)
+            super::mermaid::blocks(t)
                 .into_iter()
-                .map(|b| Link {
-                    target: Target::Diagram(b.source),
-                    cells: self.cells(b.at, b.len),
-                }),
+                .map(|b| Link::new(Target::Diagram(b.source), self.cells(b.at, b.len))),
         );
-        // A path cut off by the rows read is not offered in part.
-        for (i, n) in paths(&self.chars) {
-            if !self.cut(i, n) {
-                links.push(Link {
-                    target: Target::Path(
-                        self.chars[i..i + n].iter().collect(),
-                        line_after(&self.chars[i + n..]),
-                    ),
-                    cells: self.cells(i, n),
-                });
-            }
-        }
-        // A path relative to the pane's folder, where nothing above is.
-        for (i, n) in relative_paths(&self.chars) {
+        let overlaps = |links: &[Link], cells: &[Point]| {
+            links
+                .iter()
+                .any(|link| cells.iter().any(|cell| link.cells.contains(cell)))
+        };
+        // A path in quotes is all of it, and a path relative to the pane's
+        // folder is one where nothing above is.
+        let quoted = quoted_paths(t);
+        let absolute = paths(t);
+        let from = links.len();
+        let found = quoted
+            .iter()
+            .chain(&absolute)
+            .chain(&relative_paths(t))
+            .copied()
+            .collect::<Vec<_>>();
+        for (i, n) in found {
             let cells = self.cells(i, n);
-            if !self.cut(i, n)
-                && !links
-                    .iter()
-                    .any(|link| cells.iter().any(|cell| link.cells.contains(cell)))
-            {
-                links.push(Link {
-                    target: Target::Path(
-                        self.chars[i..i + n].iter().collect(),
-                        line_after(&self.chars[i + n..]),
-                    ),
-                    cells,
-                });
+            let above = if absolute.contains(&(i, n)) {
+                &links[from..]
+            } else {
+                &links[..]
+            };
+            if self.cut(i, n) || overlaps(above, &cells) {
+                continue;
             }
+            let after = &t[i + n..];
+            let after = if quoted.contains(&(i, n)) {
+                &after[1..]
+            } else {
+                after
+            };
+            let mut link = Link::new(
+                Target::Path(t[i..i + n].iter().collect(), line_after(after)),
+                cells,
+            );
+            link.column = column_after(after);
+            if !quoted.contains(&(i, n)) {
+                link.spaced = spaced(t, i, n);
+            }
+            links.push(link);
         }
         // A URL or path takes precedence over a work-like substring.
-        for (i, n) in work_items(&self.chars) {
+        for (i, n) in work_items(t) {
             let cells = self.cells(i, n);
-            if !self.cut(i, n)
-                && !links
-                    .iter()
-                    .any(|link| cells.iter().any(|cell| link.cells.contains(cell)))
-            {
-                links.push(Link {
-                    target: Target::WorkItem(self.chars[i..i + n].iter().collect()),
+            if !self.cut(i, n) && !overlaps(&links, &cells) {
+                links.push(Link::new(
+                    Target::WorkItem(t[i..i + n].iter().collect()),
                     cells,
-                });
+                ));
             }
         }
         links
@@ -439,9 +486,21 @@ fn path_char(c: char) -> bool {
     name_char(c) || c == '/'
 }
 
-/// A character of a file name.
+/// A character of a file name: a letter or digit of any script, a mark
+/// combined with one (`u` and `\u{308}` for `ü`), or `_.@%+~-`.
 fn name_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || "_.@%+~-".contains(c)
+    c.is_alphanumeric() || "_.@%+~-".contains(c) || combining(c)
+}
+
+/// A letter of a script written without spaces between words: Chinese,
+/// Japanese and Korean.
+fn unspaced(c: char) -> bool {
+    matches!(c, '\u{1100}'..='\u{11ff}' | '\u{2e80}'..='\u{a4cf}' | '\u{ac00}'..='\u{d7af}' | '\u{f900}'..='\u{faff}' | '\u{ff00}'..='\u{ffef}')
+}
+
+/// A mark the terminal draws over the character before it.
+fn combining(c: char) -> bool {
+    matches!(c, '\u{300}'..='\u{36f}' | '\u{1ab0}'..='\u{1aff}' | '\u{1dc0}'..='\u{1dff}' | '\u{20d0}'..='\u{20ff}' | '\u{fe20}'..='\u{fe2f}')
 }
 
 /// Where a run of path characters (names and slashes) from `i` ends.
@@ -453,10 +512,31 @@ fn run(t: &[char], i: usize) -> usize {
     j
 }
 
+/// Where a run of path characters from `i` ends, through one `…` an agent
+/// shortened it with (`areas/termin…/x.rs`, `/…/proj`, `/tmp/4cf…`).
+fn shortened_run(t: &[char], i: usize) -> usize {
+    let j = run(t, i);
+    if t.get(j) == Some(&'…') {
+        run(t, j + 1)
+    } else {
+        j
+    }
+}
+
+/// Whether a path holding a `…` still names something by its ends: a
+/// name after it, or the start of a name before it.
+fn names_by_its_ends(path: &[char]) -> bool {
+    let Some(at) = path.iter().position(|c| *c == '…') else {
+        return true;
+    };
+    let (head, tail) = (&path[..at], &path[at + 1..]);
+    tail.iter().any(|c| *c != '/') || head.last().is_some_and(|c| *c != '/')
+}
+
 const TRAILING: &str = ".,;:)]}'\"/";
 
 /// The line a path names just after it, as compilers and agents write it:
-/// `:12`, or `:12:5` with a column, which Files does not go to.
+/// `:12`, or `:12:5` with a column ([`column_after`]).
 fn line_after(t: &[char]) -> Option<u32> {
     let digits: String = t
         .strip_prefix(&[':'])?
@@ -464,6 +544,13 @@ fn line_after(t: &[char]) -> Option<u32> {
         .take_while(|c| c.is_ascii_digit())
         .collect();
     digits.parse().ok().filter(|n| *n > 0)
+}
+
+/// The column after a path's line: the `5` of `:12:5`.
+fn column_after(t: &[char]) -> Option<u32> {
+    line_after(t)?;
+    let rest = &t[1 + t[1..].iter().take_while(|c| c.is_ascii_digit()).count()..];
+    line_after(rest)
 }
 
 /// The length of `t` without the punctuation that ends a sentence.
@@ -478,64 +565,143 @@ fn trailing_trimmed(t: &[char]) -> usize {
 /// The absolute paths in `t`, as (start, length): a slash that begins a
 /// word, then names and slashes, less the punctuation after it. The slash
 /// inside a web address follows a letter or a slash, so it is not one.
+/// One `…` may stand inside it, where an agent shortened it, and a slash
+/// after a `…` is that path's. A slash after a letter of a script written
+/// without spaces (`已写入/tmp/a.txt`) does begin one.
 fn paths(t: &[char]) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < t.len() {
         let follows_word =
-            i > 0 && (t[i - 1].is_ascii_alphanumeric() || "_./~:@%+-".contains(t[i - 1]));
+            i > 0 && ((name_char(t[i - 1]) && !unspaced(t[i - 1])) || "/:…".contains(t[i - 1]));
         if t[i] != '/' || follows_word {
             i += 1;
             continue;
         }
-        let mut j = i + 1;
-        loop {
-            let s = j;
-            while j < t.len() && name_char(t[j]) {
-                j += 1;
-            }
-            if j > s && j < t.len() && t[j] == '/' {
-                j += 1;
-            } else {
-                break;
-            }
-        }
+        let j = shortened_run(t, i);
+        // A run with an empty name in it (`//`) ends before that.
+        let j = (i + 1..j)
+            .find(|&k| t[k] == '/' && t[k - 1] == '/')
+            .unwrap_or(j);
         let n = trailing_trimmed(&t[i..j]);
         // A slash on its own is not somewhere to go, nor a path shortened
-        // with `…`.
-        if n > 1 && !elided(t, i, j) {
+        // where it names nothing (`/tmp/…`).
+        if n > 1 && names_by_its_ends(&t[i..i + n]) {
             out.push((i, n));
         }
-        i = j;
+        i = j.max(i + 1);
     }
     out
 }
 
-/// The run of path characters at `i..j` touches a `…` that shortened it:
-/// `areas/termin…/x.rs`, `/tmp/a/b…`.
-fn elided(t: &[char], i: usize, j: usize) -> bool {
-    (i > 0 && t[i - 1] == '…') || t.get(j) == Some(&'…')
+/// The paths inside quotes or backticks in `t`, as (start, length), where
+/// a name has a space in it: `"/tmp/space name.txt"`. The text in quotes
+/// starts as a path does (`/`, `~/`, `./`, `../`) and ends on its line.
+fn quoted_paths(t: &[char]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < t.len() {
+        let quote = t[i];
+        if !"\"'`".contains(quote) {
+            i += 1;
+            continue;
+        }
+        let Some(len) = t[i + 1..]
+            .iter()
+            .position(|c| *c == quote || *c == '\n')
+            .filter(|&k| t[i + 1 + k] == quote)
+        else {
+            i += 1;
+            continue;
+        };
+        let word: String = t[i + 1..i + 1 + len].iter().collect();
+        let starts = ["/", "~/", "./", "../"].iter().any(|s| word.starts_with(s));
+        if starts && word.contains(' ') && !word.ends_with(' ') && !word.contains("  ") {
+            out.push((i + 1, len));
+            i += len + 2;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// The longer readings of the path at `i..i + n` over the spaces around it
+/// ([`Link::spaced`]), longest first: up to three words after it, ending on
+/// one that names a file (`/tmp/space` then `name.txt`), and, for a
+/// relative path, the words before it back to one that starts a path
+/// (`name.txt` after `/tmp/space`). Each word is made of path characters
+/// and set off by one space, on the same line.
+fn spaced(t: &[char], i: usize, n: usize) -> Vec<String> {
+    const WORDS: usize = 3;
+    let mut out = Vec::new();
+    let mut k = i + n;
+    for _ in 0..WORDS {
+        if t.get(k) != Some(&' ') {
+            break;
+        }
+        let w = run(t, k + 1);
+        if w == k + 1 {
+            break;
+        }
+        let end = k + 1 + trailing_trimmed(&t[k + 1..w]);
+        let word: String = t[k + 1..end].iter().collect();
+        if names_a_file(&word) {
+            out.push(t[i..end].iter().collect());
+        }
+        if end < w {
+            break;
+        }
+        k = w;
+    }
+    out.reverse();
+    if t[i] != '/' && t[i] != '~' {
+        let mut k = i;
+        for _ in 0..WORDS {
+            if k < 2 || t[k - 1] != ' ' {
+                break;
+            }
+            let start = (0..k - 1)
+                .rev()
+                .take_while(|&j| path_char(t[j]))
+                .last()
+                .unwrap_or(k - 1);
+            if start == k - 1 {
+                break;
+            }
+            if t[start] == '/' || (t[start] == '~' && t.get(start + 1) == Some(&'/')) {
+                out.insert(0, t[start..i + n].iter().collect());
+                break;
+            }
+            k = start;
+        }
+    }
+    out
 }
 
 /// The paths relative to the pane's folder in `t`, as (start, length):
 /// a word that names a file by its extension (`notes.txt`,
-/// `src/ui/rail.rs:12`) or starts at `./` or `../`. A word with slashes but
-/// no extension (`and/or`) or a number (`v2.1.3`) is not one, nor a repo
-/// before its `#42`.
+/// `src/ui/rail.rs:12`, `areas/termin…/x.rs`) or starts at `./` or `../`.
+/// A word with slashes but no extension (`and/or`) or a number (`v2.1.3`)
+/// is not one, nor a repo before its `#42`.
 fn relative_paths(t: &[char]) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < t.len() {
         let starts = (name_char(t[i]) || t[i] == '.')
-            && (i == 0 || !(name_char(t[i - 1]) || "/:#".contains(t[i - 1])));
+            && (i == 0 || !(name_char(t[i - 1]) || "/:#…".contains(t[i - 1])));
         if !starts {
             i += 1;
             continue;
         }
-        let j = run(t, i);
+        let j = shortened_run(t, i);
         let n = trailing_trimmed(&t[i..j]);
         let word: String = t[i..i + n].iter().collect();
-        if t.get(j) != Some(&'#') && !elided(t, i, j) && names_a_file(&word) {
+        let names = match word.split_once('…') {
+            Some((_, file)) => file.starts_with('/') && names_a_file(&file[1..]),
+            None => names_a_file(&word),
+        };
+        if t.get(j) != Some(&'#') && names {
             out.push((i, n));
         }
         i = j.max(i + 1);
@@ -557,7 +723,7 @@ fn names_a_file(word: &str) -> bool {
     let Some((base, ext)) = last.rsplit_once('.') else {
         return false;
     };
-    base.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 1
+    base.chars().filter(|c| c.is_alphabetic()).count() >= 1
         && base.trim_start_matches('.').chars().count() >= 2
         && (1..=8).contains(&ext.len())
         && ext.chars().all(|c| c.is_ascii_alphanumeric())
@@ -926,7 +1092,9 @@ mod tests {
     }
 
     #[test]
-    fn a_path_shortened_with_an_ellipsis_is_no_link_at_all() {
+    fn a_path_shortened_with_an_ellipsis_is_one_link_for_the_device_to_find() {
+        // The rows Claude Code and Codex printed: the click finds the file
+        // by the ends either side of the `…` (`printed_path`).
         let s = screen(
             60,
             4,
@@ -935,9 +1103,289 @@ mod tests {
              /tmp/claude-1000/-srv-parvi/4bb7cac5-c5e6-4cf…\n \
              ▝▝   ▝▝   /…/scratchpad/links/proj",
         );
-        for (row, col) in [(0, 12), (0, 30), (1, 20), (2, 10), (3, 14)] {
+        let at = |row, col| link(&s, row, col).map(|l| l.target);
+        let shortened = Some(Target::Path(
+            "areas/termin…/long_file_name_for_wrapping_tests.rs".into(),
+            None,
+        ));
+        assert_eq!(at(0, 12), shortened);
+        assert_eq!(at(0, 30), shortened);
+        assert_eq!(
+            at(2, 10),
+            Some(Target::Path(
+                "/tmp/claude-1000/-srv-parvi/4bb7cac5-c5e6-4cf…".into(),
+                None
+            ))
+        );
+        assert_eq!(
+            at(3, 14),
+            Some(Target::Path("/…/scratchpad/links/proj".into(), None))
+        );
+        // A relative folder cut where nothing of a name is left names
+        // nothing, and neither half of a shortened path is a link alone.
+        assert_eq!(at(1, 20), None);
+        assert_eq!(at(1, 59), None);
+        let s = screen(60, 2, "  /tmp/a/… and areas/termin… then …/x.rs");
+        for col in [3, 9, 18, 34] {
+            assert_eq!(link(&s, 0, col), None, "column {col}");
+        }
+
+        // Codex's own header, as `capture-pane` gave it (0.171.0).
+        let s = screen(
+            84,
+            3,
+            "  >_ OpenAI Codex (v0.171.0)\n     \
+             /tmp/claude-1000/-srv-ahjo/…/scratchpad/codex\n",
+        );
+        assert_eq!(
+            link(&s, 1, 30).map(|l| l.target),
+            Some(Target::Path(
+                "/tmp/claude-1000/-srv-ahjo/…/scratchpad/codex".into(),
+                None
+            ))
+        );
+    }
+
+    #[test]
+    fn the_column_after_a_paths_line_goes_with_it() {
+        // The audit's printed `./line.txt:82:4` (ahjo-3v0).
+        let s = screen(60, 2, "./line.txt:82:4 and /a/b.rs:7 and cc.md:3:x");
+        let at = |col| link(&s, 0, col).map(|l| (l.target, l.column));
+        assert_eq!(
+            at(3),
+            Some((Target::Path("./line.txt".into(), Some(82)), Some(4)))
+        );
+        assert_eq!(
+            at(22),
+            Some((Target::Path("/a/b.rs".into(), Some(7)), None))
+        );
+        assert_eq!(at(35), Some((Target::Path("cc.md".into(), Some(3)), None)));
+    }
+
+    // Interactive Codex 0.171.0 in a tmux pane 84 columns wide, as
+    // `capture-pane -p` gave it (ahjo-4zw.11): the prompt as typed, then
+    // its answer, a bullet Codex broke itself, first after a `-` well
+    // short of the edge, then inside each name too long for a row.
+    const CODEX_84: &str = "\
+› Print this path as a bullet point exactly, without other words or tools: /tmp/
+  claude-1000/ahjo-file-lane/4zw-r1/paths/long-directory-
+  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  aaaaaaaaa/more-directory-
+  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  bbbbbbbbb/long-path-target.txt
+
+
+• • /tmp/claude-1000/ahjo-file-lane/4zw-r1/paths/long-directory-
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    aaaaaaaaaa/more-directory-
+    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    bbbbbbbbbb/long-path-target.txt
+
+  Worked for 3s • 11:00 PM";
+
+    #[test]
+    fn interactive_codex_breaks_a_bullet_inside_names_too_long_for_a_row() {
+        let s = screen(84, 20, CODEX_84);
+        let path = format!(
+            "/tmp/claude-1000/ahjo-file-lane/4zw-r1/paths/long-directory-{}/more-directory-{}/long-path-target.txt",
+            "a".repeat(90),
+            "b".repeat(90)
+        );
+        let whole = Some(Target::Path(path.clone(), None));
+        // The answer: every row of it, the first where the click failed.
+        assert_eq!(
+            path_on(
+                &s,
+                &[
+                    (8, 4),
+                    (8, 20),
+                    (8, 63),
+                    (9, 4),
+                    (9, 83),
+                    (10, 10),
+                    (11, 50),
+                    (12, 30)
+                ]
+            ),
+            vec![whole.clone(); 8]
+        );
+        let l = link(&s, 8, 20).unwrap();
+        assert_eq!(l.cells.len(), path.len());
+        // The prompt as typed, broken after its `/tmp/` at the edge.
+        assert_eq!(
+            path_on(&s, &[(0, 78), (1, 2), (2, 82), (3, 2), (4, 40), (5, 20)]),
+            vec![whole; 6]
+        );
+        // Neither the bullets, the indentation nor the words after it.
+        for (row, col) in [(8, 0), (8, 2), (9, 1), (14, 4)] {
             assert_eq!(link(&s, row, col), None, "row {row}, column {col}");
         }
+    }
+
+    // The same answer once a panel opened beside narrowed the pane to 104
+    // columns and Codex drew it again: `directory-` alone on its row.
+    const CODEX_104: &str = "\
+\u{2022} \u{2022} /tmp/claude-1000/ahjo-file-lane/4zw-r1/paths/long-directory-
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/more-
+    directory-
+    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/long-
+    path-target.txt
+
+  Worked for 4s \u{2022} 11:50 PM";
+
+    #[test]
+    fn interactive_codex_breaks_again_after_a_dash_on_a_row_of_its_own() {
+        let s = screen(104, 8, CODEX_104);
+        let path = format!(
+            "/tmp/claude-1000/ahjo-file-lane/4zw-r1/paths/long-directory-{}/more-directory-{}/long-path-target.txt",
+            "a".repeat(90),
+            "b".repeat(90)
+        );
+        let whole = Some(Target::Path(path, None));
+        assert_eq!(
+            path_on(&s, &[(0, 20), (1, 50), (1, 98), (2, 6), (3, 50), (4, 8)]),
+            vec![whole; 6]
+        );
+        assert_eq!(link(&s, 6, 4), None);
+    }
+
+    #[test]
+    fn a_word_filling_the_row_after_prose_is_not_joined() {
+        // A folder named near the end of a row, then a rule of dashes, or
+        // a row of one long word that does not hang where the path or its
+        // row's text starts.
+        let s = screen(
+            30,
+            4,
+            "see the folder /tmp/out/\n------------------------------\n  and /tmp/a/build-\n    yyyyyyyyyyyyyyyyyyyyyyyyyy",
+        );
+        assert_eq!(
+            link(&s, 0, 17).map(|l| l.target),
+            Some(Target::Path("/tmp/out".into(), None))
+        );
+        assert_eq!(link(&s, 1, 3), None);
+        assert_eq!(
+            link(&s, 2, 8).map(|l| l.target),
+            Some(Target::Path("/tmp/a/build-".into(), None))
+        );
+        assert_eq!(link(&s, 3, 6), None);
+    }
+
+    // The audit's printed paths (ahjo-4zw.7, .8), as `cat` printed them.
+    const AUDIT: &str = "/tmp/claude-1000/ahjo-file-lane/4zw-r1/paths";
+
+    #[test]
+    fn a_quoted_path_with_spaces_is_all_of_it() {
+        let s = screen(
+            100,
+            2,
+            &format!("\"{AUDIT}/space name.txt\"\n`{AUDIT}/My Files/a b.md`:12"),
+        );
+        let quoted = Some(Target::Path(format!("{AUDIT}/space name.txt"), None));
+        assert_eq!(
+            path_on(&s, &[(0, 1), (0, 47), (0, 52), (0, 59)]),
+            vec![quoted; 4]
+        );
+        let l = link(&s, 0, 52).unwrap();
+        assert_eq!(l.cells.len(), AUDIT.len() + "/space name.txt".len());
+        assert!(l.spaced.is_empty());
+        // The quotes are not the path.
+        assert_eq!(link(&s, 0, 0), None);
+        assert_eq!(link(&s, 0, 60), None);
+        assert_eq!(
+            link(&s, 1, 50).map(|l| l.target),
+            Some(Target::Path(format!("{AUDIT}/My Files/a b.md"), Some(12)))
+        );
+        // Prose in quotes is not a path.
+        let s = screen(60, 1, "said \"it's done\" and './a b' then");
+        assert_eq!(link(&s, 0, 7), None);
+        assert_eq!(
+            link(&s, 0, 24).map(|l| l.target),
+            Some(Target::Path("./a b".into(), None))
+        );
+    }
+
+    #[test]
+    fn a_bare_path_with_spaces_offers_the_longer_reading_from_either_word() {
+        let s = screen(100, 2, &format!("{AUDIT}/space name.txt\n"));
+        let spaced = vec![format!("{AUDIT}/space name.txt")];
+        // Either word: the shape it has alone, and the reading over the
+        // space for the device to choose.
+        let l = link(&s, 0, 10).unwrap();
+        assert_eq!(l.target, Target::Path(format!("{AUDIT}/space"), None));
+        assert_eq!(l.spaced, spaced);
+        let l = link(&s, 0, 52).unwrap();
+        assert_eq!(l.target, Target::Path("name.txt".into(), None));
+        assert_eq!(l.spaced, spaced);
+        // Up to three words, each one that names a file, longest first;
+        // and prose after a path is a reading only where it names a file.
+        let s = screen(
+            80,
+            2,
+            "/srv/My Big Report.pdf\n/tmp/out then run it, and /tmp/x see.md",
+        );
+        assert_eq!(
+            link(&s, 0, 2).unwrap().spaced,
+            vec!["/srv/My Big Report.pdf".to_string()]
+        );
+        assert!(link(&s, 1, 2).unwrap().spaced.is_empty());
+        assert_eq!(
+            link(&s, 1, 28).unwrap().spaced,
+            vec!["/tmp/x see.md".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_unicode_file_name_is_one_path_wherever_it_is_clicked() {
+        let printed = format!("{AUDIT}/üñicode.txt");
+        // Composed, as the audit printed it, and decomposed, as some file
+        // systems give names (`u` and a combining diaeresis).
+        let decomposed = format!("{AUDIT}/u\u{308}n\u{303}icode.txt");
+        let s = screen(
+            100,
+            4,
+            &format!("{printed}\n{decomposed}\nluotu ./päivä/yö.md.\n已写入/tmp/a.txt"),
+        );
+        for col in [0, 30, 45, 46, 47, 50, 55] {
+            assert_eq!(
+                link(&s, 0, col).map(|l| l.target),
+                Some(Target::Path(printed.clone(), None)),
+                "column {col}"
+            );
+        }
+        assert_eq!(
+            link(&s, 1, 47).map(|l| l.target),
+            Some(Target::Path(decomposed, None))
+        );
+        assert_eq!(
+            link(&s, 2, 10).map(|l| l.target),
+            Some(Target::Path("./päivä/yö.md".into(), None))
+        );
+        // A path right after Chinese text, which has no spaces, is still one.
+        assert_eq!(
+            link(&s, 3, 8).map(|l| l.target),
+            Some(Target::Path("/tmp/a.txt".into(), None))
+        );
+    }
+
+    #[test]
+    fn a_home_path_the_folder_does_not_tell_is_in_the_nodes_home() {
+        // ahjo-4zw.9: the same `~` path from the home folder, then from
+        // /tmp after a `cd`, opens the same file.
+        let printed = "~/.cache/ahjo-4zw-path-audit/home.txt";
+        let node_home = Some("/home/ana");
+        let from = |cwd| in_home(&resolve(Some(cwd), printed), node_home);
+        let want = "/home/ana/.cache/ahjo-4zw-path-audit/home.txt";
+        assert_eq!(from("/home/ana/.cache/ahjo-4zw-path-audit"), want);
+        assert_eq!(from("/tmp/claude-1000/ahjo-file-lane/4zw-r1/paths"), want);
+        // A folder in another user's home still says whose `~` it is.
+        assert_eq!(
+            from("/home/bo/x"),
+            "/home/bo/.cache/ahjo-4zw-path-audit/home.txt"
+        );
+        // With no home known it is left for Files to refuse.
+        assert_eq!(in_home(printed, None), printed);
+        assert_eq!(in_home("~bo/x", node_home), "~bo/x");
     }
 
     #[test]

@@ -143,6 +143,8 @@ pub struct FilesPage {
     pub pretty_code: Entity<Code>,
     pub room: crate::picture::Room,
     pending_line: Option<usize>,
+    /// The column on [`Self::pending_line`] a printed `path:12:5` names.
+    pending_column: Option<usize>,
     pub drafts: HashMap<(String, String), Draft>,
     pub naming: Option<Naming>,
     /// Where the name being renamed is edited.
@@ -289,6 +291,16 @@ pub struct FilesPage {
     pub place_readme: Option<Vec<ahjo_app_kit::widgets::markdown::Block>>,
     /// Ctrl+wheel over the open file, a step not yet taken.
     pub(crate) zoom_wheel: std::rc::Rc<std::cell::Cell<ahjo_app_kit::zoom::Wheel>>,
+}
+
+/// The line, and the column if any, a revealed path's part names: `12` or
+/// `12:5`, both from 1.
+fn line_and_column(part: &str) -> Option<(usize, Option<usize>)> {
+    let (line, column) = match part.split_once(':') {
+        Some((line, column)) => (line, Some(column.parse().ok()?)),
+        None => (part, None),
+    };
+    Some((line.parse().ok()?, column))
 }
 
 fn enc(s: &str) -> String {
@@ -461,32 +473,33 @@ impl Page for FilesPage {
         match ask {
             Ask::OpenPath { node, path, beside } => {
                 if beside {
-                    self.open_in_panel(node, path, None, window, cx);
+                    self.open_in_panel(node, path, None, None, window, cx);
                 } else {
                     self.on_node(node.as_str(), cx);
                     self.show_in_tree(&path, cx);
                     self.open(path, window, cx)
                 }
             }
-            // A file revealed at a part of it, its line (a path a session
-            // printed as `main.rs:12`), opens there.
+            // A file revealed at a part of it, its line and maybe column
+            // (a path a session printed as `main.rs:12` or `main.rs:12:5`),
+            // opens there.
             Ask::Reveal {
                 what,
                 id,
                 node,
-                part: Some(line),
+                part: Some(part),
                 beside,
-            } if what == "path" && line.parse::<usize>().is_ok() => {
-                let line = line.parse().ok();
+            } if what == "path" && line_and_column(&part).is_some() => {
+                let (line, column) = line_and_column(&part).expect("checked");
                 if beside {
                     let node = node.unwrap_or_else(|| NodeId(self.tree.node.clone()));
-                    self.open_in_panel(node, id, line, window, cx);
+                    self.open_in_panel(node, id, Some(line), column, window, cx);
                 } else {
                     if let Some(n) = node {
                         self.on_node(n.as_str(), cx);
                     }
                     self.show_in_tree(&id, cx);
-                    self.open_at(id, line, window, cx);
+                    self.open_at(id, Some(line), column, window, cx);
                 }
             }
             Ask::Reveal { what, id, node, .. } if what == "path" => {
@@ -634,6 +647,7 @@ impl FilesPage {
             pretty_code,
             room: Default::default(),
             pending_line: None,
+            pending_column: None,
             drafts: HashMap::new(),
             naming: None,
             naming_in: None,
@@ -826,6 +840,7 @@ impl FilesPage {
         node: NodeId,
         path: String,
         line: Option<usize>,
+        column: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -835,7 +850,7 @@ impl FilesPage {
         panel.update(cx, |p, cx| {
             p.on_node(node.as_str(), cx);
             p.show_in_tree(&path, cx);
-            p.open_at(path, line, window, cx);
+            p.open_at(path, line, column, window, cx);
             p.watch(window, cx);
         });
         self.show_panel(cx);
@@ -1427,7 +1442,7 @@ impl FilesPage {
             Pick::Hit(i) => {
                 let hit = self.find.as_ref().and_then(|f| f.matches().get(i).cloned());
                 match (hit, self.find.as_mut()) {
-                    (Some(hit), _) => self.open_at(hit.path, hit.line, window, cx),
+                    (Some(hit), _) => self.open_at(hit.path, hit.line, None, window, cx),
                     // Enter before any answer: the first file found opens.
                     (None, Some(find)) if i == 0 && find.widening => find.open_first = true,
                     _ => {}
@@ -1438,16 +1453,18 @@ impl FilesPage {
                 self.remember(cx);
                 self.show_place(folder, cx)
             }
-            Pick::Go(line) | Pick::Symbol(line) => self.go_to(line, window, cx),
+            Pick::Go(line) | Pick::Symbol(line) => self.go_to(line, None, window, cx),
             Pick::HitFile(path) => self.open_as(path, keep, window, cx),
         }
         cx.notify();
     }
 
+    /// Opens a file at its line (from 1), and at a column (from 1) on it.
     pub fn open_at(
         &mut self,
         path: String,
         line: Option<usize>,
+        column: Option<usize>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1456,9 +1473,18 @@ impl FilesPage {
             .as_ref()
             .is_some_and(|o| o.path == path && o.node == self.tree.node);
         self.open(path, window, cx);
+        let column = column.filter(|_| line.is_some());
         match line {
-            Some(line) if same => self.go_to(line.saturating_sub(1), window, cx),
-            _ => self.pending_line = line,
+            Some(line) if same => self.go_to(
+                line.saturating_sub(1),
+                column.map(|c| c.saturating_sub(1)),
+                window,
+                cx,
+            ),
+            _ => {
+                self.pending_line = line;
+                self.pending_column = column;
+            }
         }
     }
     /// Opens a file in a tab of its own, and shows it in the tree.
@@ -1507,6 +1533,7 @@ impl FilesPage {
         self.md_scroll.set_offset(gpui::Point::default());
         self.md_select.borrow_mut().selection.clear();
         self.pending_line = None;
+        self.pending_column = None;
         self.confirm_discard = false;
         self.leave_after_save = false;
         self.conflict = false;
@@ -1615,6 +1642,7 @@ impl FilesPage {
                 o.changed_on_disk = false;
                 let lang = syntax::lang(&name);
                 let line = p.pending_line.take();
+                let column = p.pending_column.take();
                 let place = p.pending_place.take();
                 let log = store::kinds::extension(&name) == "log";
                 p.symbols = store::symbols::of(&name, draft.as_ref().map_or(&text, |d| &d.text));
@@ -1635,6 +1663,8 @@ impl FilesPage {
                         code.set(shown, cx);
                         if let Some(place) = place.as_ref() {
                             code.set_place(place, cx);
+                        } else if let (Some(line), Some(column)) = (line, column) {
+                            code.go_to_column(line.saturating_sub(1), column.saturating_sub(1), cx);
                         } else if let Some(line) = line {
                             code.go_to_line(line.saturating_sub(1), cx);
                         } else if log {

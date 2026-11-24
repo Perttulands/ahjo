@@ -470,7 +470,7 @@ impl FilesPage {
                         s.name,
                         line + 1
                     )))
-                    .on_click(cx.listener(move |p, _, w, cx| p.go_to(line, w, cx))),
+                    .on_click(cx.listener(move |p, _, w, cx| p.go_to(line, None, w, cx))),
             );
         }
         body.child(list).into_any_element()

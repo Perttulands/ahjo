@@ -34,6 +34,7 @@ use std::sync::Arc;
 
 mod drag;
 pub(super) mod pictures;
+pub(super) mod printed_path;
 
 /// How long a window's new grid must hold before tmux hears it: dragging a
 /// divider or the window resizes the session once, when the drag rests,
@@ -1462,6 +1463,7 @@ impl Terminals {
         } = src;
         let history = live.is_some() || self.histories.contains_key(&i);
         let place = self.slot_pane(i).map(|at| pictures::Place {
+            home: self.home_of(&at.node),
             node: at.node,
             cwd: self.cwd_of(i),
         });
@@ -2242,17 +2244,15 @@ impl Terminals {
         links::at(&s.term, GridPoint::new(line, Column(col))).map(|l| (col, row, l))
     }
 
-    /// A link was clicked: an address opens in the browser, a path in the
-    /// Files panel, on the device of the window's session, at the
-    /// line named after it, and a diagram drawn beside. A relative path is
-    /// the folder's of the pane the window shows, which tmux is asked for,
-    /// as the session's own folder is its active pane's.
-    fn open_link(&mut self, i: usize, target: links::Target, cx: &mut Context<Self>) {
+    /// A link was clicked at `at`: an address opens in the browser, a
+    /// path in the Files panel ([`printed_path`]), an item's card beside,
+    /// and a diagram drawn beside.
+    fn open_link(&mut self, i: usize, link: Link, at: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         let pane = match self.histories.get(&i) {
             Some(h) => Some(h.pane.clone()),
             None => self.slot_pane(i),
         };
-        let ask = match target {
+        let ask = match link.target {
             links::Target::Url(url) => return cx.open_url(&url),
             links::Target::Diagram(source) => return self.open_diagram(source, cx),
             links::Target::WorkItem(id) => {
@@ -2265,44 +2265,23 @@ impl Terminals {
                     beside: true,
                 }
             }
-            links::Target::Path(path, line) => {
+            links::Target::Path(..) => {
                 let Some(pane) = pane else { return };
-                let session = self.fleet.session_of_pane(&pane.node, pane.pane);
-                let cwd = session.and_then(|s| s.cwd.clone());
-                let id = session.map(|s| s.id.clone()).unwrap_or_default();
-                if path.starts_with(['/', '~']) || id.is_empty() {
-                    let path = links::resolve(cwd.as_deref(), &path);
-                    open_path(NodeId(pane.node), path, line)
-                } else {
-                    let node = NodeId(pane.node.clone());
-                    let task = self
-                        .host
-                        .call(node.clone(), SessionListWindows { session: id }, cx);
-                    cx.spawn(async move |this, cx| {
-                        let folder = task
-                            .await
-                            .ok()
-                            .map(|a| a.windows)
-                            .and_then(|w| {
-                                w.into_iter().find(|w| w.pane == pane.pane).map(|w| w.cwd)
-                            })
-                            .or(cwd);
-                        let path = links::resolve(folder.as_deref(), &path);
-                        let _ =
-                            this.update(cx, |s, cx| s.ask_link(open_path(node, path, line), cx));
-                    })
-                    .detach();
-                    return;
-                }
+                return self.open_printed(pane, link, at, cx);
             }
         };
         self.ask_link(ask, cx);
     }
 
-    fn ask_link(&mut self, ask: Ask, cx: &mut Context<Self>) {
+    pub(super) fn ask_link(&mut self, ask: Ask, cx: &mut Context<Self>) {
         if let Err(e) = self.host.ask(ask, cx) {
             self.report(&e.message, true, None);
         }
+    }
+
+    /// The folder `~` names for node `node`'s own user, when it says.
+    pub(super) fn home_of(&self, node: &str) -> Option<String> {
+        self.fleet.get(node)?.launcher.as_ref()?.home.clone()
     }
 
     /// The folder of the session window `i` shows, which relative paths
@@ -2364,7 +2343,7 @@ impl Terminals {
             _ => {
                 screen.lock().term.selection = None;
                 if let Some((_, _, link)) = self.link_at(i, e.position) {
-                    self.open_link(i, link.target, cx);
+                    self.open_link(i, link, e.position, cx);
                 }
             }
         }
@@ -2640,25 +2619,6 @@ fn peek_view(
         pan = pan.min(most);
     }
     (pan, most, Some(cursor))
-}
-
-/// Opens a file in the Files panel beside the page, at `line` if one is
-/// named: as Files reveals a path at a part of it.
-fn open_path(node: NodeId, path: String, line: Option<u32>) -> Ask {
-    match line {
-        None => Ask::OpenPath {
-            node,
-            path,
-            beside: true,
-        },
-        Some(line) => Ask::Reveal {
-            what: "path".into(),
-            id: path,
-            node: Some(node),
-            part: Some(line.to_string()),
-            beside: true,
-        },
-    }
 }
 
 #[cfg(test)]

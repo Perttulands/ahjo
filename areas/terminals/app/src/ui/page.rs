@@ -94,6 +94,8 @@ pub enum Act {
     History(usize),
     /// Makes an ended session again, under its name, in its windows.
     Restart(Key),
+    /// Opens one of the places a printed path names.
+    OpenPrinted(super::tiles::printed_path::Opening),
 }
 
 /// A row of one of the page's menus, as its tests read it: what it says
@@ -1493,6 +1495,7 @@ impl Terminals {
                 return;
             }
             Act::Restart(k) => self.restart(k),
+            Act::OpenPrinted(opening) => return self.ask_link(opening.ask(), cx),
         }
         self.sync(cx);
         self.save(cx);

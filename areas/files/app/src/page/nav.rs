@@ -227,6 +227,7 @@ impl FilesPage {
         let editing = opened.editing;
         self.symbols = store::symbols::of(&opened.name, &text);
         self.pending_line = None;
+        self.pending_column = None;
         self.confirm_discard = false;
         self.conflict = false;
         self.shown_newest = false;
@@ -717,9 +718,15 @@ impl FilesPage {
         }
     }
 
-    /// Goes to line `n` (from 0) of the open file, the place left kept to
-    /// come back to.
-    pub fn go_to(&mut self, n: usize, window: &mut Window, cx: &mut Context<Self>) {
+    /// Goes to line `n` (from 0) of the open file, and to a column (from 0)
+    /// on it, the place left kept to come back to.
+    pub fn go_to(
+        &mut self,
+        n: usize,
+        column: Option<usize>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.opened.is_none() {
             return;
         }
@@ -733,7 +740,10 @@ impl FilesPage {
             o.diff_open = false;
         }
         self.place = None;
-        self.code.update(cx, |c, cx| c.go_to_line(n, cx));
+        self.code.update(cx, |c, cx| match column {
+            Some(column) => c.go_to_column(n, column, cx),
+            None => c.go_to_line(n, cx),
+        });
         self.palette = false;
         self.clear_find(cx);
         Code::focus(&self.code, window, cx);

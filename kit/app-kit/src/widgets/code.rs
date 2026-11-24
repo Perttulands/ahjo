@@ -732,6 +732,32 @@ impl Code {
         self.show_line(n.saturating_sub(GO_TO_CONTEXT), cx);
     }
 
+    /// Goes to column `column` (0-based, in characters) of line `n`
+    /// (0-based), where a compiler or agent points: the word starting
+    /// there is selected, or the one character where no word starts, with
+    /// a few lines above it in view. A column past the line's end goes to
+    /// the line.
+    pub fn go_to_column(&mut self, n: usize, column: usize, cx: &mut Context<Self>) {
+        let n = n.min(self.starts.len().saturating_sub(1));
+        let line = self.line_range(n);
+        let text = &self.text[line.clone()];
+        let Some((at, c)) = text.char_indices().nth(column) else {
+            return self.go_to_line(n, cx);
+        };
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        let end = if word(c) {
+            text[at..]
+                .char_indices()
+                .find(|(_, c)| !word(*c))
+                .map_or(text.len(), |(i, _)| at + i)
+        } else {
+            at + c.len_utf8()
+        };
+        self.selected = line.start + at..line.start + end;
+        self.reversed = false;
+        self.show_line(n.saturating_sub(GO_TO_CONTEXT), cx);
+    }
+
     /// The first and last line (1-based) the selection covers, or none
     /// while nothing is selected. A selection ending where a line starts
     /// does not cover that line.
@@ -1887,6 +1913,26 @@ mod tests {
             assert_eq!(c.top_line(), 9 - GO_TO_CONTEXT);
             c.go_to_line(1, cx);
             assert_eq!((c.selected_lines(), c.top_line()), (Some((2, 2)), 0));
+        });
+    }
+
+    #[gpui::test]
+    fn going_to_a_column_selects_the_word_there(cx: &mut gpui::TestAppContext) {
+        let code = cx.new(Code::new);
+        code.update(cx, |c, cx| {
+            let text: String = (1..=30)
+                .map(|n| format!("    let päivä_{n} = (x);\n"))
+                .collect();
+            c.set(&text, cx);
+            // `main.rs:20:9` names the word at column 9 of line 20.
+            c.go_to_column(19, 8, cx);
+            assert_eq!(c.selected_text(), "päivä_20");
+            assert_eq!(c.top_line(), 19 - GO_TO_CONTEXT);
+            // Where no word starts, the one character; past the end, the line.
+            c.go_to_column(0, 18, cx);
+            assert_eq!(c.selected_text(), "(");
+            c.go_to_column(2, 80, cx);
+            assert_eq!(c.selected_lines(), Some((3, 3)));
         });
     }
 
