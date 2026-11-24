@@ -2,13 +2,15 @@
 
 > Ahjo Swarm makes tmux sessions great.
 
-Ahjo is a family of three apps built on one app kit: Swarm, Brain and Desk.
-This file is Swarm's vision. Swarm used to be called Parvi, which is Finnish
-for a swarm: many machines moving as one.
+This file says what Ahjo Swarm is for and when it is finished. Read it before
+you decide what Swarm should do.
+
+Ahjo is three apps built on one app kit: Swarm, Brain and Desk. Swarm was
+called Parvi, which is Finnish for a swarm: many machines moving as one.
 
 ## What it is
 
-Swarm makes tmux sessions great. With it you can:
+With Swarm you can:
 
 - launch an agent in the right place in seconds;
 - see what every agent is doing;
@@ -16,56 +18,60 @@ Swarm makes tmux sessions great. With it you can:
 - see what work is open;
 - chain agents into missions.
 
-The agents are command-line programs running in tmux, and they stay in tmux.
-tmux is what lets you reach one session from many places, and what lets agents
-read each other.
+The agents are command-line programs that run in tmux, and they stay in tmux.
+tmux lets you reach one session from many places, and it lets agents read each
+other's sessions.
 
-Each tab has one purpose, and is designed to serve that purpose as well as it
-can (`DESIGN.md`).
+Each tab has one purpose and serves that purpose as well as it can. `DESIGN.md`
+says how.
 
 ## A few pieces, many shapes
 
-Ahjo is built from a few general pieces that combine into many shapes. It does
-not get features that do only one job. This is the reason Claude Code works so
-well: it is built around bash, one general tool that an agent combines in
-endless ways. Ahjo follows the same idea.
+Build Ahjo from a few general pieces that combine into many shapes. Do not add
+a feature that does only one job. This is why Claude Code works so well: it is
+built around bash, one general tool that an agent combines in endless ways.
 
 ## You and your agent, side by side
 
-Swarm is a great app for you and a great command line for your agent, and both
-work on the same things. You work in the app. An agent on the same machine
-works through the `ahjo` command and can do everything you can.
+Swarm is an app for you and a command line for your agent, and both work on
+the same things. You work in the app. An agent on the same machine works
+through the `ahjo` command and can do everything you can.
 
 - **Every capability has a command.** Anything you can do in the app, an agent
-  can do with an `ahjo` command. Only a purely visual gesture needs none.
-- **Agents do the big jobs; Swarm gives them simple tools.** Every job is a few
-  `ahjo` commands an agent runs in a row. Swarm does not get setup screens or
+  can do with an `ahjo` command. Only a purely visual gesture needs no command.
+- **Agents do the big jobs; Swarm gives them simple tools.** An agent does a
+  job by running a few `ahjo` commands in a row. Do not add setup screens or
   rule systems for one kind of job.
 - **One configuration.** Every setting lives in one place that an agent can
-  edit, and it also shows on the Settings page.
+  edit. The Settings page shows the same settings.
 - **No permissions inside Swarm.** An agent has the access it already has on
   the machine. Swarm adds no permission checks of its own.
-- **Easy to change.** Each area stands on its own and plugs in at one place. So
-  a new idea becomes a request to an agent.
+- **Easy to change.** Each area stands on its own and plugs in at one place.
+  So a new idea becomes a request to an agent.
 
 ## What "finished" means
 
-Swarm is finished when the operator works in Swarm alone, and the two tools it
-replaces, CHROTE and Archon, are switched off. The bar is what the operator can
-do and how it goes for them: they can do everything they did before, with the
-best experience and the simplest solution we can build. Swarm keeps no
-compatibility with the old tools.
+Swarm is finished when both of these are true:
+
+1. The operator works in Swarm alone.
+2. CHROTE and Archon, the two tools Swarm replaces, are switched off.
+
+Judge Swarm by what the operator can do and how it goes for them. They can do
+everything they did before, with the best experience and the simplest solution
+we can build. Swarm keeps no compatibility with the old tools.
+
+Swarm must cover these areas:
 
 - **Sessions.** The launcher; sessions, tabs and windows; Send to Session;
   leader chords; sizes that stay readable; agent events.
-- **Files and Work.** What agents wrote and what work is open, shown beside the
-  sessions.
+- **Files and Work.** What agents wrote and what work is open, shown beside
+  the sessions.
 - **Agents.** What shapes an agent started in a folder: its instructions and
-  where they come from, skills, hooks, settings and tools. You edit them where
-  you see them.
+  where they come from, skills, hooks, settings and tools. You edit each of
+  these where you see it.
 - **Scheduled and Host.** Scheduled prompts, services, health, settings, and
   install and upgrade. None of these ever stops a session.
-- **Missions.** Missions let one operator get much more done. You define a
+- **Missions.** A mission lets one operator get much more done. You define a
   graph of work for several agents, set up what it needs, start it, and come
   back to the result. A mission rarely waits for a person. When the operator is
   needed, one mission ends with something for them to look at, and the next
@@ -73,30 +79,38 @@ compatibility with the old tools.
 
 ## After that
 
-Later, Swarm adds Windows terminals, missions across devices, moving files
-between devices, an agent arranging the operator's view, ChatGPT through MCP,
-and the phone. The data model is built for a fleet of machines from the start:
-every resource is named by its node and a local id. So these can be added
-without rebuilding what exists.
+These come after Swarm is finished:
+
+- Windows terminals;
+- missions across devices;
+- moving files between devices;
+- an agent arranging the operator's view;
+- ChatGPT through MCP;
+- the phone.
+
+The data model is built for a fleet of machines from the start. Every resource
+is named by its node and a local id. So these can be added without rebuilding
+what exists.
 
 ## Not Swarm
 
 Two things are not Swarm's job:
 
-- resident agents (agents that live on the machine and keep running on their
-  own);
-- compute admission (deciding when a heavy job may run). `heavy` and
-  `gpu-lock` own that.
+- **Resident agents**: agents that live on the machine and keep running on
+  their own.
+- **Compute admission**: deciding when a heavy job may run. `heavy` and
+  `gpu-lock` own it.
 
-The brain and the decision desk are their own apps, Ahjo Brain and Ahjo Desk.
-Each has one purpose:
+The brain and the decision desk are separate apps, each with one purpose:
 
 - **Ahjo Brain** is for exploring what we know.
-- **Ahjo Desk** is the shared place where an agent publishes something (a
-  picture, a video, a rendered page, a question) and the operator answers
-  freely: in his own words, and by marking what he sees.
+- **Ahjo Desk** is the shared place where an agent publishes something, such
+  as a picture, a video, a rendered page or a question. The operator answers
+  freely, in his own words and by marking what he sees.
 
-They look like Swarm, but you do not open them from Swarm. Swarm has no Brain
-tab. Swarm's agents reach the brain through `ahjo brain`. In Swarm, Alt+L opens
-a Brain panel at the window's edge, beside the terminals. There you can search
-the brain, read a page and send it to a session.
+Both apps look like Swarm, but you do not open them from Swarm.
+
+Swarm has no Brain tab. Swarm's agents reach the brain through `ahjo brain`.
+In Swarm, Alt+L opens a Brain panel at the window's edge, beside the
+terminals. In that panel you can search the brain, read a page and send the
+page to a session.
