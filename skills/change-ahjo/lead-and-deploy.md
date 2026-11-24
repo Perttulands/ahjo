@@ -69,7 +69,9 @@ fine: the apps hold no lock or single-instance check.
 
 The node is the systemd user unit `ahjo`, listening on `127.0.0.1:7310`
 (Windows Tailscale serves tailnet port 7300 to it, and the ChatGPT tunnel
-`ahjo-tunnel` reaches its `/mcp/chatgpt` there). Upgrade only to what is on main,
+`ahjo-tunnel` reaches its `/mcp/chatgpt` there; ChatGPT keeps the tool list
+it last loaded, so after changing the `chatgpt` set press Refresh tools under
+Plugins > Ahjo Swarm in ChatGPT's settings). Upgrade only to what is on main,
 built in the deploy worktree, which holds nothing but main, together with
 the Windows apps of the same commit, which the node hands to other machines
 (the laptop installs and updates from it):
