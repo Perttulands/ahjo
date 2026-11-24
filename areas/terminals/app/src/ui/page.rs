@@ -401,6 +401,9 @@ pub struct Terminals {
     pub rail_scroll: gpui::ScrollHandle,
     /// Where the last menu a row was picked from stood.
     pub menu_at: Point<Pixels>,
+    /// How many links were clicked: a printed path's answer from its
+    /// device opens only if no link was clicked after it.
+    pub(super) link_clicks: u64,
     /// Ended sessions being made again, until their node answers.
     pub restarting: HashSet<Key>,
     /// The wheel with Ctrl held, between its steps.
@@ -539,6 +542,7 @@ impl Terminals {
             group_bounds: Default::default(),
             rail_scroll: Default::default(),
             menu_at: Point::default(),
+            link_clicks: 0,
             restarting: HashSet::new(),
             zoom_wheel: Default::default(),
             seen_sent: HashMap::new(),

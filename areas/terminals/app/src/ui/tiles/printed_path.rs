@@ -12,6 +12,9 @@
 //! One place found opens; several are offered in a menu at the click; none
 //! is said on the status line, except that a path with spaced readings of
 //! which none stands opens as printed, for Files to say it is not found.
+//! A search the device cut short is never taken for the one place: what
+//! it found is offered with a line saying the list is incomplete. An
+//! answer that comes after another link was clicked is dropped.
 
 use super::super::page::{Act, MenuItem, Terminals};
 use crate::remotes::PaneAt;
@@ -58,6 +61,9 @@ impl Opening {
 
 /// The most places a menu offers for one printed path.
 const OFFERED: usize = 8;
+
+/// The menu's last line when the device stopped its search early.
+const INCOMPLETE: &str = "The search stopped early: there may be others";
 
 /// How a path shortened with `…` is found: the folder searched, the text
 /// looked for, and the ends a place found keeps (`head` its start, `tail`
@@ -131,11 +137,43 @@ impl Ends {
 }
 
 /// What the device answered for a printed path.
+#[derive(Debug, PartialEq, Eq)]
 enum Found {
-    /// The places it names.
-    Places(Vec<String>),
+    /// The places it names; `incomplete` when the search stopped before
+    /// it had looked everywhere, so there may be more.
+    Places {
+        places: Vec<String>,
+        incomplete: bool,
+    },
     /// Nothing; the words say where it was looked for.
     Nothing(String),
+}
+
+impl Found {
+    fn all(places: Vec<String>) -> Found {
+        Found::Places {
+            places,
+            incomplete: false,
+        }
+    }
+
+    /// What a search for `printed` by its ends found in `paths`, the
+    /// device's answer, which it cut short when `truncated`.
+    fn searched(printed: &str, ends: &Ends, paths: &[String], truncated: bool) -> Found {
+        match ends.named(paths) {
+            places if places.is_empty() && truncated => Found::Nothing(format!(
+                "{printed} names no file in the part of {} searched; the search stopped early",
+                ends.under
+            )),
+            places if places.is_empty() => {
+                Found::Nothing(format!("{printed} names no file under {}", ends.under))
+            }
+            places => Found::Places {
+                places,
+                incomplete: truncated,
+            },
+        }
+    }
 }
 
 impl Terminals {
@@ -158,16 +196,18 @@ impl Terminals {
         let id = session.map(|s| s.id.clone()).unwrap_or_default();
         let home = self.home_of(&pane.node);
         let node = NodeId(pane.node.clone());
-        let relative = std::iter::once(&printed)
-            .chain(&link.spaced)
-            .any(|p| !p.starts_with(['/', '~']));
+        // A shortened path is looked for from the pane's folder too.
+        let relative = printed.contains('…')
+            || std::iter::once(&printed)
+                .chain(&link.spaced)
+                .any(|p| !p.starts_with(['/', '~']));
         let windows = (relative && !id.is_empty()).then(|| {
             self.host
                 .call(node.clone(), SessionListWindows { session: id }, cx)
         });
         let asks = printed.contains('…') || !link.spaced.is_empty();
         if windows.is_none() && !asks {
-            let path = links::in_home(&links::resolve(cwd.as_deref(), &printed), home.as_deref());
+            let path = links::locate(cwd.as_deref(), &printed, home.as_deref());
             let opening = Opening {
                 node: pane.node,
                 path,
@@ -176,7 +216,7 @@ impl Terminals {
             };
             return self.ask_link(opening.ask(), cx);
         }
-        self.menu_at = at;
+        let click = self.link_clicks;
         let column = link.column;
         cx.spawn(async move |this, cx| {
             let folder = match windows {
@@ -188,15 +228,14 @@ impl Terminals {
                     .or(cwd),
                 None => cwd,
             };
-            let place =
-                |p: &str| links::in_home(&links::resolve(folder.as_deref(), p), home.as_deref());
+            let place = |p: &str| links::locate(folder.as_deref(), p, home.as_deref());
             let found = if printed.contains('…') {
                 match Ends::of(&printed, folder.as_deref(), place) {
                     Some(ends) => find(&this, &node, &printed, ends, cx).await,
                     None => Found::Nothing(format!("{printed} names no file")),
                 }
             } else if link.spaced.is_empty() {
-                Found::Places(vec![place(&printed)])
+                Found::all(vec![place(&printed)])
             } else {
                 // The word as printed is a reading too: where both stand,
                 // both are offered.
@@ -207,8 +246,8 @@ impl Terminals {
                     .map(|p| place(p))
                     .collect();
                 match stat(&this, &node, readings, cx).await {
-                    found if found.is_empty() => Found::Places(vec![place(&printed)]),
-                    found => Found::Places(found),
+                    found if found.is_empty() => Found::all(vec![place(&printed)]),
+                    found => Found::all(found),
                 }
             };
             let opening = |path| Opening {
@@ -218,16 +257,21 @@ impl Terminals {
                 column,
             };
             let _ = this.update(cx, |s, cx| match found {
+                // Another link was clicked meanwhile: this one is let go.
+                _ if s.link_clicks != click => {}
                 Found::Nothing(words) => {
                     s.report(&words, true, None);
                     s.flush(cx);
                     cx.notify();
                 }
-                Found::Places(places) if places.len() == 1 => {
+                Found::Places {
+                    places,
+                    incomplete: false,
+                } if places.len() == 1 => {
                     let path = places.into_iter().next().expect("one");
                     s.ask_link(opening(path).ask(), cx)
                 }
-                Found::Places(places) => {
+                Found::Places { places, incomplete } => {
                     let mut items: Vec<MenuItem> = places
                         .iter()
                         .take(OFFERED)
@@ -237,8 +281,11 @@ impl Terminals {
                         let more = places.len() - OFFERED;
                         items.push(MenuItem::note(format!("and {more} more")));
                     }
+                    if incomplete {
+                        items.push(MenuItem::note(INCOMPLETE.to_string()));
+                    }
                     let rows = items.into_iter().map(|i| i.row(&s.me)).collect();
-                    s.host.menu(rows, s.menu_at, cx);
+                    s.host.menu(rows, at, cx);
                 }
             });
         })
@@ -261,7 +308,7 @@ async fn find(
         beside: None,
     };
     let Ok(task) = this.update(cx, |s, cx| s.host.call(node.clone(), search, cx)) else {
-        return Found::Places(Vec::new());
+        return Found::all(Vec::new());
     };
     match task.await {
         Ok(found) => {
@@ -270,12 +317,7 @@ async fn find(
                 .into_iter()
                 .map(|m| m.path.replace('\\', "/"))
                 .collect();
-            match ends.named(&paths) {
-                places if places.is_empty() => {
-                    Found::Nothing(format!("{printed} names no file under {}", ends.under))
-                }
-                places => Found::Places(places),
-            }
+            Found::searched(printed, &ends, &paths, found.truncated)
         }
         Err(e) => Found::Nothing(format!("Could not look for {printed}: {}", e.message)),
     }
@@ -386,6 +428,30 @@ mod tests {
         );
         // Nothing found says so: no place, not a guess.
         assert!(e.named(&["/w/claude/other/x.txt".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn a_search_cut_short_is_never_the_one_place() {
+        // Spec 1 of the review: the device answers at most 50 files, and
+        // the one with these ends among them may not be the only one.
+        let e = ends("deep/long-directory-…/target.txt", "/w");
+        let found = ["/w/deep/long-directory-aaaa/target.txt".to_string()];
+        let printed = "deep/long-directory-…/target.txt";
+        assert_eq!(
+            Found::searched(printed, &e, &found, false),
+            Found::all(found.to_vec())
+        );
+        assert_eq!(
+            Found::searched(printed, &e, &found, true),
+            Found::Places {
+                places: found.to_vec(),
+                incomplete: true
+            }
+        );
+        let Found::Nothing(words) = Found::searched(printed, &e, &[], true) else {
+            panic!("nothing found");
+        };
+        assert!(words.contains("stopped early"), "{words}");
     }
 
     #[test]

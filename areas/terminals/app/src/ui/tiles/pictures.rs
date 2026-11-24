@@ -54,10 +54,7 @@ impl Place {
             Target::Path(p, _) if !p.contains('…') && pictures::format(p).is_some() => {
                 Some(Key::File {
                     node: self.node.clone(),
-                    path: links::in_home(
-                        &links::resolve(self.cwd.as_deref(), p),
-                        self.home.as_deref(),
-                    ),
+                    path: links::locate(self.cwd.as_deref(), p, self.home.as_deref()),
                 })
             }
             Target::Diagram(source) => Some(Key::Diagram(source.clone())),

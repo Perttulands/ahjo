@@ -81,7 +81,8 @@ pub fn at<T>(term: &Term<T>, p: Point) -> Option<Link> {
 /// A path as the session's device reads it: one relative to the session's
 /// folder `cwd` is joined to it, `~` is the home the folder is in (`/root`
 /// or `/home/<name>`), and `.` and `..` are taken out. A `~` path from a
-/// folder outside a home stays as it is, for [`in_home`].
+/// folder outside a home stays as it is. [`locate`] reads `~` as the
+/// node's home first.
 pub fn resolve(cwd: Option<&str>, path: &str) -> String {
     let joined = match (cwd, path.strip_prefix('~')) {
         (_, _) if path.starts_with('/') => path.to_string(),
@@ -105,10 +106,16 @@ pub fn resolve(cwd: Option<&str>, path: &str) -> String {
     format!("/{}", parts.join("/"))
 }
 
-/// A `~` path the folder did not tell the home of ([`resolve`]), in the
-/// node's own home: the session runs as the node's user unless its folder
-/// says otherwise.
-pub fn in_home(path: &str, home: Option<&str>) -> String {
+/// A path printed in a session in folder `folder`, on a node whose user's
+/// home is `home`: `~` is that home, as the session runs as the node's
+/// user wherever it has gone, and only when the node has not said its home
+/// is it guessed from the folder ([`resolve`]).
+pub fn locate(folder: Option<&str>, path: &str, home: Option<&str>) -> String {
+    resolve(folder, &in_home(path, home))
+}
+
+/// A `~` path in the node's home `home`, when it is known.
+fn in_home(path: &str, home: Option<&str>) -> String {
     match (path.strip_prefix('~'), home) {
         (Some(rest), Some(home)) if rest.is_empty() || rest.starts_with('/') => {
             resolve(None, &format!("{}{rest}", home.trim_end_matches('/')))
@@ -366,13 +373,18 @@ impl Text {
     }
 
     fn links(&self) -> Vec<Link> {
-        let t = &self.chars;
-        let mut links: Vec<Link> = urls(t)
+        let chars = &self.chars;
+        let mut links: Vec<Link> = urls(chars)
             .into_iter()
-            .map(|(i, n)| Link::new(Target::Url(t[i..i + n].iter().collect()), self.cells(i, n)))
+            .map(|(i, n)| {
+                Link::new(
+                    Target::Url(chars[i..i + n].iter().collect()),
+                    self.cells(i, n),
+                )
+            })
             .collect();
         links.extend(
-            super::mermaid::blocks(t)
+            super::mermaid::blocks(chars)
                 .into_iter()
                 .map(|b| Link::new(Target::Diagram(b.source), self.cells(b.at, b.len))),
         );
@@ -383,13 +395,13 @@ impl Text {
         };
         // A path in quotes is all of it, and a path relative to the pane's
         // folder is one where nothing above is.
-        let quoted = quoted_paths(t);
-        let absolute = paths(t);
+        let quoted = quoted_paths(chars);
+        let absolute = paths(chars);
         let from = links.len();
         let found = quoted
             .iter()
             .chain(&absolute)
-            .chain(&relative_paths(t))
+            .chain(&relative_paths(chars))
             .copied()
             .collect::<Vec<_>>();
         for (i, n) in found {
@@ -402,28 +414,28 @@ impl Text {
             if self.cut(i, n) || overlaps(above, &cells) {
                 continue;
             }
-            let after = &t[i + n..];
+            let after = &chars[i + n..];
             let after = if quoted.contains(&(i, n)) {
                 &after[1..]
             } else {
                 after
             };
             let mut link = Link::new(
-                Target::Path(t[i..i + n].iter().collect(), line_after(after)),
+                Target::Path(chars[i..i + n].iter().collect(), line_after(after)),
                 cells,
             );
             link.column = column_after(after);
             if !quoted.contains(&(i, n)) {
-                link.spaced = spaced(t, i, n);
+                link.spaced = spaced(chars, i, n);
             }
             links.push(link);
         }
         // A URL or path takes precedence over a work-like substring.
-        for (i, n) in work_items(t) {
+        for (i, n) in work_items(chars) {
             let cells = self.cells(i, n);
             if !self.cut(i, n) && !overlaps(&links, &cells) {
                 links.push(Link::new(
-                    Target::WorkItem(t[i..i + n].iter().collect()),
+                    Target::WorkItem(chars[i..i + n].iter().collect()),
                     cells,
                 ));
             }
@@ -616,7 +628,7 @@ fn quoted_paths(t: &[char]) -> Vec<(usize, usize)> {
         };
         let word: String = t[i + 1..i + 1 + len].iter().collect();
         let starts = ["/", "~/", "./", "../"].iter().any(|s| word.starts_with(s));
-        if starts && word.contains(' ') && !word.ends_with(' ') && !word.contains("  ") {
+        if starts && word.contains(' ') && !word.ends_with(' ') {
             out.push((i + 1, len));
             i += len + 2;
         } else {
@@ -1296,6 +1308,12 @@ mod tests {
             link(&s, 1, 50).map(|l| l.target),
             Some(Target::Path(format!("{AUDIT}/My Files/a b.md"), Some(12)))
         );
+        // Quoted, every space is the name's, two in a row too.
+        let s = screen(100, 1, &format!("'{AUDIT}/two  spaces.txt'"));
+        assert_eq!(
+            link(&s, 0, 50).map(|l| l.target),
+            Some(Target::Path(format!("{AUDIT}/two  spaces.txt"), None))
+        );
         // Prose in quotes is not a path.
         let s = screen(60, 1, "said \"it's done\" and './a b' then");
         assert_eq!(link(&s, 0, 7), None);
@@ -1369,23 +1387,25 @@ mod tests {
     }
 
     #[test]
-    fn a_home_path_the_folder_does_not_tell_is_in_the_nodes_home() {
+    fn a_home_path_is_the_nodes_home_from_any_folder() {
         // ahjo-4zw.9: the same `~` path from the home folder, then from
         // /tmp after a `cd`, opens the same file.
         let printed = "~/.cache/ahjo-4zw-path-audit/home.txt";
         let node_home = Some("/home/ana");
-        let from = |cwd| in_home(&resolve(Some(cwd), printed), node_home);
+        let from = |cwd| locate(Some(cwd), printed, node_home);
         let want = "/home/ana/.cache/ahjo-4zw-path-audit/home.txt";
         assert_eq!(from("/home/ana/.cache/ahjo-4zw-path-audit"), want);
         assert_eq!(from("/tmp/claude-1000/ahjo-file-lane/4zw-r1/paths"), want);
-        // A folder in another user's home still says whose `~` it is.
+        // Even from a folder in another user's home: the session is still
+        // Ana's.
+        assert_eq!(from("/home/bo/x"), want);
+        // Only a node that has not said its home leaves it to the folder,
+        // and from outside a home to Files to refuse.
         assert_eq!(
-            from("/home/bo/x"),
+            locate(Some("/home/bo/x"), printed, None),
             "/home/bo/.cache/ahjo-4zw-path-audit/home.txt"
         );
-        // With no home known it is left for Files to refuse.
-        assert_eq!(in_home(printed, None), printed);
-        assert_eq!(in_home("~bo/x", node_home), "~bo/x");
+        assert_eq!(locate(Some("/tmp"), printed, None), printed);
     }
 
     #[test]

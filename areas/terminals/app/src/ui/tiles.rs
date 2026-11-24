@@ -2248,6 +2248,7 @@ impl Terminals {
     /// path in the Files panel ([`printed_path`]), an item's card beside,
     /// and a diagram drawn beside.
     fn open_link(&mut self, i: usize, link: Link, at: gpui::Point<Pixels>, cx: &mut Context<Self>) {
+        self.link_clicks = self.link_clicks.wrapping_add(1);
         let pane = match self.histories.get(&i) {
             Some(h) => Some(h.pane.clone()),
             None => self.slot_pane(i),
