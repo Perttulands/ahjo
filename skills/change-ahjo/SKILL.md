@@ -14,7 +14,7 @@ rules your change touches before you build, not after the review:
 |---|---|
 | A page, or anything else on screen | `DESIGN.md` Principles and the surface it is on; `ARCHITECTURE.md` Kit and its page under App pages; then See it on screen |
 | A page's behaviour: its store, pending choices, replies | `CODING_STANDARDS.md` State and Regression tests; its page under `ARCHITECTURE.md` App pages |
-| A command, contract or node area | `ARCHITECTURE.md` Words, Rules the compiler holds, Errors and its area under Node areas |
+| A command, contract or node area | `GLOSSARY.md`; `ARCHITECTURE.md` Words, Rules the compiler holds, Errors and its area under Node areas |
 | `kit/` | `ARCHITECTURE.md` Kit and Rules the compiler holds; tell the other owners when its interface changes |
 | Install, upgrade or the Windows apps | `ARCHITECTURE.md` Install and upgrade, then [lead-and-deploy.md](lead-and-deploy.md) |
 | Leading lanes, trying a batch on Windows, deploying | [lead-and-deploy.md](lead-and-deploy.md) |

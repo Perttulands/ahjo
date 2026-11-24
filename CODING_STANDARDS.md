@@ -19,7 +19,7 @@ and a skill that names every command. A handler's failure is typed as
 
 **A name says what its value is, with one meaning on every layer.**
 
-Domain words come from `ARCHITECTURE.md` (Words). An id is named after what it
+Domain words come from `GLOSSARY.md`. An id is named after what it
 identifies: `step_id`, or `card_id` where it may be a gate or end, never
 `node_id`. A boolean reads as a question or as its effect: `is_open`,
 `install_completion_hooks`. A shared type in a contract or engine crate carries

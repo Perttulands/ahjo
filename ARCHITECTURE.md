@@ -60,38 +60,15 @@ an area: the shell's Settings page lists what pages declare.
 
 ## Words
 
-One word for one thing, the same from the CLI and the stored file to the
-screen; only the casing changes (`issue_id`, `--issue-id`). `DESIGN.md` says
-what each is for the operator; this is what each word may name in code.
+The words and what they mean are in `GLOSSARY.md`. In code, a word keeps its
+name from the CLI to the stored file to the screen; only the casing changes
+(`issue_id`, `--issue-id`). New code, schema fields and command names use only
+glossary words. An old word left in the code is renamed everywhere the next
+time that code is touched.
 
-| Word | Names only | Not |
-| --- | --- | --- |
-| mission | a plan of steps, gates, limits and ends, saved as one TOML document | board, flow |
-| step | one piece of a mission's work, done by the agents in its seats | formation (as the unit), node |
-| formation | how a step's seats work together: solo, peer or orchestrated | type |
-| seat | a place in a step; an agent sits in it, with its harness, model and effort | slot |
-| agent | a named, reusable setup (instructions, harness, model, effort, notes on how it has done) | role, character |
-| session | a tmux session; where a seat's agent runs during a run | session stem |
-| harness | the program an agent runs in (Claude Code, Codex), and what shapes it in a folder | |
-| card | anything on the mission board: input, step, gate, limit, end | node |
-| node | an Ahjo machine, and nothing else | device |
-| environment | where a step runs | device, place, home |
-| issue | a Beads or GitHub issue: what a step works on, what the Issues page lists | work, work item, task |
-| scheduled prompt | a prompt sent into sessions on a timer (the noun `scheduled`) | task (alone) |
-| run | one time a mission is carried out | |
-| reason | the operator's words given with an approval, pick, abort or resume | response |
-| panel | the shell's one column at the window's edge, where what a page opens beside another stands (`Host::show_panel`, a `PanelView`) | dock, beside view, view beside, beside panel, edge panel, drawer, side panel |
-| side section | a page's part of the shell's left column, which stands on every page; the section shows on the pages its `SideOn` says (`Host::lend_side`): Sessions' rail on every page | side panel |
-| popup | a menu, confirm or small form on the dismissal stack, standing beside what was clicked (`Host::popup`) | popover |
-| layer | a page-wide surface on the dismissal stack, over the page or the window (Overview, Peek, a rename holding the keyboard) | overlay |
-| Peek | a session's terminal over the page, used as in a window, without sizing the session | |
-| Overview | a layer showing every session as a card of its screen | |
-| beside | next to a thing without covering it: a beside ask's answer in the panel, a popup at what was clicked | beside for what lies over (the views beside of 2026-11-13 to 11-23) |
-| Send | Send to Session: a reference and a note handed to one or more sessions, from the panel | drawer, Send drawer |
-
-Words in the Not column are retired. Leftovers in the code are renamed whole
-when touched; new code, schema fields and command names use only the left
-column.
+Where the screen words live in code: the panel is `Host::show_panel` with a
+`PanelView`, a side section is `Host::lend_side` with its `SideOn`, a popup is
+`Host::popup`.
 
 ## Rules the compiler holds
 

@@ -13,7 +13,7 @@ and improved with `ahjo agent list|show|create|edit|delete`, and seats name an
 agent. A **harness** is the program an agent runs in (Claude Code, Codex) and
 what shapes it in a folder: instruction files, skills, hooks and settings. That
 is the harness area (`areas/harness`, `ahjo harness`, the Harness tab).
-`ARCHITECTURE.md` (Words) holds both words.
+`GLOSSARY.md` holds both words.
 
 ## Why
 

@@ -5,7 +5,7 @@ workspace: terminals, files, work, host and missions in one Rust binary, used
 through a native app and the `ahjo` CLI, which also reaches the brain. Ahjo
 Brain and Ahjo Desk are standalone apps. `VISION.md` says what Swarm is for,
 `DESIGN.md` what good looks like in the app, `ARCHITECTURE.md` how it is built
-(its boundaries, Words and Kit) and `CODING_STANDARDS.md` what a review holds a
+(its boundaries and Kit), `GLOSSARY.md` what its words mean and `CODING_STANDARDS.md` what a review holds a
 change to. `skills/change-ahjo` says where a change lives, how to build and
 check it, and how it reaches the operator's machine.
 
