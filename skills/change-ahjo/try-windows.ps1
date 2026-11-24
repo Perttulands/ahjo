@@ -35,11 +35,11 @@ function Write-Utf8([string]$name, [string]$text) {
 function Invoke-Page($page, [string]$script) {
     $ws = New-Object System.Net.WebSockets.ClientWebSocket
     $none = [Threading.CancellationToken]::None
-    $ws.ConnectAsync([Uri]$page.webSocketDebuggerUrl, $none).Wait()
+    $ws.ConnectAsync([Uri]$page.webSocketDebuggerUrl, $none).Wait() | Out-Null
     $ask = @{ id = 1; method = "Runtime.evaluate";
               params = @{ expression = $script; returnByValue = $true; awaitPromise = $true } } | ConvertTo-Json -Compress -Depth 5
     $bytes = [Text.Encoding]::UTF8.GetBytes($ask)
-    $ws.SendAsync((New-Object ArraySegment[byte] (,$bytes)), "Text", $true, $none).Wait()
+    $ws.SendAsync((New-Object ArraySegment[byte] (,$bytes)), "Text", $true, $none).Wait() | Out-Null
     # Events may come first: read messages until the answer to id 1.
     $answer = $null
     while (-not $answer) {
@@ -200,6 +200,7 @@ public static class Win {
         "type" {
             $app, $text = $words[1], ($words[2..($words.Count - 1)] -join " ")
             $h = Focus-Of (Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0])))
+            Write-Utf8 "result.txt" (Class-Of $h)
             foreach ($c in $text.ToCharArray()) {
                 [Win]::PostMessage($h, 0x0102, [IntPtr][int]$c, [IntPtr]1) | Out-Null  # WM_CHAR
                 Start-Sleep -Milliseconds 20
@@ -212,6 +213,7 @@ public static class Win {
                      left = 0x25; up = 0x26; right = 0x27; down = 0x28 }[$name]
             if (-not $vk) { throw "no key '$name'" }
             $h = Focus-Of (Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0])))
+            Write-Utf8 "result.txt" (Class-Of $h)
             [Win]::PostMessage($h, 0x0100, [IntPtr]$vk, [IntPtr]1) | Out-Null           # WM_KEYDOWN
             Start-Sleep -Milliseconds 50
             [Win]::PostMessage($h, 0x0101, [IntPtr]$vk, [IntPtr]0xC0000001) | Out-Null  # WM_KEYUP
@@ -226,7 +228,10 @@ public static class Win {
             $pages = @()
             while ($pages.Count -eq 0 -and $clock.Elapsed.TotalSeconds -lt 20) {
                 try {
-                    $pages = @(Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 2 |
+                    # Windows PowerShell hands a JSON array on as one object:
+                    # assigned first, it is taken apart item by item.
+                    $list = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 2
+                    $pages = @($list | ForEach-Object { $_ } |
                         Where-Object { $_.type -eq "page" -and $_.url -notlike "about:*" })
                 } catch { }
                 if ($pages.Count -eq 0) { Start-Sleep -Milliseconds 250 }

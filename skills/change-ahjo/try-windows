@@ -387,7 +387,9 @@ for walked in "${walk[@]}"; do
     click)
       step click "$app" $rest
       say "$app click $rest landed in $(tr -d '\r' < "$RUN/result.txt")" ;;
-    type|key) step "$verb" "$app" "$rest" ;;
+    type|key)
+      step "$verb" "$app" "$rest"
+      say "$app $verb $rest went to $(tr -d '\r' < "$RUN/result.txt")" ;;
     eval)
       step eval "$app" "$rest"
       value=$(tr -d '\r' < "$RUN/result.txt")

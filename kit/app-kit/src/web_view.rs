@@ -510,7 +510,10 @@ mod imp {
             let mut context = WebContext::new(opening.data_dir);
             let mut builder = WebViewBuilder::new_with_web_context(&mut context)
                 .with_url(&opening.url)
-                .with_visible(false);
+                .with_visible(false)
+                // wry gives a new view the keyboard; a page gets it only
+                // when the operator clicks into it.
+                .with_focused(false);
             for (script, main_only) in &opening.scripts {
                 builder = builder.with_initialization_script_for_main_only(script, *main_only);
             }
