@@ -114,7 +114,7 @@ pub(crate) fn run_judges(
             "judge",
             index + 1 == count,
             None,
-            Vec::new(),
+            Default::default(),
         )?;
         if index + 1 != count {
             record_output(c, id, req, workspace, control, &judge.id, attempt, &result)?;

@@ -1191,7 +1191,11 @@ impl MissionsPage {
                 .items_center()
                 .gap(px(size::HEAD_GAP));
             if let Some(pick) = &gate.pick {
-                for line in crate::store::gate::picking_words(pick, "") {
+                let name = |id: &str| match mission {
+                    Some(mission) => crate::store::gate::source(mission, id),
+                    None => id.to_owned(),
+                };
+                for line in crate::store::gate::picking_words(pick, "", name) {
                     if !line.is_empty() {
                         row = row.child(div().text_color(t.text2).child(line));
                     }
@@ -1214,24 +1218,24 @@ impl MissionsPage {
                         )),
                     );
                 }
-                if let Some(candidates) = pick.get("candidates").and_then(|v| v.as_array()) {
-                    for candidate in candidates.iter().filter_map(|v| v.as_i64()) {
-                        let gate = gate_id.clone();
-                        actions = actions.child(
+                for (index, choice) in crate::store::gate::pick_choices(pick, name)
+                    .into_iter()
+                    .enumerate()
+                {
+                    let gate = gate_id.clone();
+                    let candidate = (choice.step, choice.attempt);
+                    actions =
+                        actions.child(
                             kit::button(
                                 t,
-                                (
-                                    SharedString::from(format!("pick-{gate_id}")),
-                                    candidate as usize,
-                                ),
-                                format!("Pick {candidate}"),
+                                (SharedString::from(format!("pick-{gate_id}")), index),
+                                choice.label,
                                 Kind::Primary,
                             )
-                            .on_click(
-                                cx.listener(move |p, _, _, cx| p.pick(&gate, seq, candidate, cx)),
-                            ),
+                            .on_click(cx.listener(
+                                move |p, _, _, cx| p.pick(&gate, seq, candidate.clone(), cx),
+                            )),
                         );
-                    }
                 }
             } else {
                 for line in routes {

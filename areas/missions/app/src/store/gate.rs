@@ -72,20 +72,68 @@ pub fn source(mission: &ahjo_missions_contract::Mission, id: &str) -> String {
         title.into()
     }
 }
-/// Names candidates and the judge's recommendation in a pick request.
-pub fn picking_words(pick: &serde_json::Value, goes: &str) -> Vec<String> {
-    let attempts = pick
+/// One candidate of a pick request: the step to name when several steps
+/// feed the gate, the attempt, and its button's words.
+#[derive(Debug, PartialEq)]
+pub struct PickChoice {
+    pub step: Option<String>,
+    pub attempt: i64,
+    pub label: String,
+}
+
+/// The candidates of a pick request: a step's own attempts by number, or
+/// the outputs of several steps feeding the gate by step, titled by `name`.
+pub fn pick_choices(pick: &serde_json::Value, name: impl Fn(&str) -> String) -> Vec<PickChoice> {
+    (pick
         .get("candidates")
         .and_then(|v| v.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|v| v.as_i64())
-        .map(|n| n.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let mut words = vec![format!(
-        "The step's limit is spent. Its gate judged attempts {attempts}; take the best one."
-    )];
+        .into_iter())
+    .flatten()
+    .filter_map(|candidate| {
+        if let Some(attempt) = candidate.as_i64() {
+            return Some(PickChoice {
+                step: None,
+                attempt,
+                label: format!("Pick {attempt}"),
+            });
+        }
+        let step = candidate.get("step_id")?.as_str()?;
+        Some(PickChoice {
+            step: Some(step.to_owned()),
+            attempt: candidate.get("attempt")?.as_i64()?,
+            label: format!("Pick {}", name(step)),
+        })
+    })
+    .collect()
+}
+
+/// Names candidates and the judge's recommendation in a pick request.
+pub fn picking_words(
+    pick: &serde_json::Value,
+    goes: &str,
+    name: impl Fn(&str) -> String,
+) -> Vec<String> {
+    let choices = pick_choices(pick, &name);
+    let gathered = choices.iter().any(|choice| choice.step.is_some());
+    let mut words = vec![if gathered {
+        let steps: Vec<_> = (choices.iter())
+            .filter_map(|choice| choice.step.as_deref())
+            .map(&name)
+            .collect();
+        let steps = match steps.as_slice() {
+            [rest @ .., last] if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+            _ => steps.concat(),
+        };
+        format!(
+            "{steps} did this work side by side. Take the best output; the others stay in the attempts."
+        )
+    } else {
+        let attempts: Vec<_> = choices.iter().map(|c| c.attempt.to_string()).collect();
+        format!(
+            "The step's limit is spent. Its gate judged attempts {}; take the best one.",
+            attempts.join(", ")
+        )
+    }];
     if let Some(rec) = pick.get("recommendation")
         && let Some(attempt) = rec.get("attempt").and_then(|v| v.as_i64())
     {
@@ -94,10 +142,14 @@ pub fn picking_words(pick: &serde_json::Value, goes: &str) -> Vec<String> {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .trim();
+        let what = match rec.get("step_id").and_then(|v| v.as_str()) {
+            Some(step) if gathered => name(step),
+            _ => format!("attempt {attempt}"),
+        };
         words.push(if why.is_empty() {
-            format!("The judge recommends attempt {attempt}.")
+            format!("The judge recommends {what}.")
         } else {
-            format!("The judge recommends attempt {attempt}: {why}")
+            format!("The judge recommends {what}: {why}")
         });
     }
     words.push(goes.to_owned());
@@ -129,10 +181,38 @@ mod tests {
         assert_eq!(source(&mission, ""), "upstream step");
     }
     #[test]
+    fn a_pick_among_steps_names_each_step_and_picks_by_step() {
+        let pick = serde_json::json!({"candidates":[{"step_id":"fmn_a","attempt":1},{"step_id":"fmn_b","attempt":2}], "recommendation":{"step_id":"fmn_b","attempt":2,"reason":"tighter"}});
+        let name = |id: &str| id.trim_start_matches("fmn_").to_uppercase();
+        assert_eq!(
+            pick_choices(&pick, name),
+            [
+                PickChoice {
+                    step: Some("fmn_a".into()),
+                    attempt: 1,
+                    label: "Pick A".into()
+                },
+                PickChoice {
+                    step: Some("fmn_b".into()),
+                    attempt: 2,
+                    label: "Pick B".into()
+                }
+            ]
+        );
+        assert_eq!(
+            picking_words(&pick, "goes", name),
+            [
+                "A and B did this work side by side. Take the best output; the others stay in the attempts.",
+                "The judge recommends B: tighter",
+                "goes"
+            ]
+        );
+    }
+    #[test]
     fn a_pick_request_names_its_attempts_and_the_judges_choice() {
         let pick = serde_json::json!({"candidates":[1,2], "recommendation":{"attempt":2,"reason":"tighter"}});
         assert_eq!(
-            picking_words(&pick, "goes"),
+            picking_words(&pick, "goes", str::to_owned),
             [
                 "The step's limit is spent. Its gate judged attempts 1, 2; take the best one.",
                 "The judge recommends attempt 2: tighter",

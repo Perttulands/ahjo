@@ -1,6 +1,6 @@
 //! Wires and routes: every connection joins existing ports, each input has
-//! one producer, every gate can route, every route leads somewhere, and the
-//! Input card reaches the rest.
+//! one producer (a gate may take several steps and pick one), every gate can
+//! route, every route leads somewhere, and the Input card reaches the rest.
 
 use std::collections::{HashMap, HashSet};
 
@@ -35,27 +35,32 @@ pub fn connection_findings(mission: &Mission) -> Vec<Finding> {
             ));
         }
     }
-    // A gate's fail route into a fed input is the pushback route, and an End
-    // takes any number of routes; neither counts as a second producer.
-    let mut producers: HashMap<&str, &str> = HashMap::new();
+    // A gate's fail route into a fed input is the pushback route, an End
+    // takes any number of routes, and a gate picks among several steps that
+    // feed it; none of these counts as a second producer.
+    let mut producers: HashMap<&str, Vec<&ahjo_mission_model::Connection>> = HashMap::new();
     for connection in &mission.connections {
         if graph::is_gate_fail(mission, &connection.from)
             || graph::is_end_input(mission, &connection.to)
         {
             continue;
         }
-        if let Some(first) = producers.get(connection.to.as_str()) {
+        let earlier = producers.entry(&connection.to).or_default();
+        let froms: Vec<&str> = earlier.iter().map(|c| c.from.as_str()).collect();
+        if let Some(first) = earlier.first()
+            && !graph::joins_gate(mission, &froms, &connection.from, &connection.to)
+        {
             findings.push(Finding::new(
                 Code::DuplicateInputProducer,
                 &connection.id,
                 format!(
-                    "connection {:?} is a second producer for input {:?}; it is already produced by connection {first:?}",
-                    connection.id, connection.to
+                    "connection {:?} is a second producer for input {:?}; it is already produced by connection {:?}",
+                    connection.id, connection.to, first.id
                 ),
             ));
             continue;
         }
-        producers.insert(&connection.to, &connection.id);
+        earlier.push(connection);
     }
     findings
 }
@@ -82,11 +87,15 @@ fn route_gaps(mission: &Mission, gate: &Gate) -> Vec<String> {
     }
     let mut gaps = Vec::new();
     let mut seen = HashSet::new();
+    let gathers = graph::gathers(mission, &gate.id);
     for kind in &gate.kinds {
         if !seen.insert(*kind) {
             continue;
         }
         match kind {
+            GateKind::Code if gathers => gaps.push(
+                "a judge or you in place of its code check: several steps feed it, and a check cannot pick one of their outputs".to_owned(),
+            ),
             GateKind::Code => gaps.extend(code_check_gap(gate)),
             GateKind::Step if graph::judge_chain(mission, &gate.id).is_empty() => {
                 gaps.push(
@@ -279,4 +288,63 @@ pub fn unreachable_findings(mission: &Mission) -> Vec<Finding> {
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ahjo_mission_model::{Connection, Port, Step};
+
+    fn mission(kinds: Vec<GateKind>, wires: &[(&str, &str)]) -> Mission {
+        let port = |id: &str| {
+            vec![Port {
+                id: id.into(),
+                ..Port::default()
+            }]
+        };
+        Mission {
+            steps: ["a", "b"]
+                .map(|id| Step {
+                    id: id.into(),
+                    inputs: port("in"),
+                    outputs: port("out"),
+                    ..Step::default()
+                })
+                .into(),
+            gates: ["gate", "other"]
+                .map(|id| Gate {
+                    id: id.into(),
+                    kinds: kinds.clone(),
+                    ..Gate::default()
+                })
+                .into(),
+            connections: (wires.iter().enumerate())
+                .map(|(i, (from, to))| Connection {
+                    id: format!("edge_{i}"),
+                    from: (*from).into(),
+                    to: (*to).into(),
+                })
+                .collect(),
+            ..Mission::default()
+        }
+    }
+
+    #[test]
+    fn several_steps_may_feed_a_gate_that_a_judge_or_you_decide() {
+        let gathered = [("a:out", "gate:in"), ("b:out", "gate:in")];
+        let human = mission(vec![GateKind::Human], &gathered);
+        assert!(connection_findings(&human).is_empty());
+        assert!(route_gaps(&human, &human.gates[0]).is_empty());
+        let code = mission(vec![GateKind::Code], &gathered);
+        assert!(route_gaps(&code, &code.gates[0])[0].contains("a check cannot pick"));
+        for mixed in [
+            [("a:out", "gate:in"), ("a:out", "gate:in")],
+            [("a:out", "gate:in"), ("other:pass", "gate:in")],
+            [("a:out", "b:in"), ("other:pass", "b:in")],
+        ] {
+            let findings = connection_findings(&mission(vec![GateKind::Human], &mixed));
+            assert_eq!(findings.len(), 1, "{mixed:?}");
+            assert_eq!(findings[0].code, Code::DuplicateInputProducer);
+        }
+    }
 }

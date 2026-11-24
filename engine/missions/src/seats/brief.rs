@@ -120,6 +120,7 @@ fn render_for(request: &StepExecution, seat: &Seat, final_output: bool) -> Strin
         brief.push_str(&crate::run_pick::contract(
             request.judge,
             &request.pick_attempts,
+            &request.pick_steps,
         ));
     } else if final_output && request.judge {
         brief.push_str("Return exactly one fenced `ahjo-verdict` block containing JSON with exactly `verdict` (pass or fail), `reason` (string), and `evidence` (array of strings).\n");
@@ -173,6 +174,7 @@ mod tests {
             attempt: 1,
             judge: false,
             pick_attempts: Vec::new(),
+            pick_steps: Vec::new(),
             canceled: Default::default(),
             stopping: Default::default(),
             limits: Default::default(),

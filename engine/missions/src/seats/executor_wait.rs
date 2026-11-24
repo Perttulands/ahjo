@@ -197,6 +197,7 @@ fn execution(turn: Option<TurnWorkspace>, canceled: Arc<AtomicBool>) -> StepExec
         attempt: 1,
         judge: false,
         pick_attempts: Vec::new(),
+        pick_steps: Vec::new(),
         canceled,
         stopping: Arc::new(AtomicBool::new(false)),
         limits: Default::default(),

@@ -177,11 +177,17 @@ pub fn gate_commands(run: &str, gate: &WaitingGate) -> Vec<String> {
             .into_iter()
             .flatten()
             .filter_map(|candidate| {
+                let step = match candidate["step_id"].as_str() {
+                    Some(step) => format!(" --step {}", shell_word(step)),
+                    None => String::new(),
+                };
                 candidate
                     .as_i64()
                     .or_else(|| candidate["attempt"].as_i64())
                     .map(|attempt| {
-                        format!("ahjo run pick {run} {gate_arg} --seq {seq} --attempt {attempt}")
+                        format!(
+                            "ahjo run pick {run} {gate_arg} --seq {seq}{step} --attempt {attempt}"
+                        )
                     })
             })
             .collect()

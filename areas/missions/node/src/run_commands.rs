@@ -363,6 +363,7 @@ fn pick(m: &Missions, args: RunPick) -> Result<DecisionRecorded, Error> {
         gate,
         HumanPick {
             requested_seq: args.seq,
+            step: args.step.unwrap_or_default(),
             attempt: args.attempt,
             reason: args.reason.unwrap_or_default(),
             relayed_by: args.relayed_by.unwrap_or_default(),

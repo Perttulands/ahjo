@@ -885,7 +885,7 @@ impl Executor for SeatExecutor {
                     let execution = StepExecution {
                         run_id: request.run_id.clone(), prefix: String::new(), keep_sessions: original.keep, step: request.step.clone(),
                         bindings: crate::BindingsSnapshot { schema: 1, run_id: request.run_id.clone(), mission_id: String::new(), mission_slug: String::new(), mission_rev: 0, input_card_id: String::new(), bindings: Vec::new(), gate_bindings: Vec::new() },
-                        cwd: original.cwd, turn: original.turn, artifact_dir: request.artifact_dir.clone(), context_paths: Vec::new(), issue: String::new(), inputs: Vec::new(), input_text: String::new(), attempt: request.attempt, judge: true, pick_attempts: Vec::new(),
+                        cwd: original.cwd, turn: original.turn, artifact_dir: request.artifact_dir.clone(), context_paths: Vec::new(), issue: String::new(), inputs: Vec::new(), input_text: String::new(), attempt: request.attempt, judge: true, pick_attempts: Vec::new(), pick_steps: Vec::new(),
                         canceled: request.canceled.clone().unwrap_or_default(), stopping: request.stopping.clone().unwrap_or_default(), limits: Default::default(),
                     };
                     self.judges.lock().map_err(|e| e.to_string())?.insert((request.run_id.clone(), request.step_id.clone(), request.attempt), HeldJudge { request: execution, definition, original: original.reuse_dispatch.unwrap_or_else(|| request.dispatch_id.clone()), seat, prompt: original.brief });

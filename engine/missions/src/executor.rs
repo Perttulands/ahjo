@@ -36,6 +36,10 @@ pub struct StepExecution {
     /// spent, the candidate attempts: the final judge picks with the
     /// `ahjo-pick` contract, earlier judges recommend.
     pub pick_attempts: Vec<i64>,
+    /// Where several steps feed the gate, the step of each candidate in
+    /// `pick_attempts`, in the same order; the pick names a step and its
+    /// attempt. Empty otherwise.
+    pub pick_steps: Vec<String>,
     pub canceled: Arc<AtomicBool>,
     pub stopping: Arc<AtomicBool>,
     pub limits: crate::AttemptLimits,

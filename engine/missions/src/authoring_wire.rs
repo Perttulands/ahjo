@@ -150,11 +150,13 @@ pub(crate) fn apply(
                 return Err(Error::new("duplicate_connection", "wire already exists"));
             }
             let fail = |s: &str| crate::graph::is_gate_fail(mission, s);
+            let feeding: Vec<&str> = (mission.connections.iter())
+                .filter(|c| c.to == to && !fail(&from) && !fail(&c.from))
+                .map(|c| c.from.as_str())
+                .collect();
             let occupied = mission.end(to_node).is_none()
-                && mission
-                    .connections
-                    .iter()
-                    .any(|c| c.to == to && !fail(&from) && !fail(&c.from));
+                && !feeding.is_empty()
+                && !crate::graph::joins_gate(mission, &feeding, &from, &to);
             if occupied {
                 if !join_if_occupied || mission.step(to_node).is_none() {
                     return Err(Error::new("input_occupied", "input already has a wire"));

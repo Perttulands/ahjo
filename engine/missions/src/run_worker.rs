@@ -441,7 +441,7 @@ fn execute_inner(
         reason,
         false,
         None,
-        Vec::new(),
+        Default::default(),
     )?;
     let text = result.text;
     if let Some(escalation) = crate::parse_escalation(&text, id) {

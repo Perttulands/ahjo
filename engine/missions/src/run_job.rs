@@ -28,7 +28,7 @@ pub(crate) fn execute_step(
     reason: &str,
     final_judge: bool,
     started: Option<mpsc::SyncSender<()>>,
-    pick_attempts: Vec<i64>,
+    (pick_attempts, pick_steps): (Vec<i64>, Vec<String>),
 ) -> io::Result<crate::StepResult> {
     let mut step = mission
         .step(&node)
@@ -144,6 +144,7 @@ pub(crate) fn execute_step(
         attempt,
         judge: final_judge,
         pick_attempts,
+        pick_steps,
         canceled: control.canceled.clone(),
         stopping: control.stopping.clone(),
         limits: limits.clone(),
@@ -573,7 +574,7 @@ pub(crate) fn start_ready(
                 reason,
                 false,
                 Some(started),
-                Vec::new(),
+                Default::default(),
             );
             let _ = done.send(Finished::Step(node, attempt, result));
             let _ = wake.send(());

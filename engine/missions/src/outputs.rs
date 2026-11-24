@@ -251,7 +251,11 @@ type Origin = (String, String, i64);
 fn picked(events: &[RunEvent]) -> HashMap<Origin, serde_json::Value> {
     let mut result = HashMap::new();
     for event in events.iter().filter(|e| e.kind == "gate_verdict") {
-        let Some(pick) = event.data.get("pick") else {
+        // A pick among several steps feeding a gate is the gate's ordinary
+        // decision, not work carried on past a spent limit.
+        let Some(pick) = (event.data.get("pick")).filter(|pick| {
+            pick.get("trigger").and_then(|v| v.as_str()) != Some(crate::run_pick::GATHERED)
+        }) else {
             continue;
         };
         let Some(origin) = event

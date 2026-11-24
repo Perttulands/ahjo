@@ -116,6 +116,9 @@ pub struct HumanVerdict {
 pub struct HumanPick {
     /// The exact pending request picked on.
     pub requested_seq: u64,
+    /// The picked attempt's step, needed where several steps feed the gate.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub step: String,
     pub attempt: i64,
     pub reason: String,
     /// The seat ID of the seat that typed a pick the actor made.

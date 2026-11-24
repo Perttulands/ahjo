@@ -79,8 +79,9 @@ decision!(/// Approve a pending human gate.
     RunApprove);
 decision!(/// Reject a pending human gate.
     RunReject);
-decision!(/// Pick an attempt at a pending human gate.
-    RunPick attempt: i64);
+decision!(/// Pick an attempt at a pending human gate. Where several steps feed
+    /// the gate, name the picked attempt's step too.
+    RunPick attempt: i64, step: Option<String>);
 
 /// Abort a run.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]

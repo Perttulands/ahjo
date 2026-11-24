@@ -35,10 +35,15 @@ reads.
   document, and a person can understand it at a glance.
 - A **step** is one piece of the work. **Agents** sit in the step's seats and
   work on an **issue**.
-- A **gate** decides on a step's result. A gate has three parts:
+- A **gate** decides on a step's result. When several steps did the same
+  work side by side, the gate chooses the best result instead. A gate has
+  three parts:
   - a condition;
-  - who decides it: an agent, code or the operator;
+  - who decides it: an agent, code or the operator. Only an agent or the
+    operator can choose among several results;
   - for each answer, where the work goes next.
+
+  Only the chosen result goes on. The others are kept to look at.
 - An **agent** is a named setup you can reuse. It is made good and keeps
   getting better. What the agent has learned is written down beside it.
 - A **run** is one time a mission is carried out.

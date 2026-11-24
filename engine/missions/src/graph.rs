@@ -90,6 +90,44 @@ pub fn is_end_input(mission: &Mission, endpoint: &str) -> bool {
         .is_some_and(|(node, port)| port == END_IN && mission.end(node).is_some())
 }
 
+/// The steps whose output feeds a gate's `in`, in wire order, each once.
+pub fn gate_feeders<'a>(mission: &'a Mission, gate: &str) -> Vec<&'a str> {
+    let mut feeders = Vec::new();
+    for connection in &mission.connections {
+        let from = endpoint_card(&connection.from);
+        if endpoint_card(&connection.to) == gate
+            && endpoint_port(&connection.to) == GATE_IN
+            && mission.gate(gate).is_some()
+            && mission.step(from).is_some()
+            && !feeders.contains(&from)
+        {
+            feeders.push(from);
+        }
+    }
+    feeders
+}
+
+/// Whether a gate picks one output among several steps that feed it.
+pub fn gathers(mission: &Mission, gate: &str) -> bool {
+    gate_feeders(mission, gate).len() > 1
+}
+
+/// Whether a wire from `from` may feed the gate input `to` beside the wires
+/// from `earlier` already there: each comes from the output of a step of its
+/// own, and the gate picks one of their outputs.
+pub fn joins_gate(mission: &Mission, earlier: &[&str], from: &str, to: &str) -> bool {
+    let step_output = |endpoint: &str| {
+        mission.step(endpoint_card(endpoint)).is_some()
+            && endpoint_allows(mission, endpoint, Direction::Output)
+    };
+    mission.gate(endpoint_card(to)).is_some()
+        && endpoint_port(to) == GATE_IN
+        && step_output(from)
+        && earlier
+            .iter()
+            .all(|e| step_output(e) && endpoint_card(e) != endpoint_card(from))
+}
+
 /// Every node a run reaches from `root` by following wires, `root` included.
 pub fn reachable(mission: &Mission, root: &str) -> HashSet<String> {
     let mut reached = HashSet::from([root.to_owned()]);

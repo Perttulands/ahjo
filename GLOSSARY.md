@@ -28,8 +28,9 @@ How a step's seats work together: one agent alone (solo), agents side by side
 _Avoid_: type
 
 **Gate**:
-A check between steps that passes or fails what a step made. You, a judge
-agent or a code check decides.
+A check between steps that passes or fails what a step made, or picks the
+best of what several steps made side by side. You, a judge agent or a code
+check decides; only you or a judge can pick.
 
 **Run**:
 One time a mission is carried out.

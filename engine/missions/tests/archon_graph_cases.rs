@@ -480,10 +480,11 @@ fn changing_gate_kinds_detaches_judge_without_touching_layout() {
     assert_eq!(edit.mission.gates[0].check_value, "");
 }
 
-// Gates never grow another input and
-// stale callers are rejected even when the current input is occupied.
+// Gates never grow another input: several steps may feed a gate's one
+// input, which picks among them, but nothing else joins them there, and
+// stale callers are rejected.
 #[test]
-fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
+fn join_feeds_a_gates_one_input_from_steps_only_and_rejects_stale_writes() {
     let dir = Scratch::new();
     let store = Store::new(&dir.0);
     let mut edit = store.create_mission("join-gate", "Join gate", "").unwrap();
@@ -502,24 +503,26 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
             )
             .unwrap();
     }
-    edit = store
-        .patch(
-            "join-gate",
-            pre(&edit),
-            MissionChange::CreateGate {
-                title: "Gate".into(),
-                kinds: vec![ahjo_mission_model::GateKind::Human],
-                criterion: "".into(),
-                check: "".into(),
-                check_version: "".into(),
-                check_value: "".into(),
-                files: vec![],
-                x: 0,
-                y: 0,
-            },
-            "",
-        )
-        .unwrap();
+    for title in ["Gate", "Other"] {
+        edit = store
+            .patch(
+                "join-gate",
+                pre(&edit),
+                MissionChange::CreateGate {
+                    title: title.into(),
+                    kinds: vec![ahjo_mission_model::GateKind::Human],
+                    criterion: "".into(),
+                    check: "".into(),
+                    check_version: "".into(),
+                    check_value: "".into(),
+                    files: vec![],
+                    x: 0,
+                    y: 0,
+                },
+                "",
+            )
+            .unwrap();
+    }
     let from = |i: usize| {
         format!(
             "{}:{}",
@@ -541,19 +544,27 @@ fn join_keeps_gate_single_feed_and_rejects_stale_writes() {
         .unwrap();
     assert_eq!(
         store
-            .patch("join-gate", pre(&edit), wire(second.clone()), "")
-            .unwrap_err()
-            .code
-            .as_str(),
-        "input_occupied"
-    );
-    assert_eq!(
-        store
-            .patch("join-gate", stale, wire(second), "")
+            .patch("join-gate", stale, wire(second.clone()), "")
             .unwrap_err()
             .code
             .as_str(),
         "conflict"
+    );
+    edit = store
+        .patch("join-gate", pre(&edit), wire(second), "")
+        .unwrap();
+    let feeding: Vec<_> = (edit.mission.connections.iter())
+        .filter(|c| c.to == to)
+        .collect();
+    assert_eq!(feeding.len(), 2);
+    let input = format!("{}:pass", edit.mission.gates[1].id);
+    assert_eq!(
+        store
+            .patch("join-gate", pre(&edit), wire(input), "")
+            .unwrap_err()
+            .code
+            .as_str(),
+        "input_occupied"
     );
     assert_eq!(store.mission_edit("join-gate").unwrap().etag, edit.etag);
 }

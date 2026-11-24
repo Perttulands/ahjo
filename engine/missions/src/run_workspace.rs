@@ -73,23 +73,26 @@ fn retry_base(c: &Coordinator, id: &str, node: &str) -> io::Result<Option<String
         .map(str::to_owned))
 }
 
+/// The gates that may choose another output over this step's attempt: one
+/// that can send the step back for another attempt, or one that picks among
+/// several steps feeding it. The attempt's work waits for their choice before
+/// it reaches the run branch.
 pub(crate) fn review_gates(mission: &Mission, node: &str) -> Vec<String> {
-    use crate::graph::{endpoint_card, endpoint_port, outgoing, outgoing_from_port};
+    use crate::graph::{endpoint_card, endpoint_port, gathers, outgoing, outgoing_from_port};
     let only_one = mission.limits.iter().any(|card| {
         (card.scope == node || mission.has_input_card(&card.scope))
             && card.rounds == Some(1)
             && card.when_spent == ahjo_mission_model::WhenSpent::Fail
     });
-    if only_one {
-        return Vec::new();
-    }
     outgoing(mission, node)
         .filter_map(|wire| {
             let gate = endpoint_card(&wire.to);
+            let sends_back = !only_one
+                && outgoing_from_port(mission, gate, ahjo_mission_model::GATE_FAIL)
+                    .any(|wire| endpoint_card(&wire.to) == node);
             (endpoint_port(&wire.to) == ahjo_mission_model::GATE_IN
                 && mission.gate(gate).is_some()
-                && outgoing_from_port(mission, gate, ahjo_mission_model::GATE_FAIL)
-                    .any(|wire| endpoint_card(&wire.to) == node))
+                && (sends_back || gathers(mission, gate)))
             .then(|| gate.to_owned())
         })
         .collect()

@@ -975,19 +975,27 @@ impl MissionsPage {
             );
         }
     }
-    pub(super) fn pick(&mut self, gate: &str, seq: u64, attempt: i64, cx: &mut Context<Self>) {
+    /// Pick a candidate: an attempt, and its step where several steps feed
+    /// the gate.
+    pub(super) fn pick(
+        &mut self,
+        gate: &str,
+        seq: u64,
+        (step, attempt): (Option<String>, i64),
+        cx: &mut Context<Self>,
+    ) {
         let reason = self
             .run
             .responses
             .get(gate)
             .map(|f| f.read(cx).text.clone());
-        self.pick_with_reason(gate, seq, attempt, reason, cx);
+        self.pick_with_reason(gate, seq, (step, attempt), reason, cx);
     }
     fn pick_with_reason(
         &mut self,
         gate: &str,
         seq: u64,
-        attempt: i64,
+        (step, attempt): (Option<String>, i64),
         reason: Option<String>,
         cx: &mut Context<Self>,
     ) {
@@ -997,6 +1005,7 @@ impl MissionsPage {
                 gate: gate.into(),
                 seq,
                 attempt,
+                step,
                 reason,
                 actor: Some("human:operator".into()),
                 relayed_by: None,
@@ -1914,7 +1923,7 @@ impl MissionsPage {
                         .debug_selector(|| "attempts-pick-go".into())
                         .on_click(cx.listener(move |page, _, _, cx| {
                             let reason = page.run.attempt_reason.read(cx).text.trim().to_owned();
-                            page.pick_with_reason(&gate, seq, chosen, Some(reason), cx);
+                            page.pick_with_reason(&gate, seq, (None, chosen), Some(reason), cx);
                         })),
                     );
             }

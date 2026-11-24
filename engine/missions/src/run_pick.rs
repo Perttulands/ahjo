@@ -12,6 +12,12 @@
 //! and who picked. Between the two a judge chain runs, anchored at
 //! `pick_started`, or a `human_input_requested` with a `pick` waits for the
 //! operator. Replay finishes a pick the ledger started and did not end.
+//!
+//! A gate fed by several steps picks the same way among their outputs, once
+//! each has one: its `pick_started` belongs to the gate, its trigger is
+//! `gathered` and each candidate names its step. Every feeding step's work
+//! waits for the pick (`run_workspace::review_gates`), so only the picked
+//! output reaches the run branch; the others stay in the run's attempts.
 use crate::coordinator::Control;
 use crate::limits::LimitUse;
 use crate::run_limit::LimitStop;
@@ -28,16 +34,25 @@ pub(crate) const PICK_STARTED: &str = "pick_started";
 pub(crate) const INVALID_JUDGE_PICK: &str = "invalid_judge_pick";
 /// Who decides a pick with only one candidate (Archon says `archon`).
 const DECIDED_BY_AHJO: &str = "ahjo";
+/// The trigger of a pick among the outputs of several steps feeding a gate.
+pub(crate) const GATHERED: &str = "gathered";
 
 /// An attempt a pick may take: the step's output was accepted (`output_seq`)
 /// and its selecting gate judged it (`verdict_seq`). An attempt a limit cut
-/// off, or a crash ended, has no output and is never one.
+/// off, or a crash ended, has no output and is never one. A gathered pick's
+/// candidate names its step and carries the output the gate was handed, which
+/// no verdict judged.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct Candidate {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub step_id: String,
     pub attempt: i64,
     pub output_seq: u64,
+    #[serde(default)]
     pub verdict_seq: u64,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub input: Value,
 }
 
 /// What picking a step's best attempt takes: its selecting gate and the
@@ -50,6 +65,8 @@ pub(crate) struct StepPick<'a> {
 /// A decided pick.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Choice {
+    /// The picked step: empty for one of a step's own attempts.
+    pub step_id: String,
     pub attempt: i64,
     pub reason: String,
     pub evidence: Vec<String>,
@@ -60,7 +77,11 @@ impl Choice {
         let evidence: Vec<_> = (self.evidence.iter())
             .map(|text| json!({"kind":"step","text":text}))
             .collect();
-        json!({"attempt":self.attempt,"reason":self.reason,"evidence":evidence,"decided_by":self.decided_by})
+        let mut data = json!({"attempt":self.attempt,"reason":self.reason,"evidence":evidence,"decided_by":self.decided_by});
+        if !self.step_id.is_empty() {
+            data["step_id"] = self.step_id.clone().into();
+        }
+        data
     }
 }
 
@@ -116,9 +137,11 @@ pub(crate) fn candidates(events: &[RunEvent], step: &str, gate: &str) -> Vec<Can
                 judged.insert(
                     origin.attempt,
                     Candidate {
+                        step_id: String::new(),
                         attempt: origin.attempt,
                         output_seq: *output_seq,
                         verdict_seq: event.seq,
+                        input: Value::Null,
                     },
                 );
             }
@@ -215,6 +238,65 @@ pub(crate) fn start(
     crate::run_worker::append_live(c, id, control, started).map(|_| ())
 }
 
+/// Start the pick of each gate fed by several steps once every one of them
+/// has handed it an output since its last pick. Says whether one started.
+fn gather(
+    context: &crate::run_gate::GateContext<'_>,
+    running: &std::collections::HashSet<String>,
+) -> io::Result<bool> {
+    let crate::run_gate::GateContext {
+        c,
+        id,
+        control,
+        mission,
+        events,
+        replay,
+        ..
+    } = *context;
+    for gate in &mission.gates {
+        if replay.picking.contains(&gate.id)
+            || running.contains(&format!("gate:{}", gate.id))
+            || !crate::graph::gathers(mission, &gate.id)
+        {
+            continue;
+        }
+        let feeders = crate::graph::gate_feeders(mission, &gate.id);
+        let Some(held) = (replay.gathered.get(&gate.id))
+            .filter(|held| feeders.iter().all(|step| held.contains_key(*step)))
+        else {
+            continue;
+        };
+        let mut candidates = Vec::new();
+        for step in feeders {
+            let input = &held[step];
+            let attempt = input.origin.as_ref().map_or(0, |origin| origin.attempt);
+            let output_seq = (events.iter())
+                .rev()
+                .find(|e| e.kind == "card_output" && e.card_id == step && e.attempt == attempt)
+                .map_or(0, |e| e.seq);
+            candidates.push(Candidate {
+                step_id: step.to_owned(),
+                attempt,
+                output_seq,
+                verdict_seq: 0,
+                input: serde_json::to_value(input)?,
+            });
+        }
+        let mut data = json!({"gate_id":gate.id,"trigger":GATHERED,"candidates":candidates});
+        if gate.kinds.contains(&ahjo_mission_model::GateKind::Step) {
+            let chain: Vec<_> = (crate::graph::judge_chain(mission, &gate.id).into_iter())
+                .map(|judge| judge.id.clone())
+                .collect();
+            data["judge_chain"] = json!(chain);
+        }
+        let mut started = event(PICK_STARTED, &gate.id, 0, data);
+        started.gate_id = gate.id.clone();
+        crate::run_worker::append_live(c, id, control, started)?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
 /// Start the pick a resume with `--pick-best` asked for, whatever the card's
 /// when_spent; where the step can no longer pick, the run stops at the limit
 /// again.
@@ -254,14 +336,22 @@ pub(crate) fn unsettled(events: &[RunEvent]) -> Vec<&RunEvent> {
         .collect()
 }
 
-/// A candidate as the ledger shows it: the verdict its gate gave it and the
-/// gate input that verdict judged, which a pick carries on.
+/// A candidate as the ledger shows it: its step, the verdict its gate gave
+/// it and the gate input that verdict judged, which a pick carries on. A
+/// gathered candidate has no verdict and carries the output its step handed
+/// the gate.
 struct Detail {
+    step: String,
     attempt: i64,
     workspace: Option<std::path::PathBuf>,
     verdict: String,
     reason: String,
     input: Value,
+}
+
+/// Whether a pick chooses among several steps feeding its gate.
+pub(crate) fn is_gathered(started: &RunEvent) -> bool {
+    started.data.get("trigger").and_then(Value::as_str) == Some(GATHERED)
 }
 
 fn details(
@@ -273,43 +363,60 @@ fn details(
     let candidates: Vec<Candidate> =
         serde_json::from_value(started.data.get("candidates").cloned().unwrap_or_default())
             .map_err(|e| invalid(&format!("pick {} candidates: {e}", started.seq)))?;
+    let gathered = is_gathered(started);
     let mut details = Vec::new();
     for candidate in candidates {
-        let verdict = (events.iter())
-            .find(|e| e.seq == candidate.verdict_seq && e.kind == "gate_verdict")
-            .ok_or_else(|| {
-                invalid(&format!(
-                    "pick candidate attempt {} names verdict {}",
-                    candidate.attempt, candidate.verdict_seq
-                ))
-            })?;
-        details.push(Detail {
-            attempt: candidate.attempt,
-            workspace: crate::run_folder::attempt_path(
-                c,
-                id,
-                events,
-                &started.card_id,
-                candidate.attempt,
+        let step = if gathered {
+            candidate.step_id.clone()
+        } else {
+            started.card_id.clone()
+        };
+        let (verdict, reason, input) = if gathered {
+            (String::new(), String::new(), candidate.input.clone())
+        } else {
+            let verdict = (events.iter())
+                .find(|e| e.seq == candidate.verdict_seq && e.kind == "gate_verdict")
+                .ok_or_else(|| {
+                    invalid(&format!(
+                        "pick candidate attempt {} names verdict {}",
+                        candidate.attempt, candidate.verdict_seq
+                    ))
+                })?;
+            let data = Value::Object(verdict.data.clone());
+            (
+                text(&data, "verdict").into(),
+                text(&data, "reason").into(),
+                verdict.data.get("input_ref").cloned().unwrap_or_default(),
             )
-            .or_else(|| {
-                crate::run_workspace::attempt_path(
-                    c,
-                    id,
-                    events,
-                    &started.card_id,
-                    candidate.attempt,
-                )
-            }),
-            verdict: text(&Value::Object(verdict.data.clone()), "verdict").into(),
-            reason: text(&Value::Object(verdict.data.clone()), "reason").into(),
-            input: verdict.data.get("input_ref").cloned().unwrap_or_default(),
+        };
+        details.push(Detail {
+            workspace: crate::run_folder::attempt_path(c, id, events, &step, candidate.attempt)
+                .or_else(|| {
+                    crate::run_workspace::attempt_path(c, id, events, &step, candidate.attempt)
+                }),
+            step,
+            attempt: candidate.attempt,
+            verdict,
+            reason,
+            input,
         });
     }
     if details.is_empty() {
         return Err(invalid(&format!("pick {} has no candidates", started.seq)));
     }
     Ok(details)
+}
+
+/// What a picker names its pick by: the attempt numbers, and in a gathered
+/// pick the step of each, in the same order (empty otherwise).
+fn keys(started: &RunEvent, details: &[Detail]) -> (Vec<i64>, Vec<String>) {
+    let attempts = details.iter().map(|detail| detail.attempt).collect();
+    let steps = if is_gathered(started) {
+        details.iter().map(|detail| detail.step.clone()).collect()
+    } else {
+        Vec::new()
+    };
+    (attempts, steps)
 }
 
 fn invalid(message: &str) -> io::Error {
@@ -326,19 +433,37 @@ fn pick_input(
     started: &RunEvent,
     details: &[Detail],
 ) -> RoutedInput {
-    let mut body = format!(
-        "Pick the best attempt of {}. Its Limit card is spent, so it runs no more; the attempt picked goes on through {} as if it had passed.\n",
-        mission.card_name(&started.card_id),
-        mission.card_name(&gate.id)
-    );
+    let gathered = is_gathered(started);
+    let mut body = if gathered {
+        format!(
+            "Pick the best output. {} steps did this work side by side and each handed its output to {}; the output picked goes on through it as if it had passed, and the others stay in the run's attempts.\n",
+            details.len(),
+            mission.card_name(&gate.id)
+        )
+    } else {
+        format!(
+            "Pick the best attempt of {}. Its Limit card is spent, so it runs no more; the attempt picked goes on through {} as if it had passed.\n",
+            mission.card_name(&started.card_id),
+            mission.card_name(&gate.id)
+        )
+    };
     if !gate.criterion.trim().is_empty() {
         body += &format!("criterion: {}\n", gate.criterion.trim());
     }
     for detail in details {
-        body += &format!(
-            "\nattempt {}\nverdict: {}\nreason: {}\n",
-            detail.attempt, detail.verdict, detail.reason
-        );
+        if gathered {
+            body += &format!(
+                "\nstep {} ({}) attempt {}\n",
+                detail.step,
+                mission.card_name(&detail.step),
+                detail.attempt
+            );
+        } else {
+            body += &format!(
+                "\nattempt {}\nverdict: {}\nreason: {}\n",
+                detail.attempt, detail.verdict, detail.reason
+            );
+        }
         if let Some(path) = &detail.workspace {
             body += &format!("attempt workspace: {}\n", path.display());
         }
@@ -363,34 +488,68 @@ fn pick_input(
 /// Attempt numbers said plainly: "1, 2 or 3".
 pub(crate) fn attempt_words(attempts: &[i64]) -> String {
     let words: Vec<_> = attempts.iter().map(i64::to_string).collect();
-    match words.as_slice() {
+    or_words(&words)
+}
+
+fn or_words(words: &[String]) -> String {
+    match words {
         [] => "none".into(),
         [one] => one.clone(),
         [rest @ .., last] => format!("{} or {last}", rest.join(", ")),
     }
 }
 
+/// The candidates said plainly: "attempts 1, 2 or 3", or in a gathered pick
+/// "step a attempt 1 or step b attempt 2".
+pub(crate) fn candidate_words(attempts: &[i64], steps: &[String]) -> String {
+    if steps.is_empty() {
+        return format!("attempts {}", attempt_words(attempts));
+    }
+    let words: Vec<_> = (steps.iter().zip(attempts))
+        .map(|(step, attempt)| format!("step {step} attempt {attempt}"))
+        .collect();
+    or_words(&words)
+}
+
 /// What a judge in a pick returns: the final judge picks with a fenced
-/// `ahjo-pick` block, the judges before it recommend in plain output.
-pub(crate) fn contract(final_judge: bool, attempts: &[i64]) -> String {
+/// `ahjo-pick` block, the judges before it recommend in plain output. In a
+/// gathered pick (`steps` not empty) the pick names a step and its attempt.
+pub(crate) fn contract(final_judge: bool, attempts: &[i64], steps: &[String]) -> String {
     let pick = crate::contract_names::PICK;
+    let what = if steps.is_empty() {
+        "attempt"
+    } else {
+        "output"
+    };
+    let words = candidate_words(attempts, steps);
     if !final_judge {
         return format!(
-            "judge recommend contract:\nThis is a pick, not a verdict, and a later judge in the chain decides it: compare the attempts below side by side and recommend the best one. Write your recommendation as your output: the attempt you recommend (one of attempts {}), why it is the best, and what decided it. The judges after you read it beside the attempts. Emit no {pick} or {} block.\n",
-            attempt_words(attempts),
+            "judge recommend contract:\nThis is a pick, not a verdict, and a later judge in the chain decides it: compare the {what}s below side by side and recommend the best one. Write your recommendation as your output: the {what} you recommend (one of {words}), why it is the best, and what decided it. The judges after you read it beside the {what}s. Emit no {pick} or {} block.\n",
             crate::contract_names::VERDICT
         );
     }
+    let first = attempts.first().copied().unwrap_or(1);
+    let (count, example, names) = match steps.first() {
+        None => (
+            "three",
+            format!("\"attempt\":{first}"),
+            "attempt must be one of",
+        ),
+        Some(step) => (
+            "four",
+            format!("\"step\":{},\"attempt\":{first}", json!(step)),
+            "step and attempt must name one of",
+        ),
+    };
     format!(
-        "judge pick contract:\nThis is a pick, not a verdict: compare the attempts below side by side and pick the best one. Before the completion sentinel, emit exactly one fenced {pick} JSON block, separate from {}, with exactly these three keys:\n```{pick}\n{{\"attempt\":{},\"reason\":\"Why this attempt is the best\",\"evidence\":[\"what decided it\"]}}\n```\nattempt must be one of attempts {}, reason a string, and evidence an array of strings (use [] when there are no references). Do not omit evidence or add keys. Your pick decides; any recommendation from an earlier judge follows the attempts.\n",
+        "judge pick contract:\nThis is a pick, not a verdict: compare the {what}s below side by side and pick the best one. Before the completion sentinel, emit exactly one fenced {pick} JSON block, separate from {}, with exactly these {count} keys:\n```{pick}\n{{{example},\"reason\":\"Why this {what} is the best\",\"evidence\":[\"what decided it\"]}}\n```\n{names} {words}, reason a string, and evidence an array of strings (use [] when there are no references). Do not omit evidence or add keys. Your pick decides; any recommendation from an earlier judge follows the {what}s.\n",
         crate::contract_names::OUTPUTS,
-        attempts.first().copied().unwrap_or(1),
-        attempt_words(attempts)
     )
 }
 
-/// Accept one explicitly fenced pick of a candidate attempt, never prose.
-pub(crate) fn parse_pick(text: &str, attempts: &[i64]) -> Result<Choice, String> {
+/// Accept one explicitly fenced pick of a candidate, never prose. In a
+/// gathered pick (`steps` not empty) it names a step and its attempt.
+pub(crate) fn parse_pick(text: &str, attempts: &[i64], steps: &[String]) -> Result<Choice, String> {
     let lang = crate::contract_names::PICK;
     let marker = format!("```{lang}");
     let mut body = String::new();
@@ -413,30 +572,50 @@ pub(crate) fn parse_pick(text: &str, attempts: &[i64]) -> Result<Choice, String>
     if blocks != 1 || inside || !closed {
         return Err(format!("missing or unterminated {lang} block"));
     }
-    const KEYS: &str = "requires exactly attempt, reason and evidence";
+    let (names, keys): (&str, &[&str]) = if steps.is_empty() {
+        (
+            "requires exactly attempt, reason and evidence",
+            &["attempt", "reason", "evidence"],
+        )
+    } else {
+        (
+            "requires exactly step, attempt, reason and evidence",
+            &["step", "attempt", "reason", "evidence"],
+        )
+    };
     let fields: serde_json::Map<String, Value> =
         serde_json::from_str(&body).map_err(|_| "judge pick must be a JSON object".to_owned())?;
-    if let Some(extra) = fields
-        .keys()
-        .find(|key| !["attempt", "reason", "evidence"].contains(&key.as_str()))
-    {
-        return Err(format!("judge pick has extra key {extra:?}; it {KEYS}"));
+    if let Some(extra) = fields.keys().find(|key| !keys.contains(&key.as_str())) {
+        return Err(format!("judge pick has extra key {extra:?}; it {names}"));
     }
-    let missing: Vec<_> = (["attempt", "reason", "evidence"].into_iter())
-        .filter(|key| !fields.contains_key(*key))
+    let missing: Vec<_> = (keys.iter())
+        .filter(|key| !fields.contains_key(**key))
+        .copied()
         .collect();
     if !missing.is_empty() {
         return Err(format!(
-            "judge pick is missing {}; it {KEYS}",
+            "judge pick is missing {}; it {names}",
             missing.join(" and ")
         ));
     }
+    let step = fields.get("step").and_then(Value::as_str).unwrap_or("");
     let attempt = (fields["attempt"].as_i64())
-        .filter(|attempt| attempts.contains(attempt))
+        .filter(|attempt| {
+            if steps.is_empty() {
+                attempts.contains(attempt)
+            } else {
+                (steps.iter().zip(attempts)).any(|(s, a)| s == step && a == attempt)
+            }
+        })
         .ok_or_else(|| {
+            let what = if steps.is_empty() {
+                "attempt"
+            } else {
+                "step and attempt"
+            };
             format!(
-                "judge pick attempt must be one of attempts {}",
-                attempt_words(attempts)
+                "judge pick {what} must name one of {}",
+                candidate_words(attempts, steps)
             )
         })?;
     let reason = (fields["reason"].as_str())
@@ -449,6 +628,7 @@ pub(crate) fn parse_pick(text: &str, attempts: &[i64]) -> Result<Choice, String>
         .collect::<Option<Vec<_>>>()
         .ok_or("judge pick evidence must contain only strings")?;
     Ok(Choice {
+        step_id: step.to_owned(),
         attempt,
         reason,
         evidence,
@@ -477,16 +657,21 @@ fn resolve(
 ) -> io::Result<()> {
     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
     let details = details(c, id, &events, started)?;
+    let step = if choice.step_id.is_empty() {
+        &started.card_id
+    } else {
+        &choice.step_id
+    };
     let picked = (details.iter())
-        .find(|detail| detail.attempt == choice.attempt)
+        .find(|detail| &detail.step == step && detail.attempt == choice.attempt)
         .ok_or_else(|| {
             invalid(&format!(
-                "pick {} names attempt {}, which is not a candidate",
+                "pick {} names step {step} attempt {}, which is not a candidate",
                 started.seq, choice.attempt
             ))
         })?;
-    let attempts: Vec<_> = details.iter().map(|detail| detail.attempt).collect();
-    let mut pick = json!({"step_id":started.card_id,"attempt":choice.attempt,"pick_seq":started.seq,"candidates":attempts,"decided_by":choice.decided_by,"trigger":text(&Value::Object(started.data.clone()), "trigger")});
+    let (attempts, steps) = keys(started, &details);
+    let mut pick = json!({"step_id":picked.step,"attempt":choice.attempt,"pick_seq":started.seq,"candidates":candidates_value(&attempts, &steps),"decided_by":choice.decided_by,"trigger":text(&Value::Object(started.data.clone()), "trigger")});
     let evidence: Vec<_> = (choice.evidence.iter())
         .map(|text| json!({"kind":"step","text":text}))
         .collect();
@@ -518,21 +703,42 @@ fn resolve(
     crate::run_workspace::record_verdict(c, id, control, &events, verdict)
 }
 
+/// The candidates as a pick records them: attempt numbers, or in a gathered
+/// pick each step and its attempt.
+fn candidates_value(attempts: &[i64], steps: &[String]) -> Value {
+    if steps.is_empty() {
+        return json!(attempts);
+    }
+    (steps.iter().zip(attempts))
+        .map(|(step, attempt)| json!({"step_id":step,"attempt":attempt}))
+        .collect()
+}
+
 /// Ask the operator to pick the best attempt, with the judge's pick as a
 /// recommendation when the gate has a judge. Only this path waits for the
-/// pick; the run goes on with every other branch, as with a verdict.
+/// pick; the run goes on with every other branch, as with a verdict. A
+/// gathered pick names no one step: its candidates name theirs.
 fn ask(
     gate: &Gate,
     started: &RunEvent,
     input: &RoutedInput,
-    attempts: &[i64],
+    (attempts, steps): (&[i64], &[String]),
     recommendation: Option<&Choice>,
 ) -> RunEvent {
-    let mut pick = json!({"step_id":started.card_id,"pick_seq":started.seq,"candidates":attempts});
+    let mut pick = json!({"pick_seq":started.seq,"candidates":candidates_value(attempts, steps)});
+    if steps.is_empty() {
+        pick["step_id"] = started.card_id.clone().into();
+    }
     if let Some(recommendation) = recommendation {
         pick["recommendation"] = recommendation.data();
     }
-    let choices: Vec<_> = attempts.iter().map(i64::to_string).collect();
+    let choices: Vec<_> = if steps.is_empty() {
+        attempts.iter().map(i64::to_string).collect()
+    } else {
+        (steps.iter().zip(attempts))
+            .map(|(step, attempt)| format!("{step} attempt {attempt}"))
+            .collect()
+    };
     let mut request = event(
         "human_input_requested",
         &gate.id,
@@ -566,6 +772,9 @@ pub(crate) fn advance(
         events,
         ..
     } = *context;
+    if gather(context, running)? {
+        return Ok(PickAction::Acted);
+    }
     for started in unsettled(events) {
         if running.contains(&format!("gate:{}", started.gate_id)) {
             continue;
@@ -579,6 +788,7 @@ pub(crate) fn advance(
         let details = details(c, id, events, started)?;
         if let [only] = details.as_slice() {
             let choice = Choice {
+                step_id: only.step.clone(),
                 attempt: only.attempt,
                 reason: format!("the only attempt {} judged", mission.card_name(&gate.id)),
                 evidence: Vec::new(),
@@ -588,12 +798,12 @@ pub(crate) fn advance(
             return Ok(PickAction::Acted);
         }
         let input = pick_input(id, mission, gate, started, &details);
-        let attempts: Vec<_> = details.iter().map(|detail| detail.attempt).collect();
+        let keys = keys(started, &details);
         if gate.kinds.contains(&ahjo_mission_model::GateKind::Step) {
             if crate::graph::judge_chain(mission, &gate.id).is_empty() {
                 return Err(invalid(&format!("gate {:?} has no judge chain", gate.id)));
             }
-            spawn_judges(context, gate.clone(), started.clone(), input, attempts);
+            spawn_judges(context, gate.clone(), started.clone(), input, keys);
             return Ok(PickAction::Judging(gate.id.clone()));
         }
         if !gate.kinds.contains(&ahjo_mission_model::GateKind::Human) {
@@ -602,7 +812,7 @@ pub(crate) fn advance(
                 gate.id
             )));
         }
-        let request = ask(gate, started, &input, &attempts, None);
+        let request = ask(gate, started, &input, (&keys.0, &keys.1), None);
         crate::run_worker::append_live(c, id, control, request)?;
         return Ok(PickAction::Acted);
     }
@@ -614,7 +824,7 @@ fn spawn_judges(
     gate: Gate,
     started: RunEvent,
     input: RoutedInput,
-    attempts: Vec<i64>,
+    keys: (Vec<i64>, Vec<String>),
 ) {
     let (c, id, mission, req, workspace, control, inputs, done, wake) = (
         context.c.clone(),
@@ -637,7 +847,7 @@ fn spawn_judges(
             control: &control,
             inputs: &inputs,
         };
-        let result = judged.pick(&gate, &started, input, &attempts);
+        let result = judged.pick(&gate, &started, input, (&keys.0, &keys.1));
         let _ = done.send(crate::run_scheduler::Finished::Pick(
             gate.id.clone(),
             result,
@@ -666,7 +876,7 @@ impl Judging<'_> {
         gate: &Gate,
         started: &RunEvent,
         input: RoutedInput,
-        attempts: &[i64],
+        (attempts, steps): (&[i64], &[String]),
     ) -> io::Result<()> {
         let Judging {
             c,
@@ -731,7 +941,7 @@ impl Judging<'_> {
                     "judge",
                     last,
                     None,
-                    attempts.to_vec(),
+                    (attempts.to_vec(), steps.to_vec()),
                 )?;
                 crate::run_judges::record_output(
                     c,
@@ -774,14 +984,14 @@ impl Judging<'_> {
             .last()
             .map(|judge| judge.id.clone())
             .unwrap_or_default();
-        match parse_pick(&final_text, attempts) {
+        match parse_pick(&final_text, attempts, steps) {
             Ok(mut choice) => {
                 choice.decided_by = judge;
                 if gate.kinds.contains(&ahjo_mission_model::GateKind::Human) {
                     let events = c.ledger(id)?.read().map_err(crate::error::to_io)?;
                     let details = details(c, id, &events, started)?;
                     let input = pick_input(id, mission, gate, started, &details);
-                    let request = ask(gate, started, &input, attempts, Some(&choice));
+                    let request = ask(gate, started, &input, (attempts, steps), Some(&choice));
                     crate::run_worker::append_live(c, id, control, request).map(|_| ())
                 } else {
                     resolve(c, id, control, mission, started, &choice, None)
@@ -830,9 +1040,13 @@ pub(crate) fn route_human(
                 request.gate_id
             ))
         })?;
+    let picked = recorded.data.get("pick");
     let choice = Choice {
-        attempt: (recorded.data.get("pick"))
-            .and_then(|pick| pick.get("attempt"))
+        step_id: (picked.and_then(|pick| pick.get("step_id")))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned(),
+        attempt: (picked.and_then(|pick| pick.get("attempt")))
             .and_then(Value::as_i64)
             .unwrap_or(0),
         reason: text(&Value::Object(recorded.data.clone()), "reason").into(),
@@ -850,14 +1064,21 @@ pub(crate) fn route_human(
     )
 }
 
-/// The pick a pending human request asks for, with the judge's pick as a
-/// recommendation where the gate has a judge.
-pub(crate) fn request_candidates(request: &RunEvent) -> Option<Vec<i64>> {
+/// The candidates a pending human pick request asks among, each as its step
+/// and attempt; `None` when the request asks for a verdict.
+pub(crate) fn request_candidates(request: &RunEvent) -> Option<Vec<(String, i64)>> {
     let pick = request.data.get("pick")?;
+    let step = pick.get("step_id").and_then(Value::as_str).unwrap_or("");
     Some(
         (pick.get("candidates").and_then(Value::as_array).into_iter())
             .flatten()
-            .filter_map(Value::as_i64)
+            .filter_map(|candidate| match candidate.as_i64() {
+                Some(attempt) => Some((step.to_owned(), attempt)),
+                None => Some((
+                    candidate.get("step_id")?.as_str()?.to_owned(),
+                    candidate.get("attempt")?.as_i64()?,
+                )),
+            })
             .collect(),
     )
 }
@@ -904,6 +1125,9 @@ impl Coordinator {
             pick.actor.clone()
         };
         let mut data = json!({"gate_id":gate,"card_id":gate,"verdict":"pass","reason":pick.reason,"requested_seq":pick.requested_seq,"decided_by":actor,"pick":{"attempt":pick.attempt}});
+        if !pick.step.is_empty() {
+            data["pick"]["step_id"] = pick.step.clone().into();
+        }
         if !pick.relayed_by.is_empty() {
             data["relayed_by"] = pick.relayed_by.clone().into();
         }
@@ -937,13 +1161,30 @@ impl Coordinator {
                     "this gate waits for a verdict, not a pick: answer it with ahjo run approve or ahjo run reject",
                 ));
             };
-            if !candidates.contains(&pick.attempt) {
+            let steps: Vec<String> = candidates.iter().map(|(step, _)| step.clone()).collect();
+            let attempts: Vec<i64> = candidates.iter().map(|(_, attempt)| *attempt).collect();
+            let one_step = steps.iter().all(|step| *step == steps[0]);
+            if one_step {
+                if !attempts.contains(&pick.attempt)
+                    || (!pick.step.is_empty() && steps.first() != Some(&pick.step))
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!(
+                            "not a candidate attempt: attempt {}; pick one of {}",
+                            pick.attempt,
+                            attempt_words(&attempts)
+                        ),
+                    ));
+                }
+            } else if !candidates.contains(&(pick.step.clone(), pick.attempt)) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!(
-                        "not a candidate attempt: attempt {}; pick one of {}",
+                        "not a candidate: step {:?} attempt {}; pick one of {}, naming the step and its attempt",
+                        pick.step,
                         pick.attempt,
-                        attempt_words(&candidates)
+                        candidate_words(&attempts, &steps)
                     ),
                 ));
             }
@@ -971,6 +1212,7 @@ mod tests {
         let choice = parse_pick(
             &block(r#"{"attempt":2,"reason":"tests pass","evidence":["retry"]}"#),
             &[1, 2, 3],
+            &[],
         )
         .unwrap();
         assert_eq!((choice.attempt, choice.reason.as_str()), (2, "tests pass"));
@@ -978,30 +1220,68 @@ mod tests {
         assert!(
             parse_pick(
                 &block(r#"{"attempt":4,"reason":"","evidence":[]}"#),
-                &[1, 2, 3]
+                &[1, 2, 3],
+                &[]
             )
             .unwrap_err()
             .contains("one of attempts 1, 2 or 3")
         );
         assert!(
-            parse_pick(&block(r#"{"attempt":1,"reason":""}"#), &[1])
+            parse_pick(&block(r#"{"attempt":1,"reason":""}"#), &[1], &[])
                 .unwrap_err()
                 .contains("missing evidence")
         );
         assert!(
             parse_pick(
                 &block(r#"{"attempt":1,"reason":"","evidence":[],"x":1}"#),
-                &[1]
+                &[1],
+                &[]
             )
             .unwrap_err()
             .contains("extra key")
         );
-        assert!(parse_pick("attempt 2 is best", &[1, 2]).is_err());
+        assert!(parse_pick("attempt 2 is best", &[1, 2], &[]).is_err());
+    }
+
+    #[test]
+    fn a_gathered_pick_names_the_step_and_its_attempt() {
+        let block = |body: &str| format!("```ahjo-pick\n{body}\n```");
+        let steps = ["fmn_a".to_owned(), "fmn_b".to_owned()];
+        let choice = parse_pick(
+            &block(r#"{"step":"fmn_b","attempt":1,"reason":"tighter","evidence":[]}"#),
+            &[1, 1],
+            &steps,
+        )
+        .unwrap();
+        assert_eq!((choice.step_id.as_str(), choice.attempt), ("fmn_b", 1));
+        assert!(
+            parse_pick(
+                &block(r#"{"step":"fmn_b","attempt":2,"reason":"","evidence":[]}"#),
+                &[1, 1],
+                &steps
+            )
+            .unwrap_err()
+            .contains("one of step fmn_a attempt 1 or step fmn_b attempt 1")
+        );
+        assert!(
+            parse_pick(
+                &block(r#"{"attempt":1,"reason":"","evidence":[]}"#),
+                &[1, 1],
+                &steps
+            )
+            .unwrap_err()
+            .contains("missing step")
+        );
+        assert!(contract(true, &[1, 1], &steps).contains(
+            "step and attempt must name one of step fmn_a attempt 1 or step fmn_b attempt 1"
+        ));
     }
 
     #[test]
     fn contracts_name_the_candidates() {
-        assert!(contract(true, &[1, 2, 3]).contains("attempt must be one of attempts 1, 2 or 3"));
-        assert!(contract(false, &[1, 2]).starts_with("judge recommend contract:"));
+        assert!(
+            contract(true, &[1, 2, 3], &[]).contains("attempt must be one of attempts 1, 2 or 3")
+        );
+        assert!(contract(false, &[1, 2], &[]).starts_with("judge recommend contract:"));
     }
 }

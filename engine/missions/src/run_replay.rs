@@ -17,6 +17,9 @@ pub(crate) struct Replay {
     /// Gates picking a step's best attempt: they take no new input until
     /// the pick ends.
     pub picking: BTreeSet<String>,
+    /// For each gate fed by several steps, the latest output of each since
+    /// its last pick, by step: the gate picks once every step has one.
+    pub gathered: BTreeMap<String, BTreeMap<String, RoutedInput>>,
 }
 
 pub(crate) struct EndDelivery {
@@ -113,6 +116,9 @@ impl Replay {
                         }
                     }
                     state.picking.insert(event.gate_id.clone());
+                    if event.card_id == event.gate_id {
+                        state.gathered.remove(&event.gate_id);
+                    }
                 }
                 "human_input_requested" if crate::run_pick::is_pick(event) => {}
                 "gate_evaluating" => {
@@ -251,7 +257,14 @@ impl Replay {
     ) {
         let node = endpoint_card(endpoint);
         if mission.gate(node).is_some() {
-            self.queue.entry(node.into()).or_default().push_back(input);
+            if crate::graph::gathers(mission, node)
+                && crate::graph::gate_feeders(mission, node).contains(&input.from_card_id.as_str())
+            {
+                (self.gathered.entry(node.into()).or_default())
+                    .insert(input.from_card_id.clone(), input);
+            } else {
+                self.queue.entry(node.into()).or_default().push_back(input);
+            }
         } else if let Some(end) = mission.end(node) {
             self.ended.push(EndDelivery {
                 end_id: end.id.clone(),

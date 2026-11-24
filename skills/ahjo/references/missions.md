@@ -43,7 +43,7 @@ Declare inputs and outputs on the mission's Input card. With no declarations the
 
 ## Gates
 
-Set a criterion and gate kinds in the mission file. A human-only gate is the default. A judge uses a staffed solo step in the gate's judge chain. A code gate checks `output_contains` or `output_absent` version 1. Kinds execute in code, step, human order and stop at failure. Wire `<gate-id>:in`, `<gate-id>:pass` and `<gate-id>:fail` to their respective ports. Cap send-back loops with a Limit card.
+Set a criterion and gate kinds in the mission file. A human-only gate is the default. A judge uses a staffed solo step in the gate's judge chain. A code gate checks `output_contains` or `output_absent` version 1. Kinds execute in code, step, human order and stop at failure. Wire `<gate-id>:in`, `<gate-id>:pass` and `<gate-id>:fail` to their respective ports. Cap send-back loops with a Limit card. Wire several steps' outputs into one gate's `in` and the gate waits for each, then its judge or the operator picks one output: only that step's work reaches the run, and the others stay in `run show --attempts`. Such a gate takes a judge or a human, not a code check.
 
 The runtime supplies each seat its output contract; a judge also returns a fenced verdict block containing `verdict` (`pass` or `fail`), `reason`, and `evidence`. Do not direct a seat by typing into its session. Use `ahjo run show <run-id> --evidence --seats` if a result fails to route.
 
@@ -59,7 +59,7 @@ Drive with `ahjo run wait <run-id> --json`. The default `needs-you` returns when
 
 ## Decide
 
-For a human gate, `ahjo run show <run-id>` includes the criterion, inputs and possible routes under the pending ask. Decide only with the operator's authority. Follow the suggested `ahjo run approve` or `ahjo run reject` command with its current `--seq`. Add `--reason` to send the operator's words onward. When a gate asks for a pick, view `ahjo run show <run-id> --attempts` and follow the suggested `ahjo run pick` with `--attempt` and `--seq`. If the sequence is stale, read the run again. Wait again after the decision.
+For a human gate, `ahjo run show <run-id>` includes the criterion, inputs and possible routes under the pending ask. Decide only with the operator's authority. Follow the suggested `ahjo run approve` or `ahjo run reject` command with its current `--seq`. Add `--reason` to send the operator's words onward. When a gate asks for a pick, view `ahjo run show <run-id> --attempts` and follow the suggested `ahjo run pick` with `--attempt` and `--seq` (and `--step` when several steps feed the gate). If the sequence is stale, read the run again. Wait again after the decision.
 
 ## Recover
 
