@@ -16,6 +16,8 @@ log:
   level: info
   format: json
 mcp:
+  # The ChatGPT tool set (bin/ahjo/src/lib.rs, CHATGPT); the brain is
+  # Context Citadel's own connector.
   server_urls:
     - channel: main
-      url: "http://127.0.0.1:7310/mcp"
+      url: "http://127.0.0.1:7310/mcp/chatgpt"

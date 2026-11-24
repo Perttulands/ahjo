@@ -521,8 +521,7 @@ restart signals only the node and a tmux server it started lives on.
 `ahjo install --root ~/.local/share/ahjo` wrote it there (listening on
 127.0.0.1:7310, which Windows Tailscale serves as tailnet port 7300), linked
 into `~/.config/systemd/user`, and the ChatGPT tunnel's unit and profile,
-which reach the node's `/mcp`: every area, until the profile names the
-servers ChatGPT should see. The `change-ahjo` skill has the steps.
+which reach the node's `/mcp/chatgpt` tool set. The `change-ahjo` skill has the steps.
 
 `bin/ahjo/tests/install.rs` runs all three against a stand-in `systemctl` on
 `PATH`, with a node, a tmux server and a session of the test's own.
