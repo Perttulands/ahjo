@@ -3106,7 +3106,7 @@ fn a_web_page_runs_once_and_its_source_is_a_switch_away(cx: &mut TestAppContext)
     let other = root.canonicalize().unwrap().join("other.html");
     let other_path = other.to_str().unwrap().to_string();
     cx.update(|window, cx| {
-        page.update(cx, |p, cx| p.open_at(other_path, Some(2), window, cx));
+        page.update(cx, |p, cx| p.open_at(other_path, Some(2), None, window, cx));
     });
     until(cx, "its source at the line", |cx| {
         page.read_with(cx, |p, cx| {
