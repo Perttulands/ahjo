@@ -1305,7 +1305,7 @@ impl FilesPage {
             let truncated = o.diff.as_ref().is_some_and(|d| d.truncated);
             return self.diff_view(t, sides, truncated, cx);
         }
-        if self.runs_page() {
+        if self.runs_page() || self.plays_inside() {
             return self.live_page(t, cx);
         }
         match &o.show {
@@ -1317,35 +1317,20 @@ impl FilesPage {
                 .into_any_element(),
             Show::Gone => pane::empty(t, "Deleted since the last commit", None).into_any_element(),
             Show::Not(why) => {
-                let node = ahjo_core::NodeId(o.node.clone());
-                let path = o.path.clone();
-                pane::empty(
-                    t,
-                    why.clone(),
-                    Some(
-                        pane::act(t, "viewer-download", "Download")
-                            .debug_selector(|| "viewer-download".into())
-                            .on_click(cx.listener(move |p, _, _, cx| {
-                                p.download_path(node.clone(), path.clone(), cx)
-                            }))
-                            .into_any_element(),
-                    ),
-                )
-                .into_any_element()
+                pane::empty(t, why.clone(), Some(self.here_or_download(t, cx))).into_any_element()
             }
             Show::Picture { image, natural } => self.picture(image, *natural, cx),
             Show::Model(m) => self.model(t, m, cx),
-            Show::Media(_) => pane::empty(
-                t,
-                "It plays in this computer's own player",
-                Some(
-                    kit::button(t, "files-play", "Open", Kind::Primary)
-                        .debug_selector(|| "files-play".into())
-                        .on_click(cx.listener(|p, _, _, cx| p.play(cx)))
-                        .into_any_element(),
-                ),
-            )
-            .into_any_element(),
+            Show::Media(kind) => {
+                let why = o.cannot_play.clone().unwrap_or_else(|| {
+                    if *kind == store::kinds::Kind::Pdf {
+                        "It shows in this computer's own reader".into()
+                    } else {
+                        "It plays in this computer's own player".into()
+                    }
+                });
+                pane::empty(t, why, Some(self.here_or_download(t, cx))).into_any_element()
+            }
             Show::Text {
                 markdown: Some(blocks),
             } if !o.editing && !o.source && !self.drafts.contains_key(&o.key()) => {
@@ -1375,14 +1360,57 @@ impl FilesPage {
         }
     }
 
-    /// The open web page, running (ADR 0006): inside the window where the
-    /// system has a web view the app can lay there, else in the system's
-    /// browser, opened when the file was.
+    /// The open file's own program, and Download: for a file the app does
+    /// not show.
+    fn here_or_download(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let Some(o) = &self.opened else {
+            return div().into_any_element();
+        };
+        let node = NodeId(o.node.clone());
+        let path = o.path.clone();
+        div()
+            .flex()
+            .items_center()
+            .gap(px(size::HEAD_GAP))
+            .child(
+                kit::button(
+                    t,
+                    "files-open-here",
+                    crate::outside::OPEN_HERE,
+                    Kind::Primary,
+                )
+                .debug_selector(|| "files-open-here".into())
+                .on_click(cx.listener({
+                    let (node, path) = (node.clone(), path.clone());
+                    move |p, _, _, cx| p.open_here(node.clone(), path.clone(), cx)
+                })),
+            )
+            .child(
+                pane::act(t, "viewer-download", "Download")
+                    .debug_selector(|| "viewer-download".into())
+                    .on_click(cx.listener(move |p, _, _, cx| {
+                        p.download_path(node.clone(), path.clone(), cx)
+                    })),
+            )
+            .into_any_element()
+    }
+
+    /// The open web page, running, or the open sound, video or PDF, playing
+    /// (ADR 0006): inside the window where the system has a web view the
+    /// app can lay there; a page else in the system's browser, opened when
+    /// the file was.
     fn live_page(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let Some(opened) = &self.opened else {
             return div().into_any_element();
         };
-        let source = || {
+        let media = match opened.show {
+            Show::Media(kind) => Some(kind),
+            _ => None,
+        };
+        let source = |page: &Self, cx: &mut Context<Self>| {
+            if media.is_some() {
+                return page.here_or_download(t, cx);
+            }
             pane::act(t, "files-live-source", "Source")
                 .debug_selector(|| "files-live-source".into())
                 .on_click(cx.listener(|p, _, w, cx| p.toggle_source(w, cx)))
@@ -1398,7 +1426,7 @@ impl FilesPage {
                 } else {
                     "It runs inside Ahjo on Windows; this computer's browser cannot reach that device's folder"
                 },
-                Some(source()),
+                Some(source(self, cx)),
             )
             .debug_selector(|| "files-live-outside".into())
             .into_any_element();
@@ -1407,21 +1435,40 @@ impl FilesPage {
             return pane::empty(
                 t,
                 format!("The page did not open here: {}", e.message),
-                Some(source()),
+                Some(source(self, cx)),
             )
             .into_any_element();
         }
         let Some(reach) = reach else {
             return div().into_any_element();
         };
-        let url = self.served.serve(
-            &opened.node,
-            &paths::parent(&opened.path),
-            &opened.name,
-            reach,
-        );
+        let folder = paths::parent(&opened.path);
+        let url = match media {
+            Some(kind @ (store::kinds::Kind::Audio | store::kinds::Kind::Video)) => {
+                let bg = gpui::Rgba::from(t.bg);
+                let bg = format!(
+                    "#{:02x}{:02x}{:02x}",
+                    (bg.r * 255.).round() as u8,
+                    (bg.g * 255.).round() as u8,
+                    (bg.b * 255.).round() as u8
+                );
+                self.served.play(
+                    &opened.node,
+                    &folder,
+                    &opened.name,
+                    opened.playback,
+                    kind == store::kinds::Kind::Audio,
+                    &bg,
+                    reach,
+                )
+            }
+            _ => self
+                .served
+                .serve(&opened.node, &folder, &opened.name, reach),
+        };
         let live = self.served.clone();
         let focus = self.focus.clone();
+        let said = self.said.clone();
         div()
             .size_full()
             .debug_selector(|| "files-live-page".into())
@@ -1430,6 +1477,9 @@ impl FilesPage {
                     data_dir: std::env::var_os("LOCALAPPDATA")
                         .map(|d| std::path::PathBuf::from(d).join("Ahjo").join("files-web")),
                     scheme: Some(live.scheme()),
+                    on_message: Some(Box::new(move |message| {
+                        let _ = said.try_send(message);
+                    })),
                     focus: Some(focus),
                     ..WebViewSetup::default()
                 }

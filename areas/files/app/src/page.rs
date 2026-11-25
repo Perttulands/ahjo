@@ -299,6 +299,9 @@ pub struct FilesPage {
     /// start or unasked, or asked at a line. A web page does not open in
     /// the system's browser for it.
     unasked: bool,
+    /// Where the web view's pages post what they say to the page (a player
+    /// that cannot play its file, [`crate::live::CannotPlay`]).
+    pub said: async_channel::Sender<String>,
 }
 
 /// The line, and the column if any, a revealed path's part names: `12` or
@@ -524,6 +527,15 @@ impl Page for FilesPage {
 impl FilesPage {
     pub fn new(host: Host, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let kept: store::Kept = host.setting(cx).unwrap_or_default();
+        let (said, heard) = async_channel::unbounded::<String>();
+        cx.spawn(async move |this, cx| {
+            while let Ok(message) = heard.recv().await {
+                if this.update(cx, |p, cx| p.hear(&message, cx)).is_err() {
+                    return;
+                }
+            }
+        })
+        .detach();
         let sessions = host.model::<ahjo_terminals_contract::SessionList>(cx);
         if let Some(sessions) = &sessions {
             cx.observe(sessions, |p: &mut Self, list, cx| {
@@ -749,7 +761,26 @@ impl FilesPage {
             web: Default::default(),
             served: Default::default(),
             unasked: false,
+            said,
         }
+    }
+
+    /// A page in the web view said something: a player that cannot play
+    /// the open file shows why, with the file's own program a press away.
+    /// What it says of any other file, or of an earlier open of this one,
+    /// is too late and changes nothing.
+    fn hear(&mut self, message: &str, cx: &mut Context<Self>) {
+        let Some(said) = crate::live::CannotPlay::of(message) else {
+            return;
+        };
+        let Some(opened) = self.opened.as_mut().filter(|o| {
+            matches!(o.show, Show::Media(_))
+                && said.is_about(&o.node, &paths::parent(&o.path), &o.name, o.playback)
+        }) else {
+            return;
+        };
+        opened.cannot_play = Some(said.why());
+        cx.notify();
     }
 
     fn fail(&self, text: String, cx: &mut Context<Self>) {
@@ -1620,8 +1651,20 @@ impl FilesPage {
                         p.show_folder(path, cx);
                         return;
                     }
+                    let size = p.tree.row(&path).map(|r| r.size);
                     if let Some(o) = p.opened.as_mut() {
-                        o.show = Show::Failed(message(s, &b));
+                        // Too large to read here: still the file's own
+                        // program, or a download, a press away.
+                        o.show = if code_of(&b).as_deref() == Some(ahjo_files_contract::TOO_LARGE) {
+                            Show::Not(match size {
+                                Some(size) => {
+                                    format!("{}, too large to show here", store::format::size(size))
+                                }
+                                None => "Too large to show here".into(),
+                            })
+                        } else {
+                            Show::Failed(message(s, &b))
+                        };
                     }
                     // A file deleted since the last commit still has what
                     // went to show.
@@ -1725,7 +1768,9 @@ impl FilesPage {
             cx,
         )
     }
-    /// Decodes off the UI thread what a file shows as.
+    /// Decodes off the UI thread what a file shows as. A file read whole
+    /// that this computer cannot show (an image format its decoder refuses)
+    /// says why, with its own program and Download beside it.
     fn decode(
         &mut self,
         node: String,
@@ -1742,7 +1787,8 @@ impl FilesPage {
                     .as_mut()
                     .filter(|o| o.node == node && o.path == path)
                 {
-                    o.show = result.unwrap_or_else(Show::Failed);
+                    o.show = result
+                        .unwrap_or_else(|e| Show::Not(format!("It cannot be shown here: {e}")));
                     cx.notify();
                 }
             });
@@ -2693,8 +2739,16 @@ impl FilesPage {
             rows.push(MenuRow::new("Download", {
                 let path = path.clone();
                 let me = me.clone();
+                let node = node.clone();
                 move |_, cx| {
                     let _ = me.update(cx, |p, cx| p.download_path(node.clone(), path.clone(), cx));
+                }
+            }));
+            rows.push(MenuRow::new(crate::outside::OPEN_HERE, {
+                let path = path.clone();
+                let me = me.clone();
+                move |_, cx| {
+                    let _ = me.update(cx, |p, cx| p.open_here(node.clone(), path.clone(), cx));
                 }
             }));
         }
@@ -2776,41 +2830,25 @@ impl FilesPage {
             return;
         };
         let destination = folder.join(paths::base_name(&path));
-        self.request(
-            Request::get(node, bytes_uri(&path)),
-            move |p, status, body, cx| {
-                if status != 200 {
-                    p.fail(message(status, &body), cx);
-                    return;
-                }
-                cx.spawn(async move |this, cx| {
-                    let task = cx.background_executor().spawn(async move {
-                        use std::io::Write;
-                        let result = std::fs::create_dir_all(&folder).and_then(|_| {
-                            let mut file = std::fs::OpenOptions::new()
-                                .write(true)
-                                .create_new(true)
-                                .open(&destination)?;
-                            file.write_all(&body)
-                        });
-                        (destination, result)
-                    });
-                    let (destination, result) = task.await;
-                    let _ = this.update(cx, |page, cx| match result {
-                        Ok(()) => page.host.report(
-                            Status::new(format!("Downloaded to {}", destination.display())),
-                            cx,
-                        ),
-                        Err(e) => page.fail(
-                            format!("Could not download to {}: {e}", destination.display()),
-                            cx,
-                        ),
-                    });
-                })
-                .detach();
-            },
-            cx,
-        );
+        let Some(reach) = self.host.reach(cx) else {
+            self.fail("Not connected: nothing to download from".into(), cx);
+            return;
+        };
+        let copied = crate::outside::download(&reach, &node.0, &path, destination.clone());
+        cx.spawn(async move |this, cx| {
+            let result = copied.await;
+            let _ = this.update(cx, |page, cx| match result {
+                Ok(_) => page.host.report(
+                    Status::new(format!("Downloaded to {}", destination.display())),
+                    cx,
+                ),
+                Err(e) => page.fail(
+                    format!("Could not download to {}: {e}", destination.display()),
+                    cx,
+                ),
+            });
+        })
+        .detach();
     }
     /// Where the app cannot run a page inside its window: the open web
     /// page opens in the system's browser, from its own folder so what it
@@ -2865,6 +2903,15 @@ impl FilesPage {
                 && !matches!(o.show, Show::Failed(_) | Show::Gone)
         })
     }
+    /// The open file is sound, video or a PDF the web view in the window
+    /// plays or shows (ADR 0006): not where the window holds none, nor once
+    /// its player said it cannot.
+    pub(crate) fn plays_inside(&self) -> bool {
+        ahjo_app_kit::web_view::SHOWS_INSIDE
+            && self.opened.as_ref().is_some_and(|o| {
+                matches!(o.show, Show::Media(_)) && o.cannot_play.is_none() && !o.diff_open
+            })
+    }
     /// Between the page running and its source.
     pub fn toggle_source(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(o) = self.opened.as_mut() else {
@@ -2876,31 +2923,43 @@ impl FilesPage {
         }
         cx.notify();
     }
-    pub fn play(&mut self, cx: &mut Context<Self>) {
-        let Some(opened) = self.opened.as_ref() else {
+    /// Opens the file at `path` on `node` in this computer's own program
+    /// for it: copied here whole first, however large, as the program
+    /// needs the whole file.
+    pub(crate) fn open_here(&mut self, node: NodeId, path: String, cx: &mut Context<Self>) {
+        let name = paths::base_name(&path).to_owned();
+        let Some(reach) = self.host.reach(cx) else {
+            self.fail(format!("Not connected: {name} cannot be copied here"), cx);
             return;
         };
-        let node = opened.node.clone();
-        let path = opened.path.clone();
-        let name = opened.name.clone();
-        self.request(
-            Request::get(NodeId(node.clone()), bytes_uri(&path)),
-            move |p, s, b, cx| {
-                if s != 200 {
-                    p.fail(message(s, &b), cx)
-                } else {
-                    let key = open::version(format!("{node}\n{path}").as_bytes());
-                    let dir = std::env::temp_dir().join("ahjo-open").join(&key[..16]);
-                    let dest = dir.join(&name);
-                    match std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&dest, b)) {
-                        Ok(()) => cx.open_with_system(&dest),
-                        Err(e) => p.fail(e.to_string(), cx),
+        self.host
+            .report(Status::new(format!("Copying {name} to open it here…")), cx);
+        let copied = crate::outside::for_its_app(
+            &reach,
+            &node.0,
+            &path,
+            std::env::temp_dir().join("ahjo-open"),
+        );
+        cx.spawn(async move |this, cx| {
+            let result = copied.await;
+            let _ = this.update(cx, |page, cx| match result {
+                Ok(copy) => {
+                    // Windows says nothing of what it did with it (a
+                    // program, or its own question which one): only that
+                    // it has it.
+                    cx.open_with_system(&copy);
+                    let to = if cfg!(windows) {
+                        "Windows"
+                    } else {
+                        "the system"
                     };
+                    page.host
+                        .report(Status::new(format!("Handed {name} to {to} to open")), cx);
                 }
-                cx.notify();
-            },
-            cx,
-        )
+                Err(e) => page.fail(format!("Could not open {name} here: {e}"), cx),
+            });
+        })
+        .detach();
     }
     pub fn follow_link(
         &mut self,

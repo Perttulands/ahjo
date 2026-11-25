@@ -7,10 +7,16 @@
 #                                its window placed off every screen
 #   shot <app> <png>             capture the app's window, wherever it is
 #   click <app> <x> <y>          a left click at the screenshot's pixel x, y
+#   hover <app> <selector>       the mouse over the middle of that element
+#                                of the app's web page, through DevTools
 #   type <app> <text>            the text, as typed characters
 #   key <app> <key>              one key without modifiers (enter, escape...)
 #   eval <app> <script>          the value of a script in the app's web page,
 #                                as JSON in result.txt
+#   launched <app> <name>        the program the app opened its copy of the
+#                                file <name> in, under the run's TEMP: which
+#                                program and how large the copy is, in
+#                                result.txt; it closes nothing
 #   stop                         stop every app this run started
 #
 # Clicks and keys are posted to the app's own windows, so it need not be in
@@ -33,11 +39,14 @@ function Write-Utf8([string]$name, [string]$text) {
 }
 # The answer to one script in a page, through its DevTools socket.
 function Invoke-Page($page, [string]$script) {
+    Invoke-DevTools $page "Runtime.evaluate" @{ expression = $script; returnByValue = $true; awaitPromise = $true }
+}
+# The answer to one DevTools command in a page.
+function Invoke-DevTools($page, [string]$method, $params) {
     $ws = New-Object System.Net.WebSockets.ClientWebSocket
     $none = [Threading.CancellationToken]::None
     $ws.ConnectAsync([Uri]$page.webSocketDebuggerUrl, $none).Wait() | Out-Null
-    $ask = @{ id = 1; method = "Runtime.evaluate";
-              params = @{ expression = $script; returnByValue = $true; awaitPromise = $true } } | ConvertTo-Json -Compress -Depth 5
+    $ask = @{ id = 1; method = $method; params = $params } | ConvertTo-Json -Compress -Depth 5
     $bytes = [Text.Encoding]::UTF8.GetBytes($ask)
     $ws.SendAsync((New-Object ArraySegment[byte] (,$bytes)), "Text", $true, $none).Wait() | Out-Null
     # Events may come first: read messages until the answer to id 1.
@@ -55,6 +64,33 @@ function Invoke-Page($page, [string]$script) {
     }
     $ws.Dispose()
     $answer
+}
+# The app's web page that is shown.
+function Shown-Page([string]$app) {
+    $port = [int](Get-Content -LiteralPath (Join-Path $Run "$app.devtools"))
+    # The app's pages, once its web views have loaded one; of
+    # several, the one shown (a hidden view's page is hidden).
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $pages = @()
+    while ($pages.Count -eq 0 -and $clock.Elapsed.TotalSeconds -lt 20) {
+        try {
+            # Windows PowerShell hands a JSON array on as one object:
+            # assigned first, it is taken apart item by item.
+            $list = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 2
+            $pages = @($list | ForEach-Object { $_ } |
+                Where-Object { $_.type -eq "page" -and $_.url -notlike "about:*" })
+        } catch { }
+        if ($pages.Count -eq 0) { Start-Sleep -Milliseconds 250 }
+    }
+    if ($pages.Count -eq 0) { throw "$app has no web page loaded (DevTools port $port)" }
+    $page = $pages[0]
+    if ($pages.Count -gt 1) {
+        foreach ($p in $pages) {
+            $seen = (Invoke-Page $p "document.visibilityState").result.result.value
+            if ($seen -eq "visible") { $page = $p; break }
+        }
+    }
+    $page
 }
 $job = [IO.File]::ReadAllText((Join-Path $Run "job.txt"), (New-Object Text.UTF8Encoding $false))
 $words = $job -split "`t"
@@ -74,6 +110,33 @@ public static class Win {
   [DllImport("user32.dll")] public static extern IntPtr ChildWindowFromPointEx(IntPtr h, POINT p, uint flags);
   [DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder name, int max);
+  [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] public static extern int RmStartSession(out uint session, int flags, System.Text.StringBuilder key);
+  [DllImport("rstrtmgr.dll")] public static extern int RmEndSession(uint session);
+  [DllImport("rstrtmgr.dll", CharSet = CharSet.Unicode)] public static extern int RmRegisterResources(uint session, uint files, string[] names, uint apps, IntPtr none, uint services, string[] none2);
+  [DllImport("rstrtmgr.dll")] public static extern int RmGetList(uint session, out uint needed, ref uint count, [In, Out] RM_PROCESS_INFO[] info, ref uint reasons);
+  [StructLayout(LayoutKind.Sequential)] public struct RM_UNIQUE_PROCESS { public int pid; public System.Runtime.InteropServices.ComTypes.FILETIME started; }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] public struct RM_PROCESS_INFO {
+    public RM_UNIQUE_PROCESS process;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string app;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string service;
+    public int type, status, session; [MarshalAs(UnmanagedType.Bool)] public bool restartable;
+  }
+  // The ids of the processes that have the file open now.
+  public static int[] Holders(string file) {
+    uint session; var key = new System.Text.StringBuilder(64);
+    if (RmStartSession(out session, 0, key) != 0) return new int[0];
+    try {
+      if (RmRegisterResources(session, 1, new[] { file }, 0, IntPtr.Zero, 0, null) != 0) return new int[0];
+      uint needed = 0, count = 0, reasons = 0;
+      RmGetList(session, out needed, ref count, null, ref reasons);
+      if (needed == 0) return new int[0];
+      var info = new RM_PROCESS_INFO[needed]; count = needed;
+      if (RmGetList(session, out needed, ref count, info, ref reasons) != 0) return new int[0];
+      var ids = new int[count];
+      for (int i = 0; i < count; i++) ids[i] = info[i].process.pid;
+      return ids;
+    } finally { RmEndSession(session); }
+  }
   public struct RECT { public int L, T, R, B; }
   public struct POINT { public int X, Y; }
   [StructLayout(LayoutKind.Sequential)] public struct GUITHREADINFO {
@@ -197,6 +260,20 @@ public static class Win {
             [Win]::PostMessage($h, 0x0202, [IntPtr]::Zero, $at) | Out-Null  # WM_LBUTTONUP
             Start-Sleep -Milliseconds 700
         }
+        "hover" {
+            # The mouse over the middle of the element, given to the page
+            # as real input through DevTools (a posted move does not reach
+            # a web view: it follows the cursor itself, off screen here).
+            $app, $selector = $words[1], ($words[2..($words.Count - 1)] -join " ")
+            $page = Shown-Page $app
+            $at = (Invoke-Page $page "(() => { const r = document.querySelector($(ConvertTo-Json $selector)).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()").result.result.value
+            foreach ($dx in 0, 4, 8) {
+                Invoke-DevTools $page "Input.dispatchMouseEvent" @{ type = "mouseMoved"; x = $at[0] + $dx; y = $at[1] } | Out-Null
+                Start-Sleep -Milliseconds 60
+            }
+            Write-Utf8 "result.txt" "$($at -join ', ')"
+            Start-Sleep -Milliseconds 400
+        }
         "type" {
             $app, $text = $words[1], ($words[2..($words.Count - 1)] -join " ")
             $h = Focus-Of (Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0])))
@@ -209,7 +286,8 @@ public static class Win {
         }
         "key" {
             $app, $name = $words[1], $words[2]
-            $vk = @{ enter = 0x0D; escape = 0x1B; tab = 0x09; backspace = 0x08;
+            $vk = @{ enter = 0x0D; escape = 0x1B; tab = 0x09; backspace = 0x08; space = 0x20;
+                     pageup = 0x21; pagedown = 0x22; end = 0x23; home = 0x24;
                      left = 0x25; up = 0x26; right = 0x27; down = 0x28 }[$name]
             if (-not $vk) { throw "no key '$name'" }
             $h = Focus-Of (Window-Of ([int]((Get-Content -LiteralPath (Join-Path $Run "$app.pid"))[0])))
@@ -221,34 +299,50 @@ public static class Win {
         }
         "eval" {
             $app, $script = $words[1], ($words[2..($words.Count - 1)] -join " ")
-            $port = [int](Get-Content -LiteralPath (Join-Path $Run "$app.devtools"))
-            # The app's pages, once its web views have loaded one; of
-            # several, the one shown (a hidden view's page is hidden).
-            $clock = [Diagnostics.Stopwatch]::StartNew()
-            $pages = @()
-            while ($pages.Count -eq 0 -and $clock.Elapsed.TotalSeconds -lt 20) {
-                try {
-                    # Windows PowerShell hands a JSON array on as one object:
-                    # assigned first, it is taken apart item by item.
-                    $list = Invoke-RestMethod -Uri "http://127.0.0.1:$port/json/list" -TimeoutSec 2
-                    $pages = @($list | ForEach-Object { $_ } |
-                        Where-Object { $_.type -eq "page" -and $_.url -notlike "about:*" })
-                } catch { }
-                if ($pages.Count -eq 0) { Start-Sleep -Milliseconds 250 }
-            }
-            if ($pages.Count -eq 0) { throw "$app has no web page loaded (DevTools port $port)" }
-            $page = $pages[0]
-            if ($pages.Count -gt 1) {
-                foreach ($p in $pages) {
-                    $seen = (Invoke-Page $p "document.visibilityState").result.result.value
-                    if ($seen -eq "visible") { $page = $p; break }
-                }
-            }
+            $page = Shown-Page $app
             $answer = Invoke-Page $page $script
             if ($answer.result.exceptionDetails) {
                 throw "the script threw: $($answer.result.exceptionDetails.exception.description)"
             }
             Write-Utf8 "result.txt" (ConvertTo-Json -InputObject $answer.result.result.value -Compress -Depth 10)
+        }
+        "launched" {
+            $name = $words[2]
+            $copies = Join-Path $Run "temp\ahjo-open"
+            # The newest copy: each open of a file makes its own.
+            $copy = Get-ChildItem -LiteralPath $copies -Recurse -File -Filter $name -ErrorAction SilentlyContinue |
+                Sort-Object CreationTime -Descending | Select-Object -First 1
+            if (-not $copy) { throw "no copy of $name under $copies" }
+            # The handler it believes took the copy: a program with the
+            # copy's path on its command line or holding it open, an
+            # Explorer window on it (an archive), or else a packaged app
+            # (Media Player, which gets no path and, while his session is
+            # locked, shows no window) or Windows' Open with, started since
+            # the copy was made. Reported only: he works on this desktop,
+            # so nothing it did not start itself is closed.
+            $shell = New-Object -ComObject Shell.Application
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            $found = @()
+            while ($found.Count -eq 0 -and $clock.Elapsed.TotalSeconds -lt 60) {
+                $ids = @([Win]::Holders($copy.FullName))
+                $found = @(Get-CimInstance Win32_Process | Where-Object {
+                    $ids -contains [int]$_.ProcessId -or
+                    ($_.CommandLine -and $_.CommandLine.IndexOf($copy.FullName, [StringComparison]::OrdinalIgnoreCase) -ge 0) } |
+                    ForEach-Object { $p = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue
+                        "$($_.Name) (pid $($_.ProcessId), started $(if ($p) { $p.StartTime.ToString('HH:mm:ss') }))" })
+                $found += @($shell.Windows() | Where-Object {
+                    ([Uri]::UnescapeDataString("$($_.LocationURL)") -replace '^file:///', '' -replace '/', '\') -ieq $copy.FullName } |
+                    ForEach-Object { "an Explorer window on it" })
+                if ($found.Count -eq 0 -and $clock.Elapsed.TotalSeconds -gt 15) {
+                    $found = @(Get-Process | Where-Object {
+                        ($_.Path -like "*\WindowsApps\*" -or $_.ProcessName -eq "OpenWith") -and
+                        $_.StartTime -ge $copy.CreationTime } |
+                        ForEach-Object { "$($_.ProcessName) (pid $($_.Id), started $($_.StartTime.ToString('HH:mm:ss')), since the copy)" })
+                }
+                if ($found.Count -eq 0) { Start-Sleep -Milliseconds 250 }
+            }
+            if ($found.Count -eq 0) { throw "no program opened $($copy.FullName) in 60 s" }
+            Write-Utf8 "result.txt" "$($found -join ', ') took $($copy.FullName), a copy of $($copy.Length) bytes; left running"
         }
         "stop" {
             foreach ($f in Get-ChildItem -LiteralPath $Run -Filter "*.pid") {

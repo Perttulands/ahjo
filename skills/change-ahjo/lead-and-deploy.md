@@ -85,6 +85,27 @@ skills/change-ahjo/try-windows <commit> --app swarm --page 'files --path protos/
   --step 'click 700 160' --step 'eval window.count' --step 'shot counted'
 ```
 
+`media/` in the scratch files holds silent fixtures for the media viewers
+(made once into `~/.cache/ahjo-dev/try-media`): `big.mp4` (H.264, over
+64 MiB), `clip.webm`, `voice.mp3`, `paper.pdf` (three pages), `odd.avi`
+(MPEG-4 Part 2, over 64 MiB, which WebView2 does not play), `letter.docx`
+and `bundle.zip`; the session `media` prints their paths to click. The
+player's element is `#media`. `wait <seconds>` waits for what the app does
+on its own. After Open in its Windows app, `launched <name>` finds the
+program that took the newest copy (by its command line, by what holds the
+copy open, an Explorer window on it, or else a packaged app or Windows'
+Open with started since the copy was made) and says whether the copy is
+as large as the file. It closes nothing: he works on this desktop, so the
+handler (name, pid, start time) is only reported and stays open. A
+packaged app such as Media Player gets no path, and while his session is
+locked shows no window. The apps' copies go to the run's own
+`TEMP`:
+
+```sh
+skills/change-ahjo/try-windows <commit> --app swarm --page 'files --path media/odd.avi' \
+  --step 'wait 2' --step 'click 652 224' --step 'launched odd.avi'
+```
+
 His desktop sees little: each window shows on his main screen for about
 30 ms before it is moved right of every screen, without taking focus, and
 has a taskbar button while the try runs. A second Swarm beside his is

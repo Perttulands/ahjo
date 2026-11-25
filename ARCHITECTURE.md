@@ -405,8 +405,15 @@ the real list.
   which serves only the folder it was opened in: Files' `live::Live` reads
   each request over the link from the node's read-only folder route
   (`/api/files/folder/file`, streamed, one byte range at a time). On Linux it
-  opens in the system's browser, once each time the operator opens it. The
-  reasons, the folder's confinement and the Escape order are in
+  opens in the system's browser, once each time the operator opens it. Sound
+  and video play in the same web view, in a player page the scheme serves at
+  the folder's root, and a PDF shows in the web view's own viewer; on Linux
+  they open in the system's own program, as does any file Files does not
+  show (Open in its Windows app, beside Download). That program gets a copy
+  made whole as it streams from the node (`/api/files/file/whole`, the file
+  as the list shows it, links resolved under the roots), so no size stops
+  it.
+  The reasons, the folder's confinement and the Escape order are in
   [ADR 0006](docs/adr/0006-web-pages-run-in-a-web-view.md).
 - **Popups.** Every menu, confirm and small form that a page opens over itself
   is a popup on the dismissal stack (`Host::popup`, `app-kit`'s `popup`). The

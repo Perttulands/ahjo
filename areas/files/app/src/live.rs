@@ -7,6 +7,10 @@
 //! node confines each read to the folder again, links followed
 //! ([`FOLDER_FILE_PATH`]).
 //!
+//! A sound or video file plays in a page of the app's own, the folder's
+//! root ([`PLAYER`]), which names the file in its query and tells the app
+//! when the web view cannot play it ([`CannotPlay`]).
+//!
 //! The system web view takes each answer whole. A file asked for whole (a
 //! script, a stylesheet, an image) comes whole, however long; a range, as a
 //! player asks for, holds at most [`MOST`] bytes from where it was asked,
@@ -64,6 +68,30 @@ impl Live {
         url
     }
 
+    /// Plays `name` in `folder` on `node` from now on, as [`Self::serve`]
+    /// serves a page: the address of the player page for it, `sound` for a
+    /// sound file, on a page the colour `background` (`#rrggbb`). The
+    /// player names `playback` (the open's number) in what it says.
+    #[allow(clippy::too_many_arguments)]
+    pub fn play(
+        &self,
+        node: &str,
+        folder: &str,
+        name: &str,
+        playback: u64,
+        sound: bool,
+        background: &str,
+        reach: Reach,
+    ) -> String {
+        let root = self.serve(node, folder, "", reach);
+        format!(
+            "{root}?play={}&n={playback}&as={}&bg={}",
+            enc(name),
+            if sound { "audio" } else { "video" },
+            enc(background)
+        )
+    }
+
     /// Whether the file at `path` on `node` is in the folder served now, so
     /// a page shown from it may load it.
     pub fn serves(&self, node: &str, path: &str) -> bool {
@@ -112,7 +140,14 @@ impl Live {
             ));
         }
         if path.is_empty() {
-            return respond(SchemeResponse::refused(404, "No file is named."));
+            return respond(SchemeResponse {
+                status: 200,
+                headers: vec![
+                    ("Content-Type".into(), "text/html; charset=utf-8".into()),
+                    ("Cache-Control".into(), "no-store".into()),
+                ],
+                body: PLAYER.as_bytes().to_vec(),
+            });
         }
         let uri = format!(
             "{FOLDER_FILE_PATH}?folder={}&path={}",
@@ -210,6 +245,89 @@ fn bounded(asked: &str) -> Option<String> {
     Some(format!("bytes={from}-{to}"))
 }
 
+/// The page a sound or video file plays in, at its folder's root: the file
+/// named in its query (`play`), for the open numbered `n`, as sound or
+/// video (`as`), on its background (`bg`). It plays from the folder like any page's file, so the player
+/// asks for ranges as it plays and seeks. When the web view cannot play it
+/// (an error, or a video whose picture it cannot decode), it tells the app
+/// ([`CannotPlay`]).
+pub const PLAYER: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>Player</title>
+<style>html,body{margin:0;height:100%}body{display:flex;align-items:center;justify-content:center}
+video{max-width:100%;max-height:100%}audio{width:min(90%,640px)}</style></head><body><script>
+(() => {
+  const asked = new URLSearchParams(location.search);
+  const name = asked.get("play");
+  if (!name) return;
+  document.title = name;
+  if (/^#[0-9a-fA-F]{6}$/.test(asked.get("bg") || "")) document.body.style.background = asked.get("bg");
+  const sound = asked.get("as") === "audio";
+  const media = document.createElement(sound ? "audio" : "video");
+  media.id = "media";
+  media.controls = true;
+  media.preload = "metadata";
+  let told = false;
+  const tell = (code, message) => {
+    if (told || !window.ipc) return;
+    told = true;
+    window.ipc.postMessage("ahjo-files:" + JSON.stringify({ site: location.hostname, name, playback: Number(asked.get("n")) || 0, code, message }));
+  };
+  media.addEventListener("error", () => tell(media.error ? media.error.code : 0, media.error ? media.error.message : ""));
+  if (!sound) media.addEventListener("loadedmetadata", () => { if (!media.videoWidth) tell(0, "no picture"); });
+  media.src = encodeURIComponent(name);
+  document.body.append(media);
+})();
+</script></body></html>"#;
+
+/// What a player page tells the app (posted as `ahjo-files:` and this as
+/// JSON): the web view could not play the file `name` of the folder served
+/// as `site`, opened as `playback`. `code` is the media error's (3 it could not decode it, 4 it
+/// does not play its format), 0 a video whose picture did not show.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+pub struct CannotPlay {
+    pub site: String,
+    pub name: String,
+    pub playback: u64,
+    pub code: u16,
+    pub message: String,
+}
+
+impl CannotPlay {
+    /// The message a player page posted, when it is one.
+    pub fn of(message: &str) -> Option<Self> {
+        let said: Self = serde_json::from_str(message.strip_prefix("ahjo-files:")?).ok()?;
+        // The site is the host's first name: `ahjo-file.<site>.localhost`.
+        let site = said
+            .site
+            .strip_prefix(&format!("{SCHEME}."))
+            .and_then(|s| s.strip_suffix(".localhost"))
+            .unwrap_or(&said.site)
+            .to_owned();
+        Some(Self { site, ..said })
+    }
+
+    /// Whether it is about the file `name` in `folder` on `node`, as it
+    /// was opened as `playback`.
+    pub fn is_about(&self, node: &str, folder: &str, name: &str, playback: u64) -> bool {
+        self.site == site(node, folder) && self.name == name && self.playback == playback
+    }
+
+    /// Why, in a sentence, for the operator.
+    pub fn why(&self) -> String {
+        match self.code {
+            0 => format!(
+                "{} shows no picture here: its video is in a format this view does not play",
+                self.name
+            ),
+            2 => format!("{} stopped loading: {}", self.name, self.message),
+            3 => format!("{} does not play here: its data did not decode", self.name),
+            _ => format!(
+                "{} does not play here: this view does not play its format",
+                self.name
+            ),
+        }
+    }
+}
+
 /// The site a folder serves as: a hash of its node and path, so no page
 /// learns either from its address.
 fn site(node: &str, folder: &str) -> String {
@@ -217,7 +335,7 @@ fn site(node: &str, folder: &str) -> String {
     hex::encode(&hash[..10])
 }
 
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     s.bytes()
         .map(|b| {
             if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
@@ -250,6 +368,25 @@ mod tests {
         );
         assert_eq!(bounded("bytes=0-1,5-6"), None);
         assert_eq!(bounded("items=0-1"), None);
+    }
+
+    #[test]
+    fn a_player_says_which_file_it_cannot_play() {
+        let host = format!("{SCHEME}.{}.localhost", site("box", "/work"));
+        let said = CannotPlay::of(&format!(
+            r#"ahjo-files:{{"site":"{host}","name":"a.avi","playback":7,"code":4,"message":"no demuxer"}}"#
+        ))
+        .expect("a player's message");
+        assert!(said.is_about("box", "/work", "a.avi", 7));
+        assert!(!said.is_about("box", "/work", "a.avi", 8));
+        assert!(!said.is_about("box", "/work", "b.avi", 7));
+        assert!(!said.is_about("box", "/other", "a.avi", 7));
+        assert_eq!(
+            said.why(),
+            "a.avi does not play here: this view does not play its format"
+        );
+        assert_eq!(CannotPlay::of("ahjo-kit:escape"), None);
+        assert_eq!(CannotPlay::of(r#"ahjo-files:{"site":"x"}"#), None);
     }
 
     #[test]

@@ -357,6 +357,7 @@ dependencies = [
  "ahjo-terminals-app",
  "ahjo-terminals-contract",
  "ahjo-testkit",
+ "async-channel",
  "gltf",
  "gpui-pre",
  "hex",

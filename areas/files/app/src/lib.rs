@@ -2,6 +2,7 @@
 pub mod live;
 pub mod model;
 pub mod open;
+pub mod outside;
 pub mod store;
 
 mod page;

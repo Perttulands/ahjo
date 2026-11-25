@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use ahjo_files_contract::{
-    At, DropAt, Dropped, FILE_BYTES_PATH, FOLDER_FILE_PATH, InFolder, Job, SaveAt,
+    At, DropAt, Dropped, FILE_BYTES_PATH, FILE_WHOLE_PATH, FOLDER_FILE_PATH, InFolder, Job, SaveAt,
 };
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
@@ -30,6 +30,7 @@ pub fn routes(files: Arc<Files>, drops: Arc<Drops>) -> Router {
         .route("/api/files/bridge/start", post(bridge_start))
         .route("/api/files/bridge/events", get(bridge_events))
         .route(FILE_BYTES_PATH, get(read).put(save).post(create_file))
+        .route(FILE_WHOLE_PATH, get(read_whole))
         .route(FOLDER_FILE_PATH, get(read_in_folder))
         .layer(DefaultBodyLimit::max(MAX_BYTES as usize))
         .with_state(files)
@@ -99,6 +100,34 @@ async fn read(State(files): Shared, Query(at): Query<At>) -> Result<Response, Fi
         (X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
     ];
     Ok((headers, bytes).into_response())
+}
+
+/// A file under a root, whole, streamed from the disk as it is sent, so any
+/// size serves: for a copy of it to be made elsewhere. Plain bytes, never
+/// run.
+async fn read_whole(State(files): Shared, Query(at): Query<At>) -> Result<Response, FilesError> {
+    let (file, length) = blocking(&files, &at.node, move |f| {
+        let path = f.roots.existing(&at.path)?;
+        let file = std::fs::File::open(&path)?;
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            return Err(FilesError::NotFile);
+        }
+        Ok((file, meta.len()))
+    })
+    .await?;
+    let headers = [
+        (
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/octet-stream"),
+        ),
+        (CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        (CONTENT_SECURITY_POLICY, HeaderValue::from_static("sandbox")),
+        (X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")),
+        (CONTENT_LENGTH, header(&length.to_string())),
+    ];
+    let body = axum::body::Body::from_stream(stream_from(file, 0, length));
+    Ok((headers, body).into_response())
 }
 
 /// A file of an opened folder, whole or the one byte range asked for,

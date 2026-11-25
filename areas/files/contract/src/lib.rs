@@ -7,6 +7,11 @@ pub mod commands;
 /// HTTP route serving the bytes of a file.
 pub const FILE_BYTES_PATH: &str = "/api/files/file";
 
+/// HTTP route reading one file under a root ([`At`]) whole, streamed, of
+/// any size, links resolved as the file list shows them: what Download and
+/// the file's own program get. Read-only, served as plain bytes.
+pub const FILE_WHOLE_PATH: &str = "/api/files/file/whole";
+
 /// HTTP route reading a file inside an opened folder ([`InFolder`]), whole
 /// or one byte range, streamed: what a web view showing a file of that
 /// folder loads, through the app. Read-only.

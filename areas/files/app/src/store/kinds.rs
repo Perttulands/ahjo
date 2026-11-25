@@ -223,6 +223,28 @@ mod tests {
         assert_eq!(kind(".env.local"), Kind::Text);
     }
 
+    /// What every sound, video, PDF and file-of-its-own-program name opens
+    /// as: played or shown by the web view (else this computer's program),
+    /// or offered to its program.
+    #[test]
+    fn media_and_other_kinds_by_extension() {
+        for ext in ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav"] {
+            assert_eq!(kind(&format!("a.{ext}")), Kind::Audio, "{ext}");
+        }
+        for ext in [
+            "avi", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ogv", "webm",
+        ] {
+            assert_eq!(kind(&format!("a.{ext}")), Kind::Video, "{ext}");
+        }
+        assert_eq!(kind("A.PDF"), Kind::Pdf);
+        for ext in [
+            "docx", "doc", "xlsx", "pptx", "odt", "zip", "7z", "tar", "gz", "rar", "exe", "msi",
+            "bin", "",
+        ] {
+            assert_eq!(kind(&format!("a.{ext}")), Kind::Other, "{ext}");
+        }
+    }
+
     #[test]
     fn binary_is_not_text() {
         assert_eq!(as_text(b"hi\tthere\n").as_deref(), Some("hi\tthere\n"));

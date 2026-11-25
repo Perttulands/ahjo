@@ -23,12 +23,20 @@ usage: try-windows [<commit>] [--page <page>]... [--step <step>]... [--app swarm
               click <x> <y>      a left click at the last screenshot's pixels,
                                  in the deepest window there: a web view's
                                  page too
+              hover <selector>   the mouse over the middle of that element of
+                                 the web page shown (a hover)
               type <text>        typed into what has the keyboard
               key <key>          enter, escape, tab, backspace, up, down,
                                  left or right
               eval <script>      the script's value in the app's web page
                                  (the shown one, when it has several),
                                  printed and kept in eval.txt
+              wait <seconds>     waits, for what the app does on its own
+              launched <name>    waits for the program the app opened a
+                                 copy of the scratch file <name> in (its
+                                 own Windows app), says which program and
+                                 whether the copy is whole; it closes
+                                 nothing
               shot <name>        captured as <app>-<name>.png
             Keys with Alt or Ctrl cannot be sent to a window that is not in
             front: run a chord from the Keys panel (click Keys, then its row).
@@ -38,7 +46,11 @@ usage: try-windows [<commit>] [--page <page>]... [--step <step>]... [--app swarm
             'my assets', a <dialog>, a custom note Escape hides) and
             protos/cdn (lodash from a CDN), each
             counting its button's clicks in window.count; the session
-            'protos' prints both paths, to click.
+            'protos' prints both paths, to click. media/ holds big.mp4
+            (h264, over 64 MiB), clip.webm, voice.mp3, paper.pdf (three
+            pages), odd.avi (MPEG-4 Part 2, over 64 MiB, which the web
+            view does not play), letter.docx and bundle.zip; the session
+            'media' prints their paths. All of them are silent.
   --app     which apps to start (default all three)
   --out     where the screenshots go (default
             ~/.cache/ahjo-dev/try-shots/<commit>-<time>)
@@ -121,7 +133,7 @@ cleanup() {
   done
   [ ${#pids[@]} -gt 0 ] && kill "${pids[@]}" 2>/dev/null && wait "${pids[@]}" 2>/dev/null
   "$TMUX_BIN" -S "$S/tmux.sock" kill-server 2>/dev/null
-  rm -rf "$S" "$RUN"
+  rm -rf "$S" 2>/dev/null; rm -rf "$RUN" 2>/dev/null || say "left $RUNW: something there is still in use"
   say "stopped everything it started"
 }
 trap cleanup EXIT
@@ -236,6 +248,30 @@ document.getElementById("count").addEventListener("click", (e) => {
 });
 </script></body></html>
 HTML
+# Media for Files to play, made once and kept between runs: silent, so a
+# try plays nothing aloud on his speakers.
+MEDIA=$HOME/.cache/ahjo-dev/try-media
+if [ ! -e "$MEDIA/done" ]; then
+  say "making the media fixtures in $MEDIA (once)"
+  mkdir -p "$MEDIA"
+  ff() { ffmpeg -v error -y "$@" < /dev/null; }
+  # 60 s at a constant 12 Mbit/s: about 90 MB.
+  ff -f lavfi -i testsrc2=size=1280x720:rate=30 -f lavfi -i anullsrc=r=44100:cl=stereo -t 60 \
+    -c:v libx264 -preset ultrafast -pix_fmt yuv420p -b:v 12M -minrate 12M -maxrate 12M -bufsize 2M \
+    -x264-params nal-hrd=cbr -c:a aac -b:a 64k -movflags +faststart "$MEDIA/big.mp4"
+  ff -f lavfi -i testsrc2=size=640x360:rate=30 -t 20 -c:v libvpx-vp9 -b:v 400k -deadline realtime -cpu-used 8 "$MEDIA/clip.webm"
+  ff -f lavfi -i anullsrc=r=44100:cl=stereo -t 30 -c:a libmp3lame -b:a 64k "$MEDIA/voice.mp3"
+  # MPEG-4 Part 2 in AVI at the best quality: a format WebView2 does not play.
+  ff -f lavfi -i testsrc2=size=1280x720:rate=30 -t 40 -c:v mpeg4 -q:v 1 "$MEDIA/odd.avi"
+  cp "$LINUX/areas/files/app/tests/media/paper.pdf" "$LINUX/areas/files/app/tests/media/letter.docx" \
+    "$LINUX/areas/files/app/tests/media/bundle.zip" "$MEDIA/"
+  [ "$(stat -c %s "$MEDIA/big.mp4")" -gt $((64 << 20)) ] && [ "$(stat -c %s "$MEDIA/odd.avi")" -gt $((64 << 20)) ] ||
+    die "the large media fixtures came out under 64 MiB"
+  touch "$MEDIA/done"
+fi
+mkdir -p "$S/files/media"
+cp "$MEDIA"/big.mp4 "$MEDIA"/clip.webm "$MEDIA"/voice.mp3 "$MEDIA"/odd.avi "$MEDIA"/paper.pdf \
+  "$MEDIA"/letter.docx "$MEDIA"/bundle.zip "$S/files/media/"
 git -C "$S/brain" init -q && git -C "$S/brain" add -A &&
   git -C "$S/brain" -c user.name=try -c user.email=try@localhost commit -qm "scratch brain"
 cat > "$S/xdg/ahjo/config.toml" <<EOF
@@ -255,6 +291,8 @@ HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s agent -c "$S/files" \
 HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s shell -c "$S/files" "ls -la; exec bash --norc"
 HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s protos -c "$S/files" \
   "printf '%s\\n' 'Prototypes:' '' '$S/files/protos/counter/index.html' '' '$S/files/protos/cdn/index.html'; exec bash --norc"
+HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s media -c "$S/files/media" \
+  "printf '%s\\n' 'Media:' '' $(for f in big.mp4 clip.webm voice.mp3 paper.pdf odd.avi letter.docx bundle.zip; do printf "'%s' '' " "$S/files/media/$f"; done); exec bash --norc"
 HOME=$S XDG_CONFIG_HOME=$S/xdg "$AHJO" serve > "$out/node.log" 2>&1 &
 pids+=($!)
 for i in $(seq 1 100); do "$AHJO" version --node $node >/dev/null 2>&1 && break; sleep 0.2; done
@@ -330,7 +368,7 @@ fi
 
 # --- The Windows apps, with scratch settings, off screen ------------------
 cp "$HERE/try-windows.ps1" "$RUN/"
-mkdir -p "$RUN/appdata/Ahjo" "$RUN/localappdata"
+mkdir -p "$RUN/appdata/Ahjo" "$RUN/localappdata" "$RUN/temp"
 # His theme and size, read and never written, so the shots look as his do.
 his=/mnt/c/Users/pertt/AppData/Roaming/Ahjo/app.json
 theme=$(jq -r '.theme // empty' "$his" 2>/dev/null || true)
@@ -339,8 +377,10 @@ jq -n --arg node "$node" --arg theme "${theme:-}" --arg size "${size:-}" \
   '{node: $node} + (if $theme != "" then {theme: $theme} else {} end)
    + (if $size != "" then {size: ($size | tonumber)} else {} end)' > "$RUN/appdata/Ahjo/app.json"
 # APPDATA and LOCALAPPDATA point every file the apps keep (settings, logs,
-# the Desk's web view, Brain's cache) into the run.
-printf 'APPDATA=%s\r\nLOCALAPPDATA=%s\r\n' "$RUNW\\appdata" "$RUNW\\localappdata" > "$RUN/env.txt"
+# the Desk's web view, Brain's cache) into the run; TEMP and TMP the copies
+# a file's own Windows app opens.
+printf 'APPDATA=%s\r\nLOCALAPPDATA=%s\r\nTEMP=%s\r\nTMP=%s\r\n' "$RUNW\\appdata" "$RUNW\\localappdata" \
+  "$RUNW\\temp" "$RUNW\\temp" > "$RUN/env.txt"
 exe() { printf '%s\\target\\release\\ahjo-%s.exe' "$(wslpath -w "$WIN")" "$1"; }
 
 if wants swarm; then
@@ -393,6 +433,9 @@ for walked in "${walk[@]}"; do
     click)
       step click "$app" $rest
       say "$app click $rest landed in $(tr -d '\r' < "$RUN/result.txt")" ;;
+    hover)
+      step hover "$app" "$rest"
+      say "$app hover $rest at $(tr -d '\r' < "$RUN/result.txt")" ;;
     type|key)
       step "$verb" "$app" "$rest"
       say "$app $verb $rest went to $(tr -d '\r' < "$RUN/result.txt")" ;;
@@ -401,6 +444,16 @@ for walked in "${walk[@]}"; do
       value=$(tr -d '\r' < "$RUN/result.txt")
       printf '%s\t%s\t%s\n' "$app" "$rest" "$value" >> "$out/eval.txt"
       say "$app eval $rest => $value" ;;
+    wait)
+      sleep "$rest" ;;
+    launched)
+      step launched "$app" "$rest"
+      seen=$(tr -d '\r' < "$RUN/result.txt")
+      original=$(stat -c %s "$S/files/media/$rest" 2>/dev/null || stat -c %s "$S/files/$rest")
+      copied=$(sed -n 's/.* copy of \([0-9]*\) bytes.*/\1/p' <<< "$seen")
+      whole=$([ "$copied" = "$original" ] && echo whole || echo "NOT WHOLE: $copied of $original bytes")
+      printf '%s\t%s\t%s (%s)\n' "$app" "launched $rest" "$seen" "$whole" >> "$out/eval.txt"
+      say "$app launched $rest: $seen ($whole)" ;;
     shot)
       step shot "$app" "$RUNW\\$app-$rest.png"
       mv "$RUN/$app-$rest.png" "$out/" ;;

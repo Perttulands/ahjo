@@ -56,6 +56,34 @@ the reader or the panel, its source a switch away.
   else in the window takes the keyboard back too. Terminal and Peek keys
   never pass through a page.
 
+- **Sound, video and PDF too.** The same web view plays a sound or video
+  file and shows a PDF, from a terminal click and from Files alike. A PDF
+  loads straight into the web view's own viewer. Sound and video play in a
+  page of the app's own (`live::PLAYER`), which the scheme serves at the
+  folder's root and which names the file in its query: the player reads the
+  file from the folder in ranges as it plays and seeks, never whole. When
+  the web view cannot play it (an error, or a video whose picture it does
+  not decode) the page tells the app (`live::CannotPlay`), and the reader
+  says so in place of the player. On Linux these open in the system's own
+  program, as before.
+- **Every other file, its own program.** A file Files shows neither as text
+  nor in a viewer (an office document, an archive, unknown bytes, one too
+  large to read, a picture this computer does not decode) and media the
+  web view cannot play offer Open in its Windows app beside Download. Both
+  copy the file whole as it streams from the node, a piece at a time, so no
+  size limit applies. They read it through a route of their own
+  (`/api/files/file/whole`), the one file as the list shows it with its
+  links resolved under the roots, as Download always read it: the folder
+  route's bound is a page's, and a file the operator picked by name needs
+  none. The program gets a copy in this computer's temporary files, under
+  one safe local name (the extension kept), in a folder no other open
+  shares; folders of opens more than a day old go. The app says it handed
+  the file to Windows, which tells it no more.
+- **A player's word, on its own open.** The player page names the open it
+  plays for (`Opened::playback`), and the app takes what it says only for
+  that open, so a late error from an earlier open of the same file changes
+  nothing.
+
 ## Why
 
 - **Not a viewer of our own.** A prototype is only seen by running it:
@@ -71,6 +99,11 @@ the reader or the panel, its source a switch away.
   node's API (the node's route sends `Content-Security-Policy: sandbox` for
   that reason), and would need the node reachable from the web view. Served
   through the app, the page has only its folder.
+- **The system's player, not one of our own.** WebView2 plays what a
+  browser plays (H.264 and VP8/9 video, MP3, AAC, Opus, WAV) and shows PDFs,
+  with its own controls and seeking; anything else goes to the program
+  Windows chooses for it, which plays far more. A copy, not the node's
+  address, because the program is on Windows and the file on the node.
 - **Hide on overlap, not punch holes.** A child window cannot be drawn under
   the app's popups. Hiding it while anything overlaps keeps every popup
   visible and costs a moment of blank page; a popup elsewhere does not.

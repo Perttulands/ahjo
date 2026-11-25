@@ -691,3 +691,60 @@ async fn a_folder_serves_nothing_outside_itself() {
     // A leading slash names a file of the folder too, not of the disk.
     assert_eq!(status("/etc/passwd", &folder).await, StatusCode::NOT_FOUND);
 }
+
+/// Download and a file's own program read it whole, past the most one read
+/// carries, through a link as the list shows it (to another folder of the
+/// root, as the folder route refuses); never from outside the roots.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_whole_file_streams_through_its_links_inside_the_roots() {
+    let scratch = Scratch::new("file-whole");
+    let root = scratch.0.join("root");
+    let folder = root.join("here");
+    let other = root.join("other");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    let length = MAX_BYTES + 4096;
+    {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut file = std::fs::File::create(other.join("big.bin")).unwrap();
+        file.set_len(length).unwrap();
+        file.seek(SeekFrom::Start(length - 4)).unwrap();
+        file.write_all(b"tail").unwrap();
+    }
+    std::fs::write(scratch.0.join("outside.txt"), "not a root's").unwrap();
+    std::os::unix::fs::symlink(other.join("big.bin"), folder.join("next door.bin")).unwrap();
+    std::os::unix::fs::symlink(scratch.0.join("outside.txt"), folder.join("out.txt")).unwrap();
+    let app = app(&root);
+    let whole = |path: &Path| {
+        format!(
+            "/api/files/file/whole?node={NODE}&path={}",
+            encode(path.to_str().unwrap())
+        )
+    };
+    let (status, body, headers) = call(
+        &app,
+        "GET",
+        &whole(&folder.join("next door.bin")),
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.len() as u64, length);
+    assert!(body.ends_with(b"tail"));
+    assert_eq!(headers["content-length"], length.to_string().as_str());
+    assert_eq!(headers["content-type"], "application/octet-stream");
+    // The folder route keeps the page's folder as its bound.
+    let (status, _, _) = call(
+        &app,
+        "GET",
+        &in_folder(&folder, "next door.bin"),
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, _) = call(&app, "GET", &whole(&folder.join("out.txt")), Body::empty()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _, _) = call(&app, "GET", &whole(&folder), Body::empty()).await;
+    assert_ne!(status, StatusCode::OK);
+}

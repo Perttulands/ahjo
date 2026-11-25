@@ -1400,29 +1400,301 @@ fn opening_another_file_keeps_the_previous_files_draft(cx: &mut TestAppContext) 
     std::fs::remove_dir_all(root).unwrap();
 }
 
-/// Media is shown immediately, without reading its bytes first.
+/// Sound, video and PDF show what plays them without reading the file
+/// first; every file the app does not show offers its own program and
+/// Download. Here, where the window holds no web view, its own program
+/// plays it (ADR 0006). Pressed, the program gets a complete copy, however
+/// large: the copy's bytes are the file's, past the 64 MiB a read holds.
 #[gpui::test]
-fn sound_video_and_pdf_open_to_play_without_reading(cx: &mut TestAppContext) {
-    let root = ahjo_testkit::fresh_dir("files-media");
-    for name in ["clip.mp4", "voice.mp3", "paper.pdf"] {
-        std::fs::write(root.join(name), b"").unwrap();
+fn media_and_other_files_open_in_their_own_program_whole(cx: &mut TestAppContext) {
+    use ahjo_files_app::open::Show;
+    use ahjo_files_app::store::kinds::Kind;
+    use std::io::{Seek, SeekFrom, Write};
+    if ahjo_app_kit::web_view::SHOWS_INSIDE {
+        return;
     }
+    let root = ahjo_testkit::fresh_dir("files-media");
+    let downloads = ahjo_testkit::fresh_dir("files-media-downloads");
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/media");
+    let media = [
+        ("clip.mp4", Kind::Video),
+        ("clip.webm", Kind::Video),
+        ("clip.mov", Kind::Video),
+        ("voice.mp3", Kind::Audio),
+        ("voice.wav", Kind::Audio),
+        ("voice.ogg", Kind::Audio),
+        ("paper.pdf", Kind::Pdf),
+    ];
+    for entry in std::fs::read_dir(&fixtures).unwrap() {
+        let entry = entry.unwrap();
+        std::fs::copy(entry.path(), root.join(entry.file_name())).unwrap();
+    }
+    std::fs::write(root.join("gone.mp4"), b"not read").unwrap();
+    // A file listed in one folder through a link to another folder of the
+    // root, which no page of its folder may load, still opens whole.
+    std::fs::create_dir(root.join("shelf")).unwrap();
+    std::fs::create_dir(root.join("desk")).unwrap();
+    std::fs::copy(fixtures.join("letter.docx"), root.join("shelf/kept.docx")).unwrap();
+    std::os::unix::fs::symlink(root.join("shelf/kept.docx"), root.join("desk/linked.docx"))
+        .unwrap();
+    // Larger than any read of a file whole (64 MiB), sparse, its last
+    // bytes marked so the copy's end can be checked.
+    let huge_length = (64u64 << 20) + 4096;
+    let mut huge = std::fs::File::create(root.join("huge.bin")).unwrap();
+    huge.set_len(huge_length).unwrap();
+    huge.seek(SeekFrom::End(-4)).unwrap();
+    huge.write_all(b"tail").unwrap();
+    drop(huge);
+    let settings = root.join("settings.json");
+    std::fs::write(
+        &settings,
+        serde_json::to_vec(&serde_json::json!({"files":{"download_folder":downloads}})).unwrap(),
+    )
+    .unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
     cx.update(ahjo_app_shell::prepare);
     let url = running.url.clone();
-    let (_, cx) = cx.add_window_view(move |window, cx| {
-        ahjo_app_shell::start(&[ahjo_files_app::build], Some(url), None, window, cx)
+    let (shell, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), Some(settings), w, cx)
     });
-    for name in ["clip.mp4", "voice.mp3", "paper.pdf"] {
-        let id = leak(format!("file-row-{name}"));
-        tree(cx, id);
-        std::fs::remove_file(root.join(name)).unwrap();
-        click(cx, id);
-        until(cx, "media open action", |cx| {
-            cx.debug_bounds("files-play").is_some()
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    let shown = |cx: &mut VisualTestContext, name: &str| {
+        page.read_with(cx, |p, _| {
+            p.opened
+                .as_ref()
+                .filter(|o| o.name == name)
+                .map(|o| o.show.clone())
+        })
+    };
+    // Each press hands the program one more path: the copy it opened.
+    let open_here = |cx: &mut VisualTestContext, name: &str| -> std::path::PathBuf {
+        let before = cx.opened_paths().len();
+        click(cx, "files-open-here");
+        until(cx, "its program opened", |cx| {
+            cx.opened_paths().len() > before
         });
+        let copy = cx.opened_paths().last().unwrap().clone();
+        assert_eq!(copy.file_name().unwrap(), name);
+        assert!(copy.starts_with(std::env::temp_dir().join("ahjo-open")));
+        copy
+    };
+    let mut copies = vec![];
+
+    tree(cx, "file-row-clip.mp4");
+    for (name, kind) in media {
+        click(cx, leak(format!("file-row-{name}")));
+        let words = if kind == Kind::Pdf {
+            "empty-It shows in this computer's own reader"
+        } else {
+            "empty-It plays in this computer's own player"
+        };
+        until(cx, "what plays it", |cx| {
+            cx.debug_bounds(words).is_some()
+                && cx.debug_bounds("viewer-download").is_some()
+                && matches!(shown(cx, name), Some(Show::Media(k)) if k == kind)
+        });
+        let copy = open_here(cx, name);
+        assert_eq!(
+            std::fs::read(&copy).unwrap(),
+            std::fs::read(root.join(name)).unwrap(),
+            "{name}: its program gets the whole file"
+        );
+        copies.push(copy);
     }
+
+    // Opened without reading: a file gone since the listing still shows
+    // what plays it.
+    std::fs::remove_file(root.join("gone.mp4")).unwrap();
+    click(cx, "file-row-gone.mp4");
+    until(cx, "what plays it, unread", |cx| {
+        cx.debug_bounds("empty-It plays in this computer's own player")
+            .is_some()
+            && matches!(shown(cx, "gone.mp4"), Some(Show::Media(Kind::Video)))
+    });
+
+    // A Word document and an archive: not shown, their program a press
+    // away, beside Download.
+    for (name, words) in [
+        ("letter.docx", "empty-937 B of binary, not shown here"),
+        ("bundle.zip", "empty-147 B of binary, not shown here"),
+    ] {
+        click(cx, leak(format!("file-row-{name}")));
+        until(cx, "not shown, with its program", |cx| {
+            cx.debug_bounds(words).is_some()
+                && cx.debug_bounds("files-open-here").is_some()
+                && cx.debug_bounds("viewer-download").is_some()
+        });
+        let copy = open_here(cx, name);
+        assert_eq!(
+            std::fs::read(&copy).unwrap(),
+            std::fs::read(root.join(name)).unwrap()
+        );
+        copies.push(copy);
+    }
+
+    let linked = root.canonicalize().unwrap().join("desk/linked.docx");
+    let linked = linked.to_str().unwrap().to_owned();
+    page.update_in(cx, |p, w, cx| p.open(linked, w, cx));
+    until(cx, "the linked file, with its program", |cx| {
+        cx.debug_bounds("empty-937 B of binary, not shown here")
+            .is_some()
+            && shown(cx, "linked.docx").is_some()
+    });
+    let copy = open_here(cx, "linked.docx");
+    assert_eq!(
+        std::fs::read(&copy).unwrap(),
+        std::fs::read(root.join("shelf/kept.docx")).unwrap()
+    );
+    copies.push(copy);
+
+    // Too large to read here: still its program, and Download, whole.
+    click(cx, "file-row-huge.bin");
+    until(cx, "too large, with its program", |cx| {
+        cx.debug_bounds("empty-64 MB, too large to show here")
+            .is_some()
+            && cx.debug_bounds("files-open-here").is_some()
+    });
+    let copy = open_here(cx, "huge.bin");
+    let whole = |path: &std::path::Path| {
+        let mut file = std::fs::File::open(path).unwrap();
+        let length = file.metadata().unwrap().len();
+        let mut tail = [0u8; 4];
+        file.seek(SeekFrom::End(-4)).unwrap();
+        std::io::Read::read_exact(&mut file, &mut tail).unwrap();
+        (length, tail)
+    };
+    assert_eq!(whole(&copy), (huge_length, *b"tail"), "the copy is whole");
+    copies.push(copy);
+    click(cx, "viewer-download");
+    let destination = downloads.join("huge.bin");
+    let notice = format!("Downloaded to {}", destination.display());
+    until(cx, "downloaded whole", |cx| status(&shell, cx) == notice);
+    assert_eq!(whole(&destination), (huge_length, *b"tail"));
+
+    drop(running);
+    for copy in copies {
+        // Its folder for this open, the only one of this test's.
+        std::fs::remove_dir_all(copy.parent().unwrap()).unwrap();
+    }
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(downloads).unwrap();
+}
+
+/// A player that cannot play its file says so on the file it played, with
+/// the file's own program a press away; what it says late, of a file no
+/// longer open, changes nothing.
+#[gpui::test]
+fn a_player_that_cannot_play_says_so_on_its_own_file(cx: &mut TestAppContext) {
+    let root = ahjo_testkit::fresh_dir("files-cannot-play");
+    std::fs::write(root.join("a.avi"), b"RIFF").unwrap();
+    std::fs::write(root.join("b.avi"), b"RIFF").unwrap();
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    let (node, said) = page.read_with(cx, |p, _| (p.tree.node.clone(), p.said.clone()));
+    let folder = root.canonicalize().unwrap();
+    let folder = folder.to_str().unwrap();
+    // As the player page posts it, from its own host.
+    let host = |cx: &mut VisualTestContext, name: &str| {
+        let reach = page.read_with(cx, |p, cx| p.host.reach(cx)).unwrap();
+        let url = ahjo_files_app::live::Live::default()
+            .play(&node, folder, name, 1, false, "#000000", reach);
+        url.split("://")
+            .nth(1)
+            .unwrap()
+            .split('/')
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    let cannot = |site: &str, name: &str, playback: u64| {
+        format!(
+            "ahjo-files:{}",
+            serde_json::json!({"site": site, "name": name, "playback": playback,
+                "code": 4, "message": "DEMUXER_ERROR"})
+        )
+    };
+    let playback =
+        |cx: &mut VisualTestContext| page.read_with(cx, |p, _| p.opened.as_ref().unwrap().playback);
+    tree(cx, "file-row-a.avi");
+    click(cx, "file-row-a.avi");
+    until(cx, "a.avi open", |cx| {
+        cx.debug_bounds("viewer-download").is_some()
+    });
+    let a_site = host(cx, "a.avi");
+    let first = playback(cx);
+    said.try_send(cannot(&a_site, "a.avi", first)).unwrap();
+    let why = "empty-a.avi does not play here: this view does not play its format";
+    until(cx, "why, with its program", |cx| {
+        cx.debug_bounds(why).is_some() && cx.debug_bounds("files-open-here").is_some()
+    });
+    click(cx, "file-row-b.avi");
+    until(cx, "b.avi open", |cx| {
+        cx.debug_bounds("empty-It plays in this computer's own player")
+            .is_some()
+    });
+    // a.avi's player, late: b.avi is open now.
+    said.try_send(cannot(&a_site, "a.avi", first)).unwrap();
+    cx.run_until_parked();
+    page.read_with(cx, |p, _| {
+        let o = p.opened.as_ref().unwrap();
+        assert_eq!(o.name, "b.avi");
+        assert_eq!(o.cannot_play, None);
+    });
+    // a.avi opened again plays afresh: what its first player says, late,
+    // is about that open, not this one; what this one's says shows.
+    click(cx, "file-row-a.avi");
+    until(cx, "a.avi open again", |cx| {
+        cx.debug_bounds("empty-It plays in this computer's own player")
+            .is_some()
+            && page.read_with(cx, |p, _| p.opened.as_ref().unwrap().name == "a.avi")
+    });
+    let again = playback(cx);
+    assert_ne!(again, first);
+    said.try_send(cannot(&a_site, "a.avi", first)).unwrap();
+    cx.run_until_parked();
+    page.read_with(cx, |p, _| {
+        assert_eq!(p.opened.as_ref().unwrap().cannot_play, None)
+    });
+    said.try_send(cannot(&a_site, "a.avi", again)).unwrap();
+    until(cx, "why, for this open", |cx| {
+        cx.debug_bounds(why).is_some()
+    });
+    drop(running);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A picture read whole that this computer cannot decode says why, with
+/// its own program and Download beside it, as any file not shown does.
+#[gpui::test]
+fn a_picture_that_does_not_decode_offers_its_own_program(cx: &mut TestAppContext) {
+    let root = ahjo_testkit::fresh_dir("files-undecoded");
+    std::fs::write(root.join("broken.png"), b"not a png at all").unwrap();
+    let running = start(root.clone());
+    cx.executor().allow_parking();
+    cx.update(ahjo_app_shell::prepare);
+    let url = running.url.clone();
+    let (_, cx) = cx.add_window_view(move |w, cx| {
+        ahjo_app_shell::start(&[observed_files], Some(url), None, w, cx)
+    });
+    let page = SEARCH_PAGE.with(|p| p.borrow().as_ref().unwrap().clone());
+    tree(cx, "file-row-broken.png");
+    click(cx, "file-row-broken.png");
+    until(cx, "why, with its program and Download", |cx| {
+        page.read_with(cx, |p, _| {
+            p.opened.as_ref().is_some_and(
+                |o| matches!(&o.show, ahjo_files_app::open::Show::Not(why) if why.starts_with("It cannot be shown here: ")),
+            )
+        }) && cx.debug_bounds("files-open-here").is_some()
+            && cx.debug_bounds("viewer-download").is_some()
+    });
+    assert!(cx.debug_bounds("files-failed").is_none());
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -3188,6 +3460,13 @@ fn the_page_scheme_serves_its_folder_and_nothing_else(cx: &mut TestAppContext) {
         page_answer.header("content-type"),
         Some("text/html; charset=utf-8")
     );
+    let player = ask("", vec![]);
+    assert_eq!(player.status, 200, "the player, at the folder's root");
+    assert_eq!(
+        player.header("content-type"),
+        Some("text/html; charset=utf-8")
+    );
+    assert_eq!(player.body, ahjo_files_app::live::PLAYER.as_bytes());
     let nested = ask("my%20assets/style%20one.css", vec![]);
     assert_eq!(nested.status, 200);
     assert_eq!(nested.body, b"p { color: red }");
