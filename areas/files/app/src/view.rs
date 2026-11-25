@@ -1379,7 +1379,7 @@ impl FilesPage {
     /// system has a web view the app can lay there, else in the system's
     /// browser, opened when the file was.
     fn live_page(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let Some(o) = &self.opened else {
+        let Some(opened) = &self.opened else {
             return div().into_any_element();
         };
         let source = || {
@@ -1390,7 +1390,7 @@ impl FilesPage {
         };
         let reach = self.host.reach(cx);
         if !ahjo_app_kit::web_view::SHOWS_INSIDE {
-            let local = reach.is_some_and(|r| r.on_this_computer(&o.node));
+            let local = reach.is_some_and(|r| r.on_this_computer(&opened.node));
             return pane::empty(
                 t,
                 if local {
@@ -1414,9 +1414,12 @@ impl FilesPage {
         let Some(reach) = reach else {
             return div().into_any_element();
         };
-        let url = self
-            .served
-            .serve(&o.node, &paths::parent(&o.path), &o.name, reach);
+        let url = self.served.serve(
+            &opened.node,
+            &paths::parent(&opened.path),
+            &opened.name,
+            reach,
+        );
         let live = self.served.clone();
         let focus = self.focus.clone();
         div()

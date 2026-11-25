@@ -7,9 +7,10 @@
 //! node confines each read to the folder again, links followed
 //! ([`FOLDER_FILE_PATH`]).
 //!
-//! The system web view takes each answer whole, so one answer holds at most
-//! [`MOST`] bytes: a longer file is answered from where it was asked, that
-//! much of it, and a player asks for the rest as it plays.
+//! The system web view takes each answer whole. A file asked for whole (a
+//! script, a stylesheet, an image) comes whole, however long; a range, as a
+//! player asks for, holds at most [`MOST`] bytes from where it was asked,
+//! said so, and the player asks for the rest as it plays.
 
 use ahjo_app_kit::host::{Reach, Request};
 use ahjo_app_kit::web_view::{Respond, Scheme, SchemeRequest, SchemeResponse, scheme_url};
@@ -21,7 +22,7 @@ use std::sync::{Arc, Mutex};
 /// The scheme's name.
 pub const SCHEME: &str = "ahjo-file";
 
-/// The most bytes of a file one answer holds.
+/// The most bytes of a file one answer to a range holds.
 pub const MOST: u64 = 8 << 20;
 
 /// What the headers of a node's answer may tell the page.
@@ -61,6 +62,18 @@ impl Live {
             });
         }
         url
+    }
+
+    /// Whether the file at `path` on `node` is in the folder served now, so
+    /// a page shown from it may load it.
+    pub fn serves(&self, node: &str, path: &str) -> bool {
+        let served = self.served.lock().unwrap_or_else(|e| e.into_inner());
+        served.as_ref().is_some_and(|s| {
+            s.node == node
+                && path
+                    .strip_prefix(s.folder.as_str())
+                    .is_some_and(|rest| rest.starts_with('/') || s.folder.ends_with('/'))
+        })
     }
 
     /// The scheme a view loads its pages from.
@@ -107,22 +120,24 @@ impl Live {
             enc(path)
         );
         let mut request = Request::get(NodeId(served.node.clone()), uri);
-        if let Some(range) = asked.header("range").and_then(bounded) {
+        let range = asked.header("range").and_then(bounded);
+        let ranged = range.is_some();
+        if let Some(range) = range {
             request = request.header("Range", range);
         }
         let opened = served.reach.open(request);
         served.reach.spawn(async move {
             respond(match opened.await {
-                Ok(answer) => read(answer).await,
+                Ok(answer) => read(answer, ranged).await,
                 Err(e) => SchemeResponse::refused(502, e.message),
             })
         });
     }
 }
 
-/// The node's answer as the page gets it: at most [`MOST`] bytes of the
-/// file, which a whole answer longer than that becomes the first part of.
-async fn read(mut answer: ahjo_app_kit::link::http::Streamed) -> SchemeResponse {
+/// The node's answer as the page gets it: the whole file when it was asked
+/// whole, else the range it was asked, at most [`MOST`] bytes of it.
+async fn read(mut answer: ahjo_app_kit::link::http::Streamed, ranged: bool) -> SchemeResponse {
     let mut headers: Vec<(String, String)> = answer
         .headers
         .iter()
@@ -144,16 +159,15 @@ async fn read(mut answer: ahjo_app_kit::link::http::Streamed) -> SchemeResponse 
         );
         return refused;
     }
-    let length = answer
-        .header("content-length")
-        .and_then(|l| l.parse::<u64>().ok());
+    // The node bounds a range already; this only guards against more.
+    let most = if ranged { MOST as usize } else { usize::MAX };
     let mut body = Vec::new();
     loop {
         match answer.piece().await {
             Ok(Some(piece)) => {
-                let room = MOST as usize - body.len();
+                let room = most - body.len();
                 body.extend_from_slice(&piece[..piece.len().min(room)]);
-                if body.len() as u64 >= MOST {
+                if body.len() >= most {
                     break;
                 }
             }
@@ -161,21 +175,9 @@ async fn read(mut answer: ahjo_app_kit::link::http::Streamed) -> SchemeResponse 
             Err(e) => return SchemeResponse::refused(502, e),
         }
     }
-    let mut status = answer.status;
-    if status == 200
-        && let Some(length) = length.filter(|&l| l > body.len() as u64)
-    {
-        // Cut short: the first part, said as such.
-        status = 206;
-        headers.retain(|(n, _)| n != "content-range");
-        headers.push((
-            "Content-Range".into(),
-            format!("bytes 0-{}/{length}", body.len().saturating_sub(1)),
-        ));
-    }
     headers.push(("Content-Length".into(), body.len().to_string()));
     SchemeResponse {
-        status,
+        status: answer.status,
         headers,
         body,
     }

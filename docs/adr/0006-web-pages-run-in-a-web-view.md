@@ -15,12 +15,14 @@ the reader or the panel, its source a switch away.
   once each time the operator opens it: not as it draws, not as a tab coming
   back, not at start, and not when it was asked for at a line. Only the
   serving node's files reached on this computer's own address open that way;
-  for another device's file the reader says why it does not run.
+  for another device's file the status line and the reader say why it does
+  not run.
 - **The source.** Source (and Page) in the viewer's head switches between the
   page running and its text, which is the coloured, editable view every text
-  file has. A path asked for at a line opens to the source at that line, and
-  an unsaved draft keeps the file in its source until it is saved or
-  discarded.
+  file has. A path asked for at a line opens to the source at that line,
+  from its first frame, so the page does not run; an unsaved draft keeps the
+  file in its source until it is saved or discarded. A save of a file in the
+  page's folder loads the page afresh when it shows again.
 - **Its own folder, through the app.** The page loads from a scheme of the
   app's own (`ahjo-file`), at `http://ahjo-file.<site>.localhost/<path>`,
   where `<site>` is a hash of the node and folder. The app answers every
@@ -31,10 +33,12 @@ the reader or the panel, its source a switch away.
   outside it, even into another folder under the same root. The page never
   gets the node's origin, its authority or another folder: each folder is a
   site of its own, and it may reach the network (a CDN) as any page can.
-- **Bounded answers.** The node streams a file or one byte range of it, with
-  no size limit. The system web view takes each answer whole, so the app
-  answers at most 8 MiB at a time: a longer range is cut to that much and
-  said so in `Content-Range`, and a player asks for the rest.
+- **Whole files, bounded ranges.** The node streams a file or one byte range
+  of it, with no size limit. The system web view takes each answer whole. A
+  file the page asks for whole (a script, a stylesheet, an image) comes
+  whole, however long, as a page needs it. A range, as a player asks for,
+  holds at most 8 MiB: a longer one is cut to that much and said so in
+  `Content-Range`, and the player asks for the rest.
 - **Hidden while covered.** A web view is a child window that draws above
   everything the app draws, so the kit decides once a frame, after the stack
   is drawn (`frame::stack` → `web_view::settle`), whether each one shows: it

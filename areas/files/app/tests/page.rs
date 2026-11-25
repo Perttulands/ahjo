@@ -3107,6 +3107,16 @@ fn a_web_page_runs_once_and_its_source_is_a_switch_away(cx: &mut TestAppContext)
     let other_path = other.to_str().unwrap().to_string();
     cx.update(|window, cx| {
         page.update(cx, |p, cx| p.open_at(other_path, Some(2), None, window, cx));
+        // Its source from the first frame, before the file is read.
+        page.read_with(cx, |p, _| {
+            let o = p.opened.as_ref().expect("the file opening");
+            assert_eq!(o.name, "other.html");
+            assert!(
+                matches!(o.show, ahjo_files_app::open::Show::Reading),
+                "not read yet"
+            );
+            assert!(o.source, "the source, so the page never runs");
+        });
     });
     until(cx, "its source at the line", |cx| {
         page.read_with(cx, |p, cx| {
@@ -3124,8 +3134,9 @@ fn a_web_page_runs_once_and_its_source_is_a_switch_away(cx: &mut TestAppContext)
 }
 
 /// The app's scheme serves the open page's folder through the node: a file
-/// in a folder of it, a range of a large file, bounded and said so, and
-/// nothing outside the folder or for another site.
+/// in a folder of it, a script longer than any range answer whole, a range
+/// of a large file, bounded and said so, and nothing outside the folder or
+/// for another site.
 #[gpui::test]
 fn the_page_scheme_serves_its_folder_and_nothing_else(cx: &mut TestAppContext) {
     use ahjo_app_kit::web_view::{SchemeRequest, SchemeResponse};
@@ -3201,14 +3212,16 @@ fn the_page_scheme_serves_its_folder_and_nothing_else(cx: &mut TestAppContext) {
         small.header("content-range"),
         Some(&*format!("bytes 10-19/{length}"))
     );
-    // Asked whole, it comes as its first part, said so.
-    let whole = ask("clip.mp4", vec![]);
-    assert_eq!(whole.status, 206);
-    assert_eq!(whole.body.len() as u64, MOST);
-    assert_eq!(
-        whole.header("content-range"),
-        Some(&*format!("bytes 0-{}/{length}", MOST - 1))
-    );
+    // A script asked whole comes whole, longer than a range answer holds.
+    let script: Vec<u8> = (0..MOST + (1 << 20))
+        .map(|i| b'a' + (i % 26) as u8)
+        .collect();
+    std::fs::write(folder.join("bundle.js"), &script).unwrap();
+    let whole = ask("bundle.js", vec![]);
+    assert_eq!(whole.status, 200);
+    assert_eq!(whole.header("content-range"), None);
+    assert_eq!(whole.body.len(), script.len());
+    assert!(whole.body == script, "the script's bytes, all of them");
 
     for escape in ["%2E%2E/secret.txt", "my%20assets/%2E%2E/%2E%2E/secret.txt"] {
         let refused = ask(escape, vec![]);

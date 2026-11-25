@@ -173,7 +173,8 @@ fn decode(text: &str) -> Option<String> {
 /// takes the keyboard, and hands back an Escape it leaves unhandled. An
 /// Escape is the page's when it prevented the default, or while a dialog
 /// of its own is open, or when anything in the page changed while the key
-/// was handled (it closed or changed something of its own).
+/// was handled (it closed or changed something of its own). The observer
+/// hears a change before the timer runs, so it notes it as it comes.
 const KIT_SCRIPT: &str = r#"(() => {
   if (window.__ahjoKit) return;
   window.__ahjoKit = true;
@@ -184,10 +185,11 @@ const KIT_SCRIPT: &str = r#"(() => {
   addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || e.repeat) return;
     const open = document.querySelector("dialog[open], [aria-modal='true']") || document.fullscreenElement;
-    const seen = new MutationObserver(() => {});
+    let changed = false;
+    const seen = new MutationObserver((records) => { if (records.length) changed = true; });
     seen.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
     setTimeout(() => {
-      const changed = seen.takeRecords().length > 0;
+      if (seen.takeRecords().length) changed = true;
       seen.disconnect();
       if (!e.defaultPrevented && !open && !changed) post("escape");
     }, 0);
@@ -297,6 +299,14 @@ impl WebSurface {
         match &self.inner.borrow().slot {
             Slot::Failed(e) => Some(e.clone()),
             _ => None,
+        }
+    }
+
+    /// Loads the page afresh the next time it shows, as what it was loaded
+    /// from changed: the same address shows the old document otherwise.
+    pub fn reload(&self) {
+        if let Slot::Open(view) = &mut self.inner.borrow_mut().slot {
+            view.reload();
         }
     }
 
@@ -609,6 +619,11 @@ mod imp {
             }
         }
 
+        /// Forgets what the page loaded, so the next show loads it again.
+        pub fn reload(&mut self) {
+            self.url.clear();
+        }
+
         /// What the page last said of the keyboard.
         pub fn set_keyboard(&mut self, has: bool) {
             self.has_keyboard = has;
@@ -675,6 +690,10 @@ mod imp {
         }
 
         pub fn hide(&mut self) {
+            match self.0 {}
+        }
+
+        pub fn reload(&mut self) {
             match self.0 {}
         }
 

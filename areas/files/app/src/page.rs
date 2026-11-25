@@ -1482,9 +1482,13 @@ impl FilesPage {
         cx: &mut Context<Self>,
     ) {
         let key = (self.tree.node.clone(), path.clone());
-        // At a line it opens to its source.
+        // At a line it opens to its source, from its first frame: a page
+        // asked for at a line never runs.
         if line.is_some() {
             self.open_unasked(path, true, window, cx);
+            if let Some(opened) = self.opened.as_mut().filter(|o| o.key() == key) {
+                opened.source = true;
+            }
         } else {
             self.open(path, window, cx);
         }
@@ -1948,6 +1952,11 @@ impl FilesPage {
                 }
                 p.host
                     .toast(&format!("Saved {}", paths::base_name(&target)), cx);
+                // A page from its folder shows what was saved when it next
+                // shows (ADR 0006).
+                if p.served.serves(&node, &target) {
+                    p.web.reload();
+                }
                 let new_key = (node.clone(), target.clone());
                 if here {
                     p.conflict = false;
@@ -2806,7 +2815,7 @@ impl FilesPage {
     /// Where the app cannot run a page inside its window: the open web
     /// page opens in the system's browser, from its own folder so what it
     /// loads comes with it, once for each time it is asked for. Only this
-    /// computer's own files can.
+    /// computer's own files can: for another, the status line says why.
     fn run_outside(&mut self, cx: &mut Context<Self>) {
         if ahjo_app_kit::web_view::SHOWS_INSIDE || self.unasked {
             return;
@@ -2816,19 +2825,32 @@ impl FilesPage {
                 .reach(cx)
                 .is_some_and(|r| r.on_this_computer(node))
         };
-        let Some(o) = self
+        let Some(opened) = self
             .opened
             .as_ref()
-            .filter(|o| !o.ran_outside && store::kinds::kind(&o.name) == store::kinds::Kind::Html)
+            .filter(|o| !o.outside_done && store::kinds::kind(&o.name) == store::kinds::Kind::Html)
         else {
             return;
         };
-        let file = std::path::PathBuf::from(&o.path);
-        if local(&o.node.clone(), cx) && file.is_file() {
+        let file = std::path::PathBuf::from(&opened.path);
+        let name = opened.name.clone();
+        if !local(&opened.node.clone(), cx) {
+            self.host.toast(
+                &format!(
+                    "{name} runs inside Ahjo on Windows; this computer's browser cannot reach that device's folder"
+                ),
+                cx,
+            );
+        } else if !file.is_file() {
+            self.host.toast(
+                &format!("{name} is not a file this computer's browser can open"),
+                cx,
+            );
+        } else {
             cx.open_with_system(&file);
         }
-        if let Some(o) = self.opened.as_mut() {
-            o.ran_outside = true;
+        if let Some(opened) = self.opened.as_mut() {
+            opened.outside_done = true;
         }
     }
     /// The open file runs as a web page: one, not asked for at a line, not
