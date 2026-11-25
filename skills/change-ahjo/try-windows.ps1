@@ -9,6 +9,12 @@
 #   click <app> <x> <y>          a left click at the screenshot's pixel x, y
 #   hover <app> <selector>       the mouse over the middle of that element
 #                                of the app's web page, through DevTools
+#   drag <app> <selector> <dx> <dy>  a left-button drag from the middle of
+#                                that element by dx, dy pixels, through
+#                                DevTools
+#   wheel <app> <selector> <dy>  the mouse wheel turned dy pixels over the
+#                                middle of that element (negative: away from
+#                                you, zooming in), through DevTools
 #   type <app> <text>            the text, as typed characters
 #   key <app> <key>              one key without modifiers (enter, escape...)
 #   eval <app> <script>          the value of a script in the app's web page,
@@ -270,6 +276,28 @@ public static class Win {
             foreach ($dx in 0, 4, 8) {
                 Invoke-DevTools $page "Input.dispatchMouseEvent" @{ type = "mouseMoved"; x = $at[0] + $dx; y = $at[1] } | Out-Null
                 Start-Sleep -Milliseconds 60
+            }
+            Write-Utf8 "result.txt" "$($at -join ', ')"
+            Start-Sleep -Milliseconds 400
+        }
+        { $_ -in "drag", "wheel" } {
+            # Real input to the page through DevTools, as hover's is.
+            $app, $selector = $words[1], $words[2]
+            $page = Shown-Page $app
+            $at = (Invoke-Page $page "(() => { const r = document.querySelector($(ConvertTo-Json $selector)).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })()").result.result.value
+            $mouse = { param($type, $x, $y, $more) Invoke-DevTools $page "Input.dispatchMouseEvent" (@{ type = $type; x = $x; y = $y } + $more) | Out-Null }
+            if ($words[0] -eq "wheel") {
+                & $mouse "mouseMoved" $at[0] $at[1] @{}
+                & $mouse "mouseWheel" $at[0] $at[1] @{ deltaX = 0; deltaY = [double]$words[3] }
+            } else {
+                $dx, $dy = [double]$words[3], [double]$words[4]
+                & $mouse "mouseMoved" $at[0] $at[1] @{}
+                & $mouse "mousePressed" $at[0] $at[1] @{ button = "left"; buttons = 1; clickCount = 1 }
+                foreach ($i in 1..10) {
+                    & $mouse "mouseMoved" ($at[0] + $dx * $i / 10) ($at[1] + $dy * $i / 10) @{ button = "left"; buttons = 1 }
+                    Start-Sleep -Milliseconds 20
+                }
+                & $mouse "mouseReleased" ($at[0] + $dx) ($at[1] + $dy) @{ button = "left"; buttons = 0; clickCount = 1 }
             }
             Write-Utf8 "result.txt" "$($at -join ', ')"
             Start-Sleep -Milliseconds 400

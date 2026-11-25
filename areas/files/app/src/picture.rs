@@ -157,7 +157,6 @@ impl FilesPage {
             .iter()
             .filter_map(|o| match &o.show {
                 Show::Picture { image, .. } => Some(image.clone()),
-                Show::Model(model) => Some(model.image.clone()),
                 _ => None,
             })
             .collect();

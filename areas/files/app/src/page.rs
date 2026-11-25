@@ -300,7 +300,8 @@ pub struct FilesPage {
     /// the system's browser for it.
     unasked: bool,
     /// Where the web view's pages post what they say to the page (a player
-    /// that cannot play its file, [`crate::live::CannotPlay`]).
+    /// or model page that cannot play or show its file,
+    /// [`crate::live::CannotShow`]).
     pub said: async_channel::Sender<String>,
 }
 
@@ -765,21 +766,21 @@ impl FilesPage {
         }
     }
 
-    /// A page in the web view said something: a player that cannot play
-    /// the open file shows why, with the file's own program a press away.
+    /// A page in the web view said something: a player or model page that
+    /// cannot play or show the open file shows why, with the file's own program a press away.
     /// What it says of any other file, or of an earlier open of this one,
     /// is too late and changes nothing.
     fn hear(&mut self, message: &str, cx: &mut Context<Self>) {
-        let Some(said) = crate::live::CannotPlay::of(message) else {
+        let Some(said) = crate::live::CannotShow::of(message) else {
             return;
         };
         let Some(opened) = self.opened.as_mut().filter(|o| {
             matches!(o.show, Show::Media(_))
-                && said.is_about(&o.node, &paths::parent(&o.path), &o.name, o.playback)
+                && said.is_about(&o.node, &paths::parent(&o.path), &o.name, o.open_id)
         }) else {
             return;
         };
-        opened.cannot_play = Some(said.why());
+        opened.cannot_show = Some(said.why());
         cx.notify();
     }
 
@@ -1622,7 +1623,10 @@ impl FilesPage {
         let kind = store::kinds::kind(&name);
         if matches!(
             kind,
-            store::kinds::Kind::Audio | store::kinds::Kind::Video | store::kinds::Kind::Pdf
+            store::kinds::Kind::Audio
+                | store::kinds::Kind::Video
+                | store::kinds::Kind::Pdf
+                | store::kinds::Kind::Model
         ) {
             self.opened.as_mut().unwrap().show = Show::Media(kind);
             cx.notify();
@@ -1675,14 +1679,6 @@ impl FilesPage {
                     return;
                 }
                 p.opened.as_mut().unwrap().size = Some(b.len() as u64);
-                if store::kinds::kind(&name) == store::kinds::Kind::Model {
-                    p.decode(node, path, cx, move || {
-                        crate::model::Model::load(&b)
-                            .map(crate::model::Preview::new)
-                            .map(Show::Model)
-                    });
-                    return;
-                }
                 if let Some(format) = open::picture_format(&name) {
                     let svg = cx.svg_renderer();
                     p.decode(node, path, cx, move || {
@@ -2903,13 +2899,13 @@ impl FilesPage {
                 && !matches!(o.show, Show::Failed(_) | Show::Gone)
         })
     }
-    /// The open file is sound, video or a PDF the web view in the window
-    /// plays or shows (ADR 0006): not where the window holds none, nor once
-    /// its player said it cannot.
+    /// The open file is sound, video, a PDF or a 3D model the web view in
+    /// the window plays or shows (ADR 0006): not where the window holds
+    /// none, nor once its page said it cannot.
     pub(crate) fn plays_inside(&self) -> bool {
         ahjo_app_kit::web_view::SHOWS_INSIDE
             && self.opened.as_ref().is_some_and(|o| {
-                matches!(o.show, Show::Media(_)) && o.cannot_play.is_none() && !o.diff_open
+                matches!(o.show, Show::Media(_)) && o.cannot_show.is_none() && !o.diff_open
             })
     }
     /// Between the page running and its source.

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Rebuilds three.js, the one script the model viewer loads (live::model_page),
+# from the pinned three.js release and the parts three-entry.mjs names:
+# three, its orbit controls, room light and the glTF, OBJ/MTL, FBX and STL
+# loaders. Run it after changing either version, then commit three.js.
+set -euo pipefail
+THREE=0.187.0 ESBUILD=0.28.2
+here=$(cd "$(dirname "$0")" && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cd "$work"
+npm init -y >/dev/null
+npm install --silent --no-audit --no-fund "three@$THREE" "esbuild@$ESBUILD"
+cp "$here/three-entry.mjs" .
+npx esbuild three-entry.mjs --bundle --format=iife --global-name=THREE \
+  --minify --legal-comments=eof --target=es2020 --outfile="$here/three.js"

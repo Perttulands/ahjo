@@ -1424,10 +1424,26 @@ fn media_and_other_files_open_in_their_own_program_whole(cx: &mut TestAppContext
         ("voice.wav", Kind::Audio),
         ("voice.ogg", Kind::Audio),
         ("paper.pdf", Kind::Pdf),
+        ("cube.glb", Kind::Model),
+        ("scene.gltf", Kind::Model),
+        ("crate.obj", Kind::Model),
+        ("cube.fbx", Kind::Model),
+        ("part.stl", Kind::Model),
     ];
     for entry in std::fs::read_dir(&fixtures).unwrap() {
         let entry = entry.unwrap();
         std::fs::copy(entry.path(), root.join(entry.file_name())).unwrap();
+    }
+    let models = fixtures.with_file_name("models");
+    for model in [
+        "cube.glb",
+        "textured/scene.gltf",
+        "crate.obj",
+        "cube.fbx",
+        "part.stl",
+    ] {
+        let at = models.join(model);
+        std::fs::copy(&at, root.join(at.file_name().unwrap())).unwrap();
     }
     std::fs::write(root.join("gone.mp4"), b"not read").unwrap();
     // A file listed in one folder through a link to another folder of the
@@ -1484,10 +1500,10 @@ fn media_and_other_files_open_in_their_own_program_whole(cx: &mut TestAppContext
     tree(cx, "file-row-clip.mp4");
     for (name, kind) in media {
         click(cx, leak(format!("file-row-{name}")));
-        let words = if kind == Kind::Pdf {
-            "empty-It shows in this computer's own reader"
-        } else {
-            "empty-It plays in this computer's own player"
+        let words = match kind {
+            Kind::Pdf => "empty-It shows in this computer's own reader",
+            Kind::Model => "empty-It turns in this computer's own 3D viewer",
+            _ => "empty-It plays in this computer's own player",
         };
         until(cx, "what plays it", |cx| {
             cx.debug_bounds(words).is_some()
@@ -1589,6 +1605,7 @@ fn a_player_that_cannot_play_says_so_on_its_own_file(cx: &mut TestAppContext) {
     let root = ahjo_testkit::fresh_dir("files-cannot-play");
     std::fs::write(root.join("a.avi"), b"RIFF").unwrap();
     std::fs::write(root.join("b.avi"), b"RIFF").unwrap();
+    std::fs::write(root.join("scene.gltf"), br#"{"asset":{"version":"2.0"}}"#).unwrap();
     let running = start(root.clone());
     cx.executor().allow_parking();
     cx.update(ahjo_app_shell::prepare);
@@ -1613,22 +1630,22 @@ fn a_player_that_cannot_play_says_so_on_its_own_file(cx: &mut TestAppContext) {
             .unwrap()
             .to_owned()
     };
-    let cannot = |site: &str, name: &str, playback: u64| {
+    let cannot = |site: &str, name: &str, open_id: u64| {
         format!(
             "ahjo-files:{}",
-            serde_json::json!({"site": site, "name": name, "playback": playback,
-                "code": 4, "message": "DEMUXER_ERROR"})
+            serde_json::json!({"site": site, "name": name, "open_id": open_id,
+                "failed": "media", "code": 4, "message": "DEMUXER_ERROR"})
         )
     };
-    let playback =
-        |cx: &mut VisualTestContext| page.read_with(cx, |p, _| p.opened.as_ref().unwrap().playback);
+    let open_id =
+        |cx: &mut VisualTestContext| page.read_with(cx, |p, _| p.opened.as_ref().unwrap().open_id);
     tree(cx, "file-row-a.avi");
     click(cx, "file-row-a.avi");
     until(cx, "a.avi open", |cx| {
         cx.debug_bounds("viewer-download").is_some()
     });
     let a_site = host(cx, "a.avi");
-    let first = playback(cx);
+    let first = open_id(cx);
     said.try_send(cannot(&a_site, "a.avi", first)).unwrap();
     let why = "empty-a.avi does not play here: this view does not play its format";
     until(cx, "why, with its program", |cx| {
@@ -1645,7 +1662,7 @@ fn a_player_that_cannot_play_says_so_on_its_own_file(cx: &mut TestAppContext) {
     page.read_with(cx, |p, _| {
         let o = p.opened.as_ref().unwrap();
         assert_eq!(o.name, "b.avi");
-        assert_eq!(o.cannot_play, None);
+        assert_eq!(o.cannot_show, None);
     });
     // a.avi opened again plays afresh: what its first player says, late,
     // is about that open, not this one; what this one's says shows.
@@ -1655,16 +1672,35 @@ fn a_player_that_cannot_play_says_so_on_its_own_file(cx: &mut TestAppContext) {
             .is_some()
             && page.read_with(cx, |p, _| p.opened.as_ref().unwrap().name == "a.avi")
     });
-    let again = playback(cx);
+    let again = open_id(cx);
     assert_ne!(again, first);
     said.try_send(cannot(&a_site, "a.avi", first)).unwrap();
     cx.run_until_parked();
     page.read_with(cx, |p, _| {
-        assert_eq!(p.opened.as_ref().unwrap().cannot_play, None)
+        assert_eq!(p.opened.as_ref().unwrap().cannot_show, None)
     });
     said.try_send(cannot(&a_site, "a.avi", again)).unwrap();
     until(cx, "why, for this open", |cx| {
         cx.debug_bounds(why).is_some()
+    });
+    // A model's page that could not load it says why the same way.
+    click(cx, "file-row-scene.gltf");
+    until(cx, "scene.gltf open", |cx| {
+        cx.debug_bounds("empty-It turns in this computer's own 3D viewer")
+            .is_some()
+    });
+    let model = format!(
+        "ahjo-files:{}",
+        serde_json::json!({"site": a_site, "name": "scene.gltf", "open_id": open_id(cx),
+            "failed": "model", "why": "scene.bin is not there or could not be read"})
+    );
+    said.try_send(model).unwrap();
+    until(cx, "why the model did not load, with its program", |cx| {
+        cx.debug_bounds(
+            "empty-scene.gltf does not show here: scene.bin is not there or could not be read",
+        )
+        .is_some()
+            && cx.debug_bounds("files-open-here").is_some()
     });
     drop(running);
     std::fs::remove_dir_all(root).unwrap();
@@ -3467,6 +3503,47 @@ fn the_page_scheme_serves_its_folder_and_nothing_else(cx: &mut TestAppContext) {
         Some("text/html; charset=utf-8")
     );
     assert_eq!(player.body, ahjo_files_app::live::PLAYER.as_bytes());
+    // A model's page, at the root too, and three.js from the app's own site.
+    let model_url = live.show_model(
+        &node,
+        folder.to_str().unwrap(),
+        "my model.glb",
+        4,
+        "#102030",
+        page.read_with(cx, |p, cx| p.host.reach(cx)).unwrap(),
+    );
+    let model = SchemeRequest::of(SCHEME, "GET", &model_url, vec![]).unwrap();
+    assert_eq!((model.site.as_str(), model.path.as_str()), (&*site, ""));
+    assert_eq!(model.query, "model=my%20model.glb&open=4&bg=%23102030");
+    let (tx, rx) = std::sync::mpsc::channel();
+    live.answer(model, Box::new(move |r| tx.send(r).unwrap()));
+    let model = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(model.status, 200);
+    assert_eq!(model.body, ahjo_files_app::live::model_page().into_bytes());
+    let app = |path: &str| {
+        let asked = SchemeRequest::of(
+            SCHEME,
+            "GET",
+            &ahjo_app_kit::web_view::scheme_url(SCHEME, ahjo_files_app::live::APP_SITE, path),
+            vec![],
+        )
+        .unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        live.answer(asked, Box::new(move |r| tx.send(r).unwrap()));
+        rx.recv_timeout(Duration::from_secs(10)).unwrap()
+    };
+    let three = app("three.js");
+    assert_eq!(three.status, 200);
+    assert_eq!(
+        three.header("content-type"),
+        Some("text/javascript; charset=utf-8")
+    );
+    assert_eq!(three.body, ahjo_files_app::live::THREE);
+    assert_eq!(
+        app("index.html").status,
+        404,
+        "the app's site serves no folder"
+    );
     let nested = ask("my%20assets/style%20one.css", vec![]);
     assert_eq!(nested.status, 200);
     assert_eq!(nested.body, b"p { color: red }");

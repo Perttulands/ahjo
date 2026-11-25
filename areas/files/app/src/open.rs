@@ -27,10 +27,9 @@ pub enum Show {
         image: Arc<RenderImage>,
         natural: zoom::Px,
     },
-    Model(super::model::Preview),
-    /// Sound, video or a PDF: played or shown by the system's web view where
-    /// the window holds one (ADR 0006), else by this computer's own program;
-    /// never read whole.
+    /// Sound, video, a PDF or a 3D model: played or shown by the system's
+    /// web view where the window holds one (ADR 0006), else by this
+    /// computer's own program; never read here.
     Media(kinds::Kind),
     /// Why it is not shown inline, in a sentence: binary, too large, or
     /// read but not decoded here. Its own program and Download stand by it.
@@ -77,13 +76,13 @@ pub struct Opened {
     /// This open of a web page was dealt with outside the app (ADR 0006):
     /// run in the system's browser, or the operator told why it could not.
     pub outside_done: bool,
-    /// Why the web view cannot play this sound or video file, once its
-    /// player said so.
-    pub cannot_play: Option<String>,
-    /// This open's own number, which its player names in what it says, so
-    /// what the player of an earlier open of the same file says is too
-    /// late.
-    pub playback: u64,
+    /// Why the web view cannot play or show this sound, video or model,
+    /// once its page said so.
+    pub cannot_show: Option<String>,
+    /// This open's own number, which its player or model page names in what
+    /// it says, so what the page of an earlier open of the same file says
+    /// is too late.
+    pub open_id: u64,
 }
 
 /// A diff's lines, and the same paired side by side; and for colouring
@@ -172,8 +171,8 @@ impl Opened {
             diff_at: 0,
             changed_on_disk: false,
             outside_done: false,
-            cannot_play: None,
-            playback: {
+            cannot_show: None,
+            open_id: {
                 static OPENS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
                 OPENS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             },

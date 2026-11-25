@@ -63,7 +63,7 @@ the reader or the panel, its source a switch away.
   folder's root and which names the file in its query: the player reads the
   file from the folder in ranges as it plays and seeks, never whole. When
   the web view cannot play it (an error, or a video whose picture it does
-  not decode) the page tells the app (`live::CannotPlay`), and the reader
+  not decode) the page tells the app (`live::CannotShow`), and the reader
   says so in place of the player. On Linux these open in the system's own
   program, as before.
 - **Every other file, its own program.** A file Files shows neither as text
@@ -79,9 +79,26 @@ the reader or the panel, its source a switch away.
   one safe local name (the extension kept), in a folder no other open
   shares; folders of opens more than a day old go. The app says it handed
   the file to Windows, which tells it no more.
-- **A player's word, on its own open.** The player page names the open it
-  plays for (`Opened::playback`), and the app takes what it says only for
-  that open, so a late error from an earlier open of the same file changes
+- **3D models too.** A glb, a gltf, an obj, an fbx or an stl turns in the
+  same web view, in a page of the app's own (`live::model_page`) that the scheme
+  serves at the folder's root, naming the model in its query. It loads the
+  model from the folder like any page's file, so what the model names
+  beside it comes with it: a glTF's buffers and textures, an OBJ's
+  materials and theirs. It draws with three.js and its loaders, which the
+  app ships (`web/three.js`, rebuilt by `web/bundle-three` from a pinned
+  release) and serves from a site no folder has (`live::APP_SITE`), so a
+  model shows without the network. A drag turns it, the wheel zooms, Reset
+  view goes back to where it opened. It draws when the view changes and
+  when a file the model names arrives after it first showed (an OBJ's
+  texture can), and at no other time. A file the model names that is not
+  there is named on the page, whenever that turns out; a model that does not load at all tells the app why
+  (`live::Failure::Model`), which says so with Open in its Windows app.
+  Files no longer draws models itself: the small CPU preview of a glb it
+  had drew one kind, untextured, and is gone. On Linux
+  models open in the system's own program, as media do.
+- **A page's word, on its own open.** The player or model page names the
+  open it shows (`Opened::open_id`), and the app takes what it says only
+  for that open, so a late error from an earlier open of the same file changes
   nothing.
 
 ## Why
@@ -104,6 +121,12 @@ the reader or the panel, its source a switch away.
   with its own controls and seeking; anything else goes to the program
   Windows chooses for it, which plays far more. A copy, not the node's
   address, because the program is on Windows and the file on the node.
+- **three.js, shipped, not a viewer of our own.** A model needs its
+  materials, textures and formats read as their makers meant; three.js's
+  loaders do that for every format asked, and the web view draws on the
+  GPU. Shipped with the app and served by it, so it works offline and is
+  the version the app was tested with; a classic script from the app's own
+  site, so no folder's page needs leave to load it.
 - **Hide on overlap, not punch holes.** A child window cannot be drawn under
   the app's popups. Hiding it while anything overlaps keeps every popup
   visible and costs a moment of blank page; a popup elsewhere does not.

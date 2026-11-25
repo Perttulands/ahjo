@@ -155,6 +155,9 @@ const IMAGE: &[&str] = &[
     "bmp", "gif", "ico", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp",
 ];
 
+/// 3D models the web view turns (ADR 0006).
+const MODEL: &[&str] = &["fbx", "glb", "gltf", "obj", "stl"];
+
 const AUDIO: &[&str] = &["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav"];
 const VIDEO: &[&str] = &[
     "avi", "m4v", "mkv", "mov", "mp4", "mpeg", "mpg", "ogv", "webm",
@@ -180,7 +183,7 @@ pub fn kind(name: &str) -> Kind {
         "md" | "markdown" => Kind::Markdown,
         "json" => Kind::Json,
         "html" | "htm" => Kind::Html,
-        "glb" => Kind::Model,
+        e if MODEL.contains(&e) => Kind::Model,
         "pdf" => Kind::Pdf,
         e if IMAGE.contains(&e) => Kind::Image,
         e if AUDIO.contains(&e) => Kind::Audio,
@@ -223,9 +226,9 @@ mod tests {
         assert_eq!(kind(".env.local"), Kind::Text);
     }
 
-    /// What every sound, video, PDF and file-of-its-own-program name opens
-    /// as: played or shown by the web view (else this computer's program),
-    /// or offered to its program.
+    /// What every sound, video, PDF, 3D model and file-of-its-own-program
+    /// name opens as: played or shown by the web view (else this computer's
+    /// program), or offered to its program.
     #[test]
     fn media_and_other_kinds_by_extension() {
         for ext in ["aac", "flac", "m4a", "mp3", "oga", "ogg", "opus", "wav"] {
@@ -237,6 +240,12 @@ mod tests {
             assert_eq!(kind(&format!("a.{ext}")), Kind::Video, "{ext}");
         }
         assert_eq!(kind("A.PDF"), Kind::Pdf);
+        for ext in ["glb", "gltf", "GLTF", "obj", "fbx", "stl"] {
+            assert_eq!(kind(&format!("a.{ext}")), Kind::Model, "{ext}");
+        }
+        // What a model names beside it is not a model.
+        assert_eq!(kind("a.bin"), Kind::Other);
+        assert_eq!(kind("a.mtl"), Kind::Other);
         for ext in [
             "docx", "doc", "xlsx", "pptx", "odt", "zip", "7z", "tar", "gz", "rar", "exe", "msi",
             "bin", "",

@@ -407,7 +407,11 @@ the real list.
   (`/api/files/folder/file`, streamed, one byte range at a time). On Linux it
   opens in the system's browser, once each time the operator opens it. Sound
   and video play in the same web view, in a player page the scheme serves at
-  the folder's root, and a PDF shows in the web view's own viewer; on Linux
+  the folder's root, and a PDF shows in the web view's own viewer. A 3D
+  model (glb, gltf, obj, fbx, stl) turns in a model page served there too,
+  with three.js, which the app ships and serves from a site of its own
+  (`live::THREE`, built by `areas/files/app/web/bundle-three`), so it needs
+  no network. On Linux
   they open in the system's own program, as does any file Files does not
   show (Open in its Windows app, beside Download). That program gets a copy
   made whole as it streams from the node (`/api/files/file/whole`, the file

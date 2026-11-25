@@ -1,6 +1,5 @@
 //! The Files page's state.
 pub mod live;
-pub mod model;
 pub mod open;
 pub mod outside;
 pub mod store;

@@ -9,7 +9,10 @@
 //!
 //! A sound or video file plays in a page of the app's own, the folder's
 //! root ([`PLAYER`]), which names the file in its query and tells the app
-//! when the web view cannot play it ([`CannotPlay`]).
+//! when the web view cannot play it ([`CannotShow`]). A 3D model turns in
+//! another ([`model_page`]), with three.js, which the app serves itself
+//! from a site no folder has ([`APP_SITE`]), so a model shows with no
+//! network.
 //!
 //! The system web view takes each answer whole. A file asked for whole (a
 //! script, a stylesheet, an image) comes whole, however long; a range, as a
@@ -28,6 +31,14 @@ pub const SCHEME: &str = "ahjo-file";
 
 /// The most bytes of a file one answer to a range holds.
 pub const MOST: u64 = 8 << 20;
+
+/// The site the app's own scripts are served from: never a folder's,
+/// whose sites are hashes ([`site`]).
+pub const APP_SITE: &str = "app";
+
+/// three.js and the parts of it the model viewer uses, bundled by
+/// `web/bundle-three` (three.js is MIT-licensed; its notice is in the file).
+pub const THREE: &[u8] = include_bytes!("../web/three.js");
 
 /// What the headers of a node's answer may tell the page.
 const PASSED: &[&str] = &["content-type", "content-range", "accept-ranges"];
@@ -71,23 +82,44 @@ impl Live {
     /// Plays `name` in `folder` on `node` from now on, as [`Self::serve`]
     /// serves a page: the address of the player page for it, `sound` for a
     /// sound file, on a page the colour `background` (`#rrggbb`). The
-    /// player names `playback` (the open's number) in what it says.
+    /// player names `open_id` (the open's number) in what it says.
     #[allow(clippy::too_many_arguments)]
     pub fn play(
         &self,
         node: &str,
         folder: &str,
         name: &str,
-        playback: u64,
+        open_id: u64,
         sound: bool,
         background: &str,
         reach: Reach,
     ) -> String {
         let root = self.serve(node, folder, "", reach);
         format!(
-            "{root}?play={}&n={playback}&as={}&bg={}",
+            "{root}?play={}&open={open_id}&as={}&bg={}",
             enc(name),
             if sound { "audio" } else { "video" },
+            enc(background)
+        )
+    }
+
+    /// Shows the 3D model `name` in `folder` on `node` from now on, as
+    /// [`Self::play`] plays a sound: the address of the model page for it,
+    /// on the colour `background` (`#rrggbb`), naming `open_id` (the
+    /// open's number) in what it says.
+    pub fn show_model(
+        &self,
+        node: &str,
+        folder: &str,
+        name: &str,
+        open_id: u64,
+        background: &str,
+        reach: Reach,
+    ) -> String {
+        let root = self.serve(node, folder, "", reach);
+        format!(
+            "{root}?model={}&open={open_id}&bg={}",
+            enc(name),
             enc(background)
         )
     }
@@ -115,6 +147,9 @@ impl Live {
 
     /// Answers one request of the page.
     pub fn answer(&self, asked: SchemeRequest, respond: Respond) {
+        if asked.site == APP_SITE {
+            return respond(app_file(&asked));
+        }
         let served = self
             .served
             .lock()
@@ -140,13 +175,18 @@ impl Live {
             ));
         }
         if path.is_empty() {
+            let model = asked.query.split('&').any(|p| p.starts_with("model="));
             return respond(SchemeResponse {
                 status: 200,
                 headers: vec![
                     ("Content-Type".into(), "text/html; charset=utf-8".into()),
                     ("Cache-Control".into(), "no-store".into()),
                 ],
-                body: PLAYER.as_bytes().to_vec(),
+                body: if model {
+                    model_page().into_bytes()
+                } else {
+                    PLAYER.as_bytes().to_vec()
+                },
             });
         }
         let uri = format!(
@@ -167,6 +207,28 @@ impl Live {
                 Err(e) => SchemeResponse::refused(502, e.message),
             })
         });
+    }
+}
+
+/// One of the app's own files, from [`APP_SITE`]: three.js, read by any
+/// folder's model page (a classic script, so no other site needs leave).
+fn app_file(asked: &SchemeRequest) -> SchemeResponse {
+    if asked.method != "GET" {
+        return SchemeResponse::refused(405, "Pages here only read.");
+    }
+    if asked.path != "three.js" {
+        return SchemeResponse::refused(404, "The app has no such file.");
+    }
+    SchemeResponse {
+        status: 200,
+        headers: vec![
+            (
+                "Content-Type".into(),
+                "text/javascript; charset=utf-8".into(),
+            ),
+            ("Content-Length".into(), THREE.len().to_string()),
+        ],
+        body: THREE.to_vec(),
     }
 }
 
@@ -246,11 +308,11 @@ fn bounded(asked: &str) -> Option<String> {
 }
 
 /// The page a sound or video file plays in, at its folder's root: the file
-/// named in its query (`play`), for the open numbered `n`, as sound or
+/// named in its query (`play`), for the open numbered `open`, as sound or
 /// video (`as`), on its background (`bg`). It plays from the folder like any page's file, so the player
 /// asks for ranges as it plays and seeks. When the web view cannot play it
 /// (an error, or a video whose picture it cannot decode), it tells the app
-/// ([`CannotPlay`]).
+/// ([`CannotShow`], [`Failure::Media`]).
 pub const PLAYER: &str = r#"<!doctype html><html><head><meta charset="utf-8"><title>Player</title>
 <style>html,body{margin:0;height:100%}body{display:flex;align-items:center;justify-content:center}
 video{max-width:100%;max-height:100%}audio{width:min(90%,640px)}</style></head><body><script>
@@ -269,7 +331,7 @@ video{max-width:100%;max-height:100%}audio{width:min(90%,640px)}</style></head><
   const tell = (code, message) => {
     if (told || !window.ipc) return;
     told = true;
-    window.ipc.postMessage("ahjo-files:" + JSON.stringify({ site: location.hostname, name, playback: Number(asked.get("n")) || 0, code, message }));
+    window.ipc.postMessage("ahjo-files:" + JSON.stringify({ site: location.hostname, name, open_id: Number(asked.get("open")) || 0, failed: "media", code, message }));
   };
   media.addEventListener("error", () => tell(media.error ? media.error.code : 0, media.error ? media.error.message : ""));
   if (!sound) media.addEventListener("loadedmetadata", () => { if (!media.videoWidth) tell(0, "no picture"); });
@@ -278,21 +340,175 @@ video{max-width:100%;max-height:100%}audio{width:min(90%,640px)}</style></head><
 })();
 </script></body></html>"#;
 
-/// What a player page tells the app (posted as `ahjo-files:` and this as
-/// JSON): the web view could not play the file `name` of the folder served
-/// as `site`, opened as `playback`. `code` is the media error's (3 it could not decode it, 4 it
-/// does not play its format), 0 a video whose picture did not show.
-#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
-pub struct CannotPlay {
-    pub site: String,
-    pub name: String,
-    pub playback: u64,
-    pub code: u16,
-    pub message: String,
+/// The page a 3D model turns in, at its folder's root: the file named in
+/// its query (`model`: glb, gltf, obj, fbx or stl), for the open numbered
+/// `open`, on its background (`bg`). It loads the model and what the model
+/// names beside it (a glTF's buffers and textures, an OBJ's materials and
+/// theirs) from the folder like any page's file, and three.js from the app
+/// ([`APP_SITE`], its address the kit's [`scheme_url`]). A drag turns it,
+/// the wheel zooms, Reset view goes back; it draws when one of those
+/// changes the view, and when a file the model names arrives after it first
+/// showed (a texture). A file it names that is not there is named on the
+/// page, whenever that turns out; when the model does not load at all it
+/// tells the app why ([`CannotShow`], [`Failure::Model`]). `window.view`
+/// holds its camera and controls, for a check to read.
+pub fn model_page() -> String {
+    MODEL_PAGE.replace("{three}", &scheme_url(SCHEME, APP_SITE, "three.js"))
 }
 
-impl CannotPlay {
-    /// The message a player page posted, when it is one.
+/// [`model_page`], before it is given three.js's address.
+const MODEL_PAGE: &str = r##"<!doctype html><html><head><meta charset="utf-8"><title>Model</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;font:13px system-ui,sans-serif}
+canvas{display:block;touch-action:none;cursor:grab}canvas:active{cursor:grabbing}
+button,#note{position:fixed;padding:4px 10px;border-radius:4px;background:rgba(128,128,128,.18);border:1px solid rgba(128,128,128,.4);color:inherit;font:inherit}
+button{top:8px;right:8px;cursor:pointer}#note{left:8px;bottom:8px;max-width:calc(100% - 40px)}</style></head>
+<body><button id="reset" title="The view it opened with">Reset view</button><div id="note" hidden></div>
+<script src="{three}"></script><script>
+(() => {
+  const asked = new URLSearchParams(location.search);
+  const name = asked.get("model");
+  if (!name) return;
+  document.title = name;
+  const bg = /^#[0-9a-fA-F]{6}$/.test(asked.get("bg") || "") ? asked.get("bg") : "#202020";
+  const lum = [1, 3, 5].map((i) => parseInt(bg.slice(i, i + 2), 16)).reduce((a, c, i) => a + c * [0.3, 0.59, 0.11][i], 0);
+  document.body.style.background = bg;
+  document.body.style.color = lum < 128 ? "#d8d8d8" : "#202020";
+  const note = (text) => { const n = document.getElementById("note"); n.textContent = text; n.hidden = false; };
+  let told = false;
+  const tell = (why) => {
+    note(name + ": " + why);
+    if (told || !window.ipc) return;
+    told = true;
+    window.ipc.postMessage("ahjo-files:" + JSON.stringify({ site: location.hostname, name, open_id: Number(asked.get("open")) || 0, failed: "model", why }));
+  };
+  if (!window.THREE) return tell("the app's 3D viewer did not load");
+  const T = window.THREE;
+  let renderer;
+  try {
+    renderer = new T.WebGLRenderer({ antialias: true, alpha: true });
+  } catch (e) {
+    return tell("this view cannot draw 3D (" + (e && e.message || e) + ")");
+  }
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  document.body.prepend(renderer.domElement);
+  const scene = new T.Scene();
+  scene.environment = new T.PMREMGenerator(renderer).fromScene(new T.RoomEnvironment(), 0.04).texture;
+  scene.add(new T.HemisphereLight(0xffffff, 0x404040, 1.2));
+  const camera = new T.PerspectiveCamera(45, 1, 0.01, 1000);
+  const sun = new T.DirectionalLight(0xffffff, 1.6);
+  sun.position.set(1, 2, 3);
+  camera.add(sun);
+  scene.add(camera);
+  const controls = new T.OrbitControls(camera, renderer.domElement);
+  const draw = () => renderer.render(scene, camera);
+  controls.addEventListener("change", draw);
+  const size = () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / Math.max(window.innerHeight, 1);
+    camera.updateProjectionMatrix();
+    draw();
+  };
+  window.addEventListener("resize", size);
+  document.getElementById("reset").addEventListener("click", () => controls.reset());
+  window.view = { camera, controls };
+  // Files of the folder that could not be read, by their names in it. A
+  // texture may only arrive, or fail, after the model first showed (an
+  // OBJ's material starts its images and returns): each one that settles
+  // then is drawn, or named.
+  let shown = false;
+  const missing = [];
+  const fileOf = (url) => {
+    try {
+      const u = new URL(url, location.href);
+      return u.host === location.host ? decodeURIComponent(u.pathname.slice(1)) : url;
+    } catch { return url; }
+  };
+  const sayMissing = () => { if (shown && missing.length) note("Not found beside it: " + missing.join(", ")); };
+  const manager = new T.LoadingManager();
+  // The model itself failing is said as its loader says it, not as missing.
+  manager.onError = (url) => {
+    const f = fileOf(url);
+    if (f !== name && !missing.includes(f)) missing.push(f);
+    sayMissing();
+  };
+  manager.onProgress = () => { if (shown) draw(); };
+  const at = (path) => new URL(path.replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/"), location.href).href;
+  const ext = name.split(".").pop().toLowerCase();
+  const load = async () => {
+    const url = at(name);
+    if (ext === "glb" || ext === "gltf") return (await new T.GLTFLoader(manager).loadAsync(url)).scene;
+    if (ext === "fbx") return await new T.FBXLoader(manager).loadAsync(url);
+    if (ext === "stl") {
+      const shape = await new T.STLLoader(manager).loadAsync(url);
+      return new T.Mesh(shape, new T.MeshStandardMaterial({ color: shape.hasColors ? 0xffffff : 0xb4b8bc, vertexColors: !!shape.hasColors, roughness: 0.6, metalness: 0.1 }));
+    }
+    if (ext === "obj") {
+      const text = await new T.FileLoader(manager).loadAsync(url);
+      const obj = new T.OBJLoader(manager);
+      for (const [, lib] of text.matchAll(/^[ \t]*mtllib[ \t]+(.+?)[ \t]*$/gm)) {
+        try {
+          const materials = await new T.MTLLoader(manager).loadAsync(at(lib));
+          materials.preload();
+          obj.setMaterials(materials);
+        } catch {}
+      }
+      return obj.parse(text);
+    }
+    throw new Error("its kind is not one this view shows");
+  };
+  load().then((object) => {
+    const box = new T.Box3().setFromObject(object);
+    if (box.isEmpty()) throw new Error("it has nothing to draw");
+    scene.add(object);
+    const ball = box.getBoundingSphere(new T.Sphere());
+    const radius = ball.radius || 1;
+    const away = radius / Math.sin(T.MathUtils.degToRad(camera.fov / 2));
+    camera.near = away / 100;
+    camera.far = away * 100;
+    camera.position.copy(ball.center).add(new T.Vector3(0.6, 0.45, 1).normalize().multiplyScalar(away));
+    controls.target.copy(ball.center);
+    controls.update();
+    controls.saveState();
+    shown = true;
+    size();
+    sayMissing();
+    document.body.dataset.shown = "yes";
+  }).catch((e) => {
+    tell(missing.length
+      ? missing.join(", ") + (missing.length > 1 ? " are" : " is") + " not there or could not be read"
+      : (e && e.message) || String(e));
+  });
+})();
+</script></body></html>"##;
+
+/// What a player or model page tells the app when the web view cannot play
+/// or show its file (posted as `ahjo-files:` and this as JSON): the file
+/// `name` of the folder served as `site`, as it was opened as `open_id`,
+/// and how it failed.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+pub struct CannotShow {
+    pub site: String,
+    pub name: String,
+    pub open_id: u64,
+    #[serde(flatten)]
+    pub failure: Failure,
+}
+
+/// How a page of the app's own failed to show its file (`failed` in what
+/// it posts).
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+#[serde(tag = "failed", rename_all = "snake_case")]
+pub enum Failure {
+    /// The player's media error: `code` is the media error's (2 it stopped
+    /// loading, 3 it could not decode it, 4 it does not play its format),
+    /// or 0 for a video whose picture did not show.
+    Media { code: u16, message: String },
+    /// The model page could not load the model, and why, in words.
+    Model { why: String },
+}
+
+impl CannotShow {
+    /// The message a player or model page posted, when it is one.
     pub fn of(message: &str) -> Option<Self> {
         let said: Self = serde_json::from_str(message.strip_prefix("ahjo-files:")?).ok()?;
         // The site is the host's first name: `ahjo-file.<site>.localhost`.
@@ -306,24 +522,26 @@ impl CannotPlay {
     }
 
     /// Whether it is about the file `name` in `folder` on `node`, as it
-    /// was opened as `playback`.
-    pub fn is_about(&self, node: &str, folder: &str, name: &str, playback: u64) -> bool {
-        self.site == site(node, folder) && self.name == name && self.playback == playback
+    /// was opened as `open_id`.
+    pub fn is_about(&self, node: &str, folder: &str, name: &str, open_id: u64) -> bool {
+        self.site == site(node, folder) && self.name == name && self.open_id == open_id
     }
 
     /// Why, in a sentence, for the operator.
     pub fn why(&self) -> String {
-        match self.code {
-            0 => format!(
-                "{} shows no picture here: its video is in a format this view does not play",
-                self.name
+        let name = &self.name;
+        match &self.failure {
+            Failure::Model { why } => format!("{name} does not show here: {why}"),
+            Failure::Media { code: 0, .. } => format!(
+                "{name} shows no picture here: its video is in a format this view does not play"
             ),
-            2 => format!("{} stopped loading: {}", self.name, self.message),
-            3 => format!("{} does not play here: its data did not decode", self.name),
-            _ => format!(
-                "{} does not play here: this view does not play its format",
-                self.name
-            ),
+            Failure::Media { code: 2, message } => format!("{name} stopped loading: {message}"),
+            Failure::Media { code: 3, .. } => {
+                format!("{name} does not play here: its data did not decode")
+            }
+            Failure::Media { .. } => {
+                format!("{name} does not play here: this view does not play its format")
+            }
         }
     }
 }
@@ -373,8 +591,8 @@ mod tests {
     #[test]
     fn a_player_says_which_file_it_cannot_play() {
         let host = format!("{SCHEME}.{}.localhost", site("box", "/work"));
-        let said = CannotPlay::of(&format!(
-            r#"ahjo-files:{{"site":"{host}","name":"a.avi","playback":7,"code":4,"message":"no demuxer"}}"#
+        let said = CannotShow::of(&format!(
+            r#"ahjo-files:{{"site":"{host}","name":"a.avi","open_id":7,"failed":"media","code":4,"message":"no demuxer"}}"#
         ))
         .expect("a player's message");
         assert!(said.is_about("box", "/work", "a.avi", 7));
@@ -385,8 +603,34 @@ mod tests {
             said.why(),
             "a.avi does not play here: this view does not play its format"
         );
-        assert_eq!(CannotPlay::of("ahjo-kit:escape"), None);
-        assert_eq!(CannotPlay::of(r#"ahjo-files:{"site":"x"}"#), None);
+        assert_eq!(CannotShow::of("ahjo-kit:escape"), None);
+        assert_eq!(CannotShow::of(r#"ahjo-files:{"site":"x"}"#), None);
+    }
+
+    #[test]
+    fn a_model_page_loads_three_from_the_app_and_says_why_it_failed() {
+        let three = ahjo_app_kit::web_view::scheme_url(SCHEME, APP_SITE, "three.js");
+        let page = model_page();
+        assert!(page.contains(&format!(r#"<script src="{three}">"#)));
+        assert!(!page.contains("{three}"));
+        // No folder's site (hex) is the app's.
+        assert!(!APP_SITE.bytes().all(|b| b.is_ascii_hexdigit()));
+        let host = format!("{SCHEME}.{}.localhost", site("box", "/work"));
+        let said = CannotShow::of(&format!(
+            r#"ahjo-files:{{"site":"{host}","name":"scene.gltf","open_id":2,"failed":"model","why":"scene.bin is not there or could not be read"}}"#
+        ))
+        .expect("a model page's message");
+        assert!(said.is_about("box", "/work", "scene.gltf", 2));
+        assert_eq!(
+            said.failure,
+            Failure::Model {
+                why: "scene.bin is not there or could not be read".into()
+            }
+        );
+        assert_eq!(
+            said.why(),
+            "scene.gltf does not show here: scene.bin is not there or could not be read"
+        );
     }
 
     #[test]

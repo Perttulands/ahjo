@@ -25,6 +25,12 @@ usage: try-windows [<commit>] [--page <page>]... [--step <step>]... [--app swarm
                                  page too
               hover <selector>   the mouse over the middle of that element of
                                  the web page shown (a hover)
+              drag <selector> <dx> <dy>
+                                 a left-button drag from the middle of that
+                                 element of the web page shown, by dx, dy
+              wheel <selector> <dy>
+                                 the wheel turned dy pixels over it
+                                 (negative zooms in)
               type <text>        typed into what has the keyboard
               key <key>          enter, escape, tab, backspace, up, down,
                                  left or right
@@ -50,7 +56,11 @@ usage: try-windows [<commit>] [--page <page>]... [--step <step>]... [--app swarm
             (h264, over 64 MiB), clip.webm, voice.mp3, paper.pdf (three
             pages), odd.avi (MPEG-4 Part 2, over 64 MiB, which the web
             view does not play), letter.docx and bundle.zip; the session
-            'media' prints their paths. All of them are silent.
+            'media' prints their paths. All of them are silent. models/
+            holds cube.glb, textured/scene.gltf (its .bin and a checker
+            .png beside it), crate.obj (its crate.mtl red), cube.fbx,
+            part.stl and missing/scene.gltf (its .bin not there); the
+            session 'models' prints their paths.
   --app     which apps to start (default all three)
   --out     where the screenshots go (default
             ~/.cache/ahjo-dev/try-shots/<commit>-<time>)
@@ -272,6 +282,7 @@ fi
 mkdir -p "$S/files/media"
 cp "$MEDIA"/big.mp4 "$MEDIA"/clip.webm "$MEDIA"/voice.mp3 "$MEDIA"/odd.avi "$MEDIA"/paper.pdf \
   "$MEDIA"/letter.docx "$MEDIA"/bundle.zip "$S/files/media/"
+cp -r "$LINUX/areas/files/app/tests/models" "$S/files/models"
 git -C "$S/brain" init -q && git -C "$S/brain" add -A &&
   git -C "$S/brain" -c user.name=try -c user.email=try@localhost commit -qm "scratch brain"
 cat > "$S/xdg/ahjo/config.toml" <<EOF
@@ -293,6 +304,8 @@ HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s protos -c "$S/files" \
   "printf '%s\\n' 'Prototypes:' '' '$S/files/protos/counter/index.html' '' '$S/files/protos/cdn/index.html'; exec bash --norc"
 HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s media -c "$S/files/media" \
   "printf '%s\\n' 'Media:' '' $(for f in big.mp4 clip.webm voice.mp3 paper.pdf odd.avi letter.docx bundle.zip; do printf "'%s' '' " "$S/files/media/$f"; done); exec bash --norc"
+HOME=$S "$TMUX_BIN" -S "$S/tmux.sock" new-session -d -s models -c "$S/files/models" \
+  "printf '%s\\n' 'Models:' '' $(for f in cube.glb textured/scene.gltf crate.obj cube.fbx part.stl missing/scene.gltf; do printf "'%s' '' " "$S/files/models/$f"; done); exec bash --norc"
 HOME=$S XDG_CONFIG_HOME=$S/xdg "$AHJO" serve > "$out/node.log" 2>&1 &
 pids+=($!)
 for i in $(seq 1 100); do "$AHJO" version --node $node >/dev/null 2>&1 && break; sleep 0.2; done
@@ -436,6 +449,9 @@ for walked in "${walk[@]}"; do
     hover)
       step hover "$app" "$rest"
       say "$app hover $rest at $(tr -d '\r' < "$RUN/result.txt")" ;;
+    drag|wheel)
+      step "$verb" "$app" $rest
+      say "$app $verb $rest from $(tr -d '\r' < "$RUN/result.txt")" ;;
     type|key)
       step "$verb" "$app" "$rest"
       say "$app $verb $rest went to $(tr -d '\r' < "$RUN/result.txt")" ;;

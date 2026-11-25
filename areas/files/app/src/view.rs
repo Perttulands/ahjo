@@ -17,8 +17,7 @@ use ahjo_app_kit::widgets::pane;
 use ahjo_core::NodeId;
 use ahjo_files_contract::{Changed, Match};
 use gpui::{
-    AnyElement, Context, Div, MouseButton, MouseMoveEvent, Render, ScrollDelta, SharedString,
-    Window, div, img, prelude::*, px,
+    AnyElement, Context, Div, MouseButton, Render, SharedString, Window, div, prelude::*, px,
 };
 
 /// Under each of these widths a file's header leaves out one more of its
@@ -1320,14 +1319,14 @@ impl FilesPage {
                 pane::empty(t, why.clone(), Some(self.here_or_download(t, cx))).into_any_element()
             }
             Show::Picture { image, natural } => self.picture(image, *natural, cx),
-            Show::Model(m) => self.model(t, m, cx),
             Show::Media(kind) => {
-                let why = o.cannot_play.clone().unwrap_or_else(|| {
-                    if *kind == store::kinds::Kind::Pdf {
-                        "It shows in this computer's own reader".into()
-                    } else {
-                        "It plays in this computer's own player".into()
+                let why = o.cannot_show.clone().unwrap_or_else(|| {
+                    match kind {
+                        store::kinds::Kind::Pdf => "It shows in this computer's own reader",
+                        store::kinds::Kind::Model => "It turns in this computer's own 3D viewer",
+                        _ => "It plays in this computer's own player",
                     }
+                    .into()
                 });
                 pane::empty(t, why, Some(self.here_or_download(t, cx))).into_any_element()
             }
@@ -1395,8 +1394,8 @@ impl FilesPage {
             .into_any_element()
     }
 
-    /// The open web page, running, or the open sound, video or PDF, playing
-    /// (ADR 0006): inside the window where the system has a web view the
+    /// The open web page, running, or the open sound, video, PDF or 3D
+    /// model, playing or shown (ADR 0006): inside the window where the system has a web view the
     /// app can lay there; a page else in the system's browser, opened when
     /// the file was.
     fn live_page(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -1443,20 +1442,28 @@ impl FilesPage {
             return div().into_any_element();
         };
         let folder = paths::parent(&opened.path);
+        let bg = gpui::Rgba::from(t.bg);
+        let bg = format!(
+            "#{:02x}{:02x}{:02x}",
+            (bg.r * 255.).round() as u8,
+            (bg.g * 255.).round() as u8,
+            (bg.b * 255.).round() as u8
+        );
         let url = match media {
+            Some(store::kinds::Kind::Model) => self.served.show_model(
+                &opened.node,
+                &folder,
+                &opened.name,
+                opened.open_id,
+                &bg,
+                reach,
+            ),
             Some(kind @ (store::kinds::Kind::Audio | store::kinds::Kind::Video)) => {
-                let bg = gpui::Rgba::from(t.bg);
-                let bg = format!(
-                    "#{:02x}{:02x}{:02x}",
-                    (bg.r * 255.).round() as u8,
-                    (bg.g * 255.).round() as u8,
-                    (bg.b * 255.).round() as u8
-                );
                 self.served.play(
                     &opened.node,
                     &folder,
                     &opened.name,
-                    opened.playback,
+                    opened.open_id,
                     kind == store::kinds::Kind::Audio,
                     &bg,
                     reach,
@@ -1484,64 +1491,6 @@ impl FilesPage {
                     ..WebViewSetup::default()
                 }
             }))
-            .into_any_element()
-    }
-
-    fn model(&self, t: &Theme, m: &crate::model::Preview, cx: &mut Context<Self>) -> AnyElement {
-        fn with(p: &mut FilesPage, f: impl FnOnce(&mut crate::model::Preview)) {
-            if let Some(Show::Model(model)) = p.opened.as_mut().map(|o| &mut o.show) {
-                f(model)
-            }
-        }
-        div()
-            .id("model-stage")
-            .size_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .child(
-                pane::act(t, "model-reset", "Reset view").on_click(cx.listener(|p, _, _, cx| {
-                    with(p, |m| m.reset());
-                    cx.notify()
-                })),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|p, e: &gpui::MouseDownEvent, _, _| {
-                    with(p, |m| {
-                        m.last = Some((f32::from(e.position.x), f32::from(e.position.y)))
-                    })
-                }),
-            )
-            .on_mouse_move(cx.listener(|p, e: &MouseMoveEvent, _, cx| {
-                with(p, |model| {
-                    if e.dragging() {
-                        let now = (f32::from(e.position.x), f32::from(e.position.y));
-                        if let Some(last) = model.last {
-                            model.yaw += (now.0 - last.0) * 0.01;
-                            model.pitch = (model.pitch + (now.1 - last.1) * 0.01).clamp(-1.5, 1.5);
-                            model.redraw();
-                        }
-                        model.last = Some(now);
-                    } else {
-                        model.last = None;
-                    }
-                });
-                cx.notify();
-            }))
-            .on_scroll(cx.listener(|p, e: &gpui::ScrollEvent, _, cx| {
-                with(p, |model| {
-                    let y = match e.delta {
-                        ScrollDelta::Lines(v) => v.y,
-                        ScrollDelta::Pixels(v) => f32::from(v.y) / 20.,
-                    };
-                    model.zoom = (model.zoom * (y * 0.1).exp()).clamp(0.1, 10.);
-                    model.redraw();
-                });
-                cx.notify();
-                cx.stop_propagation();
-            }))
-            .child(img(m.image.clone()).max_w_full().max_h_full())
             .into_any_element()
     }
 

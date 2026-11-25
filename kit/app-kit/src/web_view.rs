@@ -70,6 +70,8 @@ pub struct SchemeRequest {
     pub site: String,
     /// The address's path after the site's `/`, decoded, without its query.
     pub path: String,
+    /// The address's query after its `?`, as it was written (not decoded).
+    pub query: String,
     pub headers: Vec<(String, String)>,
 }
 
@@ -83,11 +85,13 @@ impl SchemeRequest {
             .or_else(|| url.strip_prefix(&format!("{name}://")))?;
         let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
         let site = host.strip_suffix(".localhost").unwrap_or(host);
-        let path = path.split(['?', '#']).next().unwrap_or_default();
+        let path = path.split('#').next().unwrap_or_default();
+        let (path, query) = path.split_once('?').unwrap_or((path, ""));
         Some(Self {
             method: method.into(),
             site: site.into(),
             path: decode(path)?,
+            query: query.into(),
             headers,
         })
     }
@@ -751,6 +755,7 @@ mod tests {
         let asked = SchemeRequest::of("ahjo-file", "GET", &format!("{url}?v=1"), vec![]).unwrap();
         assert_eq!(asked.site, "f00d");
         assert_eq!(asked.path, "my assets/a b+c.css");
+        assert_eq!(asked.query, "v=1");
         // As the system web view hands it over, the scheme's name in front.
         let handed = SchemeRequest::of(
             "ahjo-file",
