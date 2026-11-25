@@ -35,7 +35,8 @@ usage: try-windows [<commit>] [--page <page>]... [--step <step>]... [--app swarm
             The fake desk's asks: a choice (try-pick), a document (try-doc)
             and a published HTML page (try-page). The scratch files hold two
             HTML prototypes, protos/counter (its own css, js, an asset in
-            'my assets', a <dialog>) and protos/cdn (lodash from a CDN), each
+            'my assets', a <dialog>, a custom note Escape hides) and
+            protos/cdn (lodash from a CDN), each
             counting its button's clicks in window.count; the session
             'protos' prints both paths, to click.
   --app     which apps to start (default all three)
@@ -195,8 +196,9 @@ cat > "$S/files/protos/counter/index.html" <<'HTML'
 <link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script></head>
 <body><img id="dot" src="my assets/dot one.svg" alt="dot" width="48" height="48">
 <h1>Counter prototype</h1><button id="count">Clicked 0 times</button>
-<button id="ask">Open dialog</button>
+<button id="ask">Open dialog</button> <button id="tell">Open note</button>
 <dialog id="dialog"><p>A dialog of the page's own.</p><button id="shut">Close</button></dialog>
+<div id="note" hidden>A note of the page's own, not a dialog: Escape hides it.</div>
 </body></html>
 HTML
 cat > "$S/files/protos/counter/style.css" <<'CSS'
@@ -212,6 +214,10 @@ button.addEventListener("click", () => {
 });
 document.getElementById("ask").addEventListener("click", () => document.getElementById("dialog").showModal());
 document.getElementById("shut").addEventListener("click", () => document.getElementById("dialog").close());
+// A custom note: its Escape handler hides it without preventing the default.
+const note = document.getElementById("note");
+document.getElementById("tell").addEventListener("click", () => { note.hidden = false; });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !note.hidden) note.hidden = true; });
 JS
 cat > "$S/files/protos/counter/my assets/dot one.svg" <<'SVG'
 <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><circle cx="24" cy="24" r="20" fill="#c0392b"/></svg>
