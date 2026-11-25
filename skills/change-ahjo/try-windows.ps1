@@ -261,6 +261,13 @@ public static class Win {
                 }
                 Remove-Item -LiteralPath $f.FullName
             }
+            # A killed app leaves its web view's processes holding the run's
+            # folder for a while: only those whose data is in this run.
+            $mine = { @(Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" |
+                Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($Run, [StringComparison]::OrdinalIgnoreCase) -ge 0 }) }
+            foreach ($w in & $mine) { Stop-Process -Id $w.ProcessId -Force -ErrorAction SilentlyContinue }
+            $clock = [Diagnostics.Stopwatch]::StartNew()
+            while ((& $mine).Count -gt 0 -and $clock.Elapsed.TotalSeconds -lt 10) { Start-Sleep -Milliseconds 250 }
         }
         default { throw "unknown step '$($words[0])'" }
     }
