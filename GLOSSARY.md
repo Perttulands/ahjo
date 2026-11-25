@@ -81,7 +81,7 @@ _Avoid_: task (on its own)
 **Panel**:
 The one column at the edge of the window. What a page opens next to itself
 stands there.
-_Avoid_: dock, drawer, side panel, edge panel, beside view
+_Avoid_: dock, drawer, side panel, edge panel, beside view, view beside, beside panel
 
 **Side section**:
 A page's part of the left column, which is on every page. Sessions' list is
