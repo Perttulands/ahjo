@@ -75,6 +75,11 @@ fn a_tampered_code_result_cannot_accept_a_human_verdict() {
         assert!(p.status != "blocked" && Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(5));
     };
+    // The run's worker reads and checks the ledger once more after the gate
+    // shows as waiting; tampered under it, the run blocks itself. Stop it
+    // first, so only the verdict reads the tampered ledger.
+    c.shutdown(Instant::now() + Duration::from_secs(10))
+        .unwrap();
     let path = root.0.join("runs").join(format!("{id}.ndjson"));
     let original = std::fs::read_to_string(&path).unwrap();
     let altered = original
@@ -90,23 +95,32 @@ fn a_tampered_code_result_cannot_accept_a_human_verdict() {
         .join("\n")
         + "\n";
     std::fs::write(&path, altered).unwrap();
-    let result = c.record_verdict(
-        &id,
-        "gate_review",
-        ahjo_mission_model::HumanVerdict {
-            requested_seq: seq,
-            verdict: "pass".into(),
-            ..Default::default()
-        },
-    );
-    assert!(result.is_err());
+    let verdict = || {
+        c.record_verdict(
+            &id,
+            "gate_review",
+            ahjo_mission_model::HumanVerdict {
+                requested_seq: seq,
+                verdict: "pass".into(),
+                ..Default::default()
+            },
+        )
+    };
+    assert!(verdict().is_err());
     assert!(
         !std::fs::read_to_string(&path)
             .unwrap()
             .contains("human_verdict_recorded")
     );
+    // The same verdict on the ledger as the run wrote it is taken: the
+    // tampering, not the stop, refused it.
     std::fs::write(&path, original).unwrap();
-    c.abort(&id, "human:operator", "test complete").unwrap();
+    verdict().unwrap();
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("human_verdict_recorded")
+    );
 }
 
 #[test]
