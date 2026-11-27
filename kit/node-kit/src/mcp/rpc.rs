@@ -86,13 +86,23 @@ async fn call(mcp: &Mcp, reach: &Reach, caller: &Caller, params: &Value) -> Answ
         return Err((INVALID_PARAMS, format!("Unknown tool: {name}{elsewhere}")));
     };
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
+    let image = mcp
+        .answering(command, &args)
+        .and_then(|answering| super::image_field(&answering.output_schema))
+        .map(str::to_owned);
     let outcome = mcp.invoke(caller, command, args).await;
-    Ok(content(outcome))
+    Ok(content(outcome, image.as_deref()))
 }
 
 /// A tool's outcome as JSON text, plus the matching structured value when
-/// the call succeeded.
-fn content(outcome: Result<Value, Error>) -> Value {
+/// the call succeeded. The field `image` names ([`super::image_field`]) is
+/// given as image content after the text, and not in the text or the
+/// structured value.
+fn content(mut outcome: Result<Value, Error>, image: Option<&str>) -> Value {
+    let picture = match (&mut outcome, image) {
+        (Ok(Value::Object(fields)), Some(field)) => fields.shift_remove(field),
+        _ => None,
+    };
     let (text, failed) = match &outcome {
         Ok(value) => (value.to_string(), false),
         Err(error) => (
@@ -101,6 +111,16 @@ fn content(outcome: Result<Value, Error>) -> Value {
         ),
     };
     let mut result = json!({ "content": [{ "type": "text", "text": text }], "isError": failed });
+    if let Some(picture) = picture {
+        result["content"]
+            .as_array_mut()
+            .expect("content is a list")
+            .push(json!({
+                "type": "image",
+                "data": picture["data"],
+                "mimeType": picture["mime_type"],
+            }));
+    }
     if let Ok(value) = outcome {
         result["structuredContent"] = value;
     }

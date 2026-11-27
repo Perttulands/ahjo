@@ -7,6 +7,7 @@ pub mod drops;
 pub mod error;
 pub mod find;
 mod identity;
+mod images;
 mod index;
 mod receive;
 mod recent;
@@ -74,6 +75,22 @@ impl Files {
     }
     pub fn rename(&self, from: &str, to: &str) -> Result<(), FilesError> {
         disk::rename(&self.roots, from, to)
+    }
+    /// The PNG, JPEG and WebP images under `folder`, newest first.
+    pub fn images(
+        &self,
+        folder: &str,
+        limit: Option<usize>,
+    ) -> Result<ahjo_files_contract::commands::FileImages, ahjo_core::Error> {
+        images::list(&self.roots, &self.node, folder, limit)
+    }
+    /// One image from `folder`, by its path from there, checked and whole.
+    pub fn image(
+        &self,
+        folder: &str,
+        path: &str,
+    ) -> Result<ahjo_files_contract::commands::FileImage, ahjo_core::Error> {
+        images::read(&self.roots, &self.node, folder, path)
     }
     pub fn delete(&self, path: &str) -> Result<(), FilesError> {
         disk::delete(&self.roots, path)
@@ -184,6 +201,8 @@ pub const LISTING: AreaListing = AreaListing {
         "file_resume",
         "file_show_transfer",
         "file_stat",
+        "file_list_images",
+        "file_read_image",
     ],
     build,
 };

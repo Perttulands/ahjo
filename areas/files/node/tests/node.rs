@@ -222,6 +222,8 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
         "file_resume",
         "file_show_transfer",
         "file_stat",
+        "file_list_images",
+        "file_read_image",
     ];
     expected.sort();
     assert_eq!(actual, expected);
@@ -229,7 +231,7 @@ async fn exact_commands_are_exposed_to_mcp_and_cli_and_operate_on_files() {
     let args = vec!["--node".into(), node.url()];
     cli::run("file", &args, &mut out).await.unwrap();
     let verbs = String::from_utf8(out).unwrap();
-    assert_eq!(verbs.matches("ahjo file ").count(), 15, "{verbs}");
+    assert_eq!(verbs.matches("ahjo file ").count(), 17, "{verbs}");
     for removed in ["find", "download", "upload"] {
         let error = cli::run(
             "file",
@@ -828,6 +830,188 @@ async fn files_work_as_the_files_view_does_under_the_roots() {
         )
         .await;
     assert_eq!(nowhere.unwrap_err().code, "unknown_node");
+    node.stop().await;
+    std::fs::remove_dir_all(scratch).unwrap();
+}
+
+/// A PNG's signature and header, saying it is `width` by `height`.
+fn png(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    bytes.extend(width.to_be_bytes());
+    bytes.extend(height.to_be_bytes());
+    bytes.extend(b"\x08\x02\0\0\0");
+    bytes
+}
+
+/// An assistant finds the screenshots an agent left in a folder and sees
+/// one as an image; nothing outside the folder is reached, by a climb or
+/// a link, and what is not a small PNG, JPEG or WebP is refused by name.
+#[tokio::test(flavor = "multi_thread")]
+async fn images_in_a_folder_are_listed_and_given_as_image_content() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let scratch = ahjo_testkit::fresh_dir("files-images");
+    let root = scratch.join("root");
+    let shots = root.join("project/shots");
+    std::fs::create_dir_all(shots.join("run-2")).unwrap();
+    std::fs::create_dir_all(shots.join(".cache")).unwrap();
+    let old = std::fs::File::create(shots.join("old.jpg")).unwrap();
+    old.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000))
+        .unwrap();
+    drop(old);
+    let picture = png(640, 480);
+    std::fs::write(shots.join("run-2/home.png"), &picture).unwrap();
+    std::fs::write(shots.join(".cache/hidden.png"), png(1, 1)).unwrap();
+    std::fs::write(shots.join("notes.txt"), "not an image").unwrap();
+    std::fs::write(shots.join("fake.png"), "<svg/>").unwrap();
+    std::fs::write(shots.join("huge.png"), png(9000, 10)).unwrap();
+    let big = std::fs::File::create(shots.join("big.webp")).unwrap();
+    big.set_len(6 << 20).unwrap();
+    drop(big);
+    // Outside the folder: a sibling under the root, and outside every root.
+    std::fs::write(root.join("project/secret.png"), png(2, 2)).unwrap();
+    std::fs::write(scratch.join("private.png"), png(3, 3)).unwrap();
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("project/secret.png"), shots.join("sibling.png"))
+            .unwrap();
+        std::os::unix::fs::symlink(scratch.join("private.png"), shots.join("private.png")).unwrap();
+    }
+    let config = format!(
+        "[files]\nroots = [{}]\n",
+        serde_json::to_string(root.to_str().unwrap()).unwrap()
+    );
+    let node = Node::start(&[ahjo_files::LISTING], &config).await.unwrap();
+    let folder = shots.to_str().unwrap();
+
+    let listed = node
+        .call("file_list_images", json!({"folder": folder}))
+        .await
+        .unwrap();
+    let paths: Vec<&str> = listed["images"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|image| image["path"].as_str().unwrap())
+        .collect();
+    let mut newest = paths[..paths.len() - 1].to_vec();
+    newest.sort_unstable();
+    assert_eq!(
+        newest,
+        ["big.webp", "fake.png", "huge.png", "run-2/home.png"]
+    );
+    assert_eq!(paths.last(), Some(&"old.jpg"), "oldest last: {listed}");
+    let big = listed["images"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|image| image["path"] == "big.webp")
+        .unwrap();
+    assert_eq!(big["too_large"], true);
+    assert_eq!(big["mime_type"], "image/webp");
+    let one = node
+        .call("file_list_images", json!({"folder": folder, "limit": 1}))
+        .await
+        .unwrap();
+    assert_eq!(one["images"].as_array().unwrap().len(), 1);
+    assert_eq!(one["truncated"], true);
+
+    // The image itself, as MCP image content after its metadata.
+    let client = NodeClient::new(Some(&node.url())).unwrap();
+    let call = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": "file_read_image", "arguments": { "folder": folder, "path": "run-2/home.png" } },
+    });
+    let (answer, _) = client
+        .request(Method::POST, "/mcp/files", Some(call), None)
+        .await
+        .unwrap();
+    let result = &answer["result"];
+    assert_eq!(result["isError"], false, "{answer}");
+    let content = result["content"].as_array().unwrap();
+    assert_eq!(content.len(), 2);
+    assert_eq!(content[1]["type"], "image");
+    assert_eq!(content[1]["mimeType"], "image/png");
+    assert_eq!(
+        STANDARD
+            .decode(content[1]["data"].as_str().unwrap())
+            .unwrap(),
+        picture
+    );
+    let text: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(text, result["structuredContent"]);
+    assert_eq!(text["image"], Value::Null, "the bytes only as an image");
+    assert_eq!(
+        (text["width"].clone(), text["height"].clone()),
+        (json!(640), json!(480))
+    );
+    assert_eq!(text["path"], "run-2/home.png");
+
+    // Refused, each by what is wrong.
+    let refused = async |folder: &std::path::Path, path: &str| {
+        node.call("file_read_image", json!({"folder": folder, "path": path}))
+            .await
+            .unwrap_err()
+            .code
+    };
+    assert_eq!(refused(&shots, "../secret.png").await, "outside_roots");
+    let climb = node
+        .call(
+            "file_read_image",
+            json!({"folder": folder, "path": "../secret.png"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(climb.message.contains("leads out of"), "{climb}");
+    // A leading slash is still a path from the folder.
+    assert_eq!(refused(&shots, "/etc/hostname").await, "not_found");
+    #[cfg(unix)]
+    {
+        assert_eq!(refused(&shots, "sibling.png").await, "outside_roots");
+        assert_eq!(refused(&shots, "private.png").await, "outside_roots");
+    }
+    assert_eq!(refused(&scratch, "private.png").await, "outside_roots");
+    assert_eq!(refused(&shots, "fake.png").await, "not_image");
+    assert_eq!(refused(&shots, "notes.txt").await, "not_image");
+    assert_eq!(refused(&shots, "big.webp").await, "too_large");
+    assert_eq!(refused(&shots, "huge.png").await, "too_large");
+    assert_eq!(refused(&shots, "absent.png").await, "not_found");
+    let error = node
+        .call("file_list_images", json!({"folder": scratch}))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "outside_roots");
+
+    // The command line: plain output names the image, --json gives it.
+    let args = |json: bool| {
+        let mut args: Vec<String> = vec![
+            "read-image".into(),
+            "--folder".into(),
+            folder.into(),
+            "--path".into(),
+            "run-2/home.png".into(),
+            "--node".into(),
+            node.url(),
+        ];
+        if json {
+            args.push("--json".into());
+        }
+        args
+    };
+    let mut out = Vec::new();
+    assert_eq!(cli::run("file", &args(true), &mut out).await.unwrap(), 0);
+    let printed: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(printed["image"]["mime_type"], "image/png");
+    assert_eq!(
+        STANDARD
+            .decode(printed["image"]["data"].as_str().unwrap())
+            .unwrap(),
+        picture
+    );
+    let mut out = Vec::new();
+    assert_eq!(cli::run("file", &args(false), &mut out).await.unwrap(), 0);
+    let printed = String::from_utf8(out).unwrap();
+    assert!(printed.contains("given with --json"), "{printed}");
+    assert!(printed.contains("640"), "{printed}");
     node.stop().await;
     std::fs::remove_dir_all(scratch).unwrap();
 }

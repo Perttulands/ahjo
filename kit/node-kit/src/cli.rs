@@ -157,6 +157,17 @@ pub async fn run_with_files(
         write_toml_document(document, json_out, out)?;
         return Ok(0);
     }
+    if let Some(field) = crate::mcp::image_field(&tool["outputSchema"])
+        && let Some(picture) = answer["content"]
+            .as_array()
+            .and_then(|content| content.iter().find(|c| c["type"] == "image"))
+    {
+        // MCP gives the image apart from the text; here it is a field again.
+        value[field] = match json_out {
+            true => json!({ "mime_type": picture["mimeType"], "data": picture["data"] }),
+            false => Value::String("given with --json, as base64".into()),
+        };
+    }
     aim(&mut value, named.as_deref(), &tools);
     if json_out {
         writeln!(out, "{}", serde_json::to_string_pretty(&value)?)?;

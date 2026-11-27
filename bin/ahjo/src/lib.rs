@@ -23,7 +23,7 @@ pub const AREAS: &[Listing] = &[
 /// `/mcp/<name>`.
 pub const TOOL_SETS: &[ToolSet] = &[CHATGPT];
 
-/// ChatGPT's: handing work to a coding agent and following it, the issues and the host, and the rest of Swarm through `swarm_search`.
+/// ChatGPT's: handing work to a coding agent and following it, the issues and the host, the images agents leave (screenshots, renders), and the rest of Swarm through `swarm_search`.
 /// The brain is left to Context Citadel's own connector, so ChatGPT has one
 /// brain interface, not two.
 pub const CHATGPT: ToolSet = ToolSet {
@@ -39,6 +39,8 @@ pub const CHATGPT: ToolSet = ToolSet {
         "issue_show",
         "issue_create",
         "host_show",
+        "file_list_images",
+        "file_read_image",
         "swarm_search",
         "swarm_read",
         "swarm_run",
@@ -52,7 +54,9 @@ pub const CHATGPT: ToolSet = ToolSet {
         reads, swarm_run if it changes something.\n\n\
         Every tool runs on the user's machine as the user. A handoff session shows in the \
         Swarm app, where the user can watch and type into it; its name is how to follow it \
-        later. session_list shows every session, including ones the user started.",
+        later. session_list shows every session, including ones the user started. \
+        To see a screenshot or render an agent made, file_list_images in the folder it \
+        saved to, then file_read_image, which gives the picture itself.",
 };
 
 /// The binary's own first words, which no area's command noun may take.

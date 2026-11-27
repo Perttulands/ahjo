@@ -193,3 +193,5 @@ pub const TOO_LARGE: &str = "too_large";
 pub const RANGE_NOT_SATISFIABLE: &str = "range_not_satisfiable";
 pub const UNKNOWN_NODE: &str = "unknown_node";
 pub const IO_ERROR: &str = "io_error";
+/// Not a PNG, JPEG or WebP image, whatever its name says.
+pub const NOT_IMAGE: &str = "not_image";

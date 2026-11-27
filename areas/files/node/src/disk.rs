@@ -271,7 +271,7 @@ pub fn delete(roots: &Roots, path: &str) -> Result<(), FilesError> {
     }
 }
 
-fn modified(meta: &fs::Metadata) -> u64 {
+pub(crate) fn modified(meta: &fs::Metadata) -> u64 {
     meta.modified()
         .ok()
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())

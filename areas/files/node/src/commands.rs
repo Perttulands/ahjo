@@ -6,9 +6,9 @@ use ahjo_files_contract::{
     Diff, IO_ERROR, Matches, NOT_FOUND, RepoStatus,
     commands::{
         FileCopy, FileCreateFolder, FileDelete, FileDeleted, FileDiff, FileList, FileListChanges,
-        FileListRecent, FileListed, FileMove, FilePath, FileRead, FileReadResult, FileResume,
-        FileSearch, FileSearchPaths, FileSearched, FileShowTransfer, FileStat, FileStated,
-        FileTransferResult, FileWrite, FileWritten, ListContent, ReadContent,
+        FileListImages, FileListRecent, FileListed, FileMove, FilePath, FileRead, FileReadImage,
+        FileReadResult, FileResume, FileSearch, FileSearchPaths, FileSearched, FileShowTransfer,
+        FileStat, FileStated, FileTransferResult, FileWrite, FileWritten, ListContent, ReadContent,
     },
 };
 use ahjo_node_kit::{Command, Effect};
@@ -120,6 +120,14 @@ pub fn commands(files: Arc<Files>) -> Vec<Command> {
             Ok(FileStated {
                 times: files.stat(&args.paths),
             })
+        }),
+        blocking(&files, Effect::Reads, |files, args: FileListImages| {
+            let folder = path(files, &args.folder)?;
+            files.images(&folder, args.limit)
+        }),
+        blocking(&files, Effect::Reads, |files, args: FileReadImage| {
+            let folder = path(files, &args.folder)?;
+            files.image(&folder, &args.path)
         }),
         Command::for_request(Effect::Writes, move |args: FileCopy| {
             let files = copying.clone();

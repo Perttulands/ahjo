@@ -16,7 +16,7 @@ These are the commands advertised by the enabled areas. Run `ahjo <noun> <verb> 
 
 ## file
 
-`ahjo file copy`, `ahjo file delete`, `ahjo file diff`, `ahjo file list`, `ahjo file search-paths`, `ahjo file create-folder`, `ahjo file move`, `ahjo file read`, `ahjo file list-recent`, `ahjo file resume`, `ahjo file search`, `ahjo file stat`, `ahjo file list-changes`, `ahjo file show-transfer`, `ahjo file write`.
+`ahjo file copy`, `ahjo file delete`, `ahjo file diff`, `ahjo file list`, `ahjo file search-paths`, `ahjo file create-folder`, `ahjo file move`, `ahjo file read`, `ahjo file list-recent`, `ahjo file resume`, `ahjo file search`, `ahjo file stat`, `ahjo file list-changes`, `ahjo file show-transfer`, `ahjo file write`, `ahjo file list-images`, `ahjo file read-image`.
 
 ## handoff
 

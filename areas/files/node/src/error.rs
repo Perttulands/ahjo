@@ -2,8 +2,8 @@
 
 use ahjo_core::Error;
 use ahjo_files_contract::{
-    ALREADY_EXISTS, FILE_CHANGED, IO_ERROR, NOT_FILE, NOT_FOLDER, NOT_FOUND, OUTSIDE_ROOTS,
-    PERMISSION_DENIED, ROOT_IMMUTABLE, TOO_LARGE, UNKNOWN_NODE,
+    ALREADY_EXISTS, FILE_CHANGED, IO_ERROR, NOT_FILE, NOT_FOLDER, NOT_FOUND, NOT_IMAGE,
+    OUTSIDE_ROOTS, PERMISSION_DENIED, ROOT_IMMUTABLE, TOO_LARGE, UNKNOWN_NODE,
 };
 use axum::http::StatusCode;
 use std::fmt;
@@ -94,6 +94,7 @@ pub(crate) fn failure_status(error: &Error) -> Option<StatusCode> {
         ALREADY_EXISTS => StatusCode::CONFLICT,
         FILE_CHANGED => StatusCode::PRECONDITION_FAILED,
         NOT_FOLDER | NOT_FILE => StatusCode::BAD_REQUEST,
+        NOT_IMAGE => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         TOO_LARGE => StatusCode::PAYLOAD_TOO_LARGE,
         IO_ERROR => StatusCode::INTERNAL_SERVER_ERROR,
         _ => return None,

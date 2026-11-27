@@ -1318,3 +1318,91 @@ async fn view_open_reaches_the_app_and_answers_its_answer() {
     assert_eq!(shown, json!({"apps": []}));
     node.stop().await.unwrap();
 }
+
+/// A camera whose snap answers a picture: what a command marks
+/// `x-ahjo-image` in its answer.
+struct Camera;
+
+/// Take a picture.
+#[derive(serde::Deserialize, schemars::JsonSchema)]
+struct Snap {}
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+struct Snapped {
+    width: u32,
+    #[schemars(extend("x-ahjo-image" = true))]
+    picture: Picture,
+}
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+struct Picture {
+    mime_type: &'static str,
+    data: &'static str,
+}
+
+impl Area for Camera {
+    fn commands(&self) -> Vec<Command> {
+        vec![Command::typed(
+            "camera_snap",
+            Effect::Reads,
+            |_: Snap| async {
+                Ok(Snapped {
+                    width: 1,
+                    picture: Picture {
+                        mime_type: "image/png",
+                        data: "iVBORw0K",
+                    },
+                })
+            },
+        )]
+    }
+}
+
+const CAMERA_LISTED: Listing = listed("camera", &[], &["camera_snap"], |_| Built::now(Camera));
+
+/// MCP gives a command's image as image content after the text, called
+/// directly or through `swarm_read`, and its structured result goes without
+/// it, as its output schema says it may.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_commands_image_is_image_content() {
+    let node = start_with(&[CAMERA_LISTED], &[HOME_CAMERA], "")
+        .await
+        .unwrap();
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (_, body) = rpc(&node, "/mcp/camera", list).await;
+    let listed: Value = serde_json::from_str(&body).unwrap();
+    let output = &listed["result"]["tools"][0]["outputSchema"];
+    assert_eq!(output["required"], json!(["width"]), "{output}");
+    assert_eq!(output["properties"]["picture"]["x-ahjo-image"], true);
+    for (path, tool, arguments) in [
+        ("/mcp/camera", "camera_snap", json!({})),
+        (
+            "/mcp/home",
+            "swarm_read",
+            json!({ "command": "camera_snap" }),
+        ),
+    ] {
+        let call = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": tool, "arguments": arguments },
+        });
+        let (_, body) = rpc(&node, path, call).await;
+        let result = serde_json::from_str::<Value>(&body).unwrap()["result"].take();
+        assert_eq!(
+            result["content"],
+            json!([
+                { "type": "text", "text": r#"{"width":1}"# },
+                { "type": "image", "data": "iVBORw0K", "mimeType": "image/png" },
+            ]),
+            "{tool}"
+        );
+        assert_eq!(result["structuredContent"], json!({ "width": 1 }), "{tool}");
+    }
+    node.stop().await.unwrap();
+}
+
+const HOME_CAMERA: ToolSet = ToolSet {
+    name: "home",
+    tools: &["swarm_read"],
+    instructions: "The home.",
+};

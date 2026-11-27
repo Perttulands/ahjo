@@ -139,6 +139,8 @@ const VERBS: &[&str] = &[
     "search_paths",
     "create_folder",
     "list_recent",
+    "list_images",
+    "read_image",
     "stat",
     "show_transfer",
     "list_repositories",

@@ -232,6 +232,82 @@ pub struct FileStated {
     pub times: Vec<Option<u64>>,
 }
 
+/// The most bytes `file_read_image` gives: what multimodal clients take in one
+/// image.
+pub const MAX_IMAGE_BYTES: u64 = 5 << 20;
+
+/// The longest side, in pixels, `file_read_image` gives.
+pub const MAX_IMAGE_SIDE: u32 = 8000;
+
+/// List the PNG, JPEG and WebP images under a folder, newest first.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileListImages {
+    /// Folder to look in, such as a project's or session's screenshot folder. Its hidden and build folders are skipped unless named.
+    pub folder: String,
+    /// How many images to answer, newest first. Defaults to 50, at most 200.
+    #[schemars(range(min = 1, max = 200))]
+    pub limit: Option<usize>,
+}
+
+/// Show a PNG, JPEG or WebP image from a folder as an image, with its size.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FileReadImage {
+    /// Folder the image is in, as file_list_images was given it.
+    pub folder: String,
+    /// The image's path from the folder, as file_list_images answers it.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FileImages {
+    pub node: String,
+    /// The folder, links resolved.
+    pub folder: String,
+    pub images: Vec<ImageEntry>,
+    /// More images were there, or the walk stopped before seeing them all.
+    pub truncated: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImageEntry {
+    /// From the folder, parts joined by `/`.
+    pub path: String,
+    /// By its name; file_read_image checks the bytes themselves.
+    pub mime_type: String,
+    pub size: u64,
+    /// Milliseconds since the Unix epoch.
+    pub modified: u64,
+    /// Over the most file_read_image gives.
+    pub too_large: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FileImage {
+    pub node: String,
+    pub folder: String,
+    pub path: String,
+    pub mime_type: String,
+    pub width: u32,
+    pub height: u32,
+    pub size: u64,
+    /// Milliseconds since the Unix epoch.
+    pub modified: u64,
+    pub version: String,
+    /// The image itself. MCP gives it as image content; the command line's
+    /// --json as base64.
+    #[schemars(extend("x-ahjo-image" = true))]
+    pub image: ImageData,
+}
+
+/// An image's bytes as base64, and what they are.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ImageData {
+    pub mime_type: String,
+    pub data: String,
+}
+
 macro_rules! command {
     ($input:ty, $name:literal, $output:ty) => {
         impl TypedCommand for $input {
@@ -254,6 +330,8 @@ command!(FileSearchPaths, "file_search_paths", Matches);
 command!(FileSearch, "file_search", FileSearched);
 command!(FileShowTransfer, "file_show_transfer", FileTransferResult);
 command!(FileStat, "file_stat", FileStated);
+command!(FileListImages, "file_list_images", FileImages);
+command!(FileReadImage, "file_read_image", FileImage);
 
 impl TypedCommand for FileCopy {
     const NAME: &'static str = "file_copy";

@@ -158,6 +158,19 @@ impl Mcp {
         self.commands(reach).find(|command| command.name == name)
     }
 
+    /// The command whose answer a call of `tool` with `args` gives: the
+    /// tool's own, or the one `swarm_read` or `swarm_run` relays to.
+    fn answering<'a>(&'a self, tool: &'a Command, args: &Value) -> Option<&'a Command> {
+        if tool.name != sets::READ && tool.name != sets::RUN {
+            return Some(tool);
+        }
+        let name = args.get("command")?.as_str()?;
+        self.groups
+            .iter()
+            .flat_map(|g| g.commands.iter())
+            .find(|c| c.name == name)
+    }
+
     async fn invoke(
         &self,
         caller: &rpc::Caller,
@@ -233,6 +246,14 @@ impl Set {
 /// what it does ([`Effect`]) as MCP's annotations.
 fn tool(command: &Command) -> Value {
     let mut schema = (command.schema)();
+    // The image a command answers is image content, not structured content,
+    // so the structured result may go without it.
+    let mut output = command.output_schema.as_ref().clone();
+    if let Some(field) = image_field(&output).map(str::to_owned)
+        && let Some(required) = output.get_mut("required").and_then(Value::as_array_mut)
+    {
+        required.retain(|name| *name != field.as_str());
+    }
     // An empty `required` says nothing.
     if let Some(fields) = schema.as_object_mut()
         && fields
@@ -260,9 +281,20 @@ fn tool(command: &Command) -> Value {
         "title": command.title(),
         "description": command.description,
         "inputSchema": schema,
-        "outputSchema": command.output_schema.as_ref(),
+        "outputSchema": output,
         "annotations": annotations,
     })
+}
+
+/// The output field a command answers as MCP image content: the one its
+/// output schema marks `x-ahjo-image`, an object of `mime_type` and base64
+/// `data`. `tools/call` gives it as an image after the text, and leaves it
+/// out of the text and the structured result; the command line puts it back.
+pub fn image_field(output_schema: &Value) -> Option<&str> {
+    output_schema["properties"]
+        .as_object()?
+        .iter()
+        .find_map(|(name, spec)| (spec["x-ahjo-image"] == true).then_some(name.as_str()))
 }
 
 /// Takes `node` out of a call's arguments: this node unless they name

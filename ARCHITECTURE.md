@@ -177,6 +177,11 @@ ones its listing named. `bin/ahjo/tests/areas.rs` checks the real list.
     `ahjo noun verb`.
   - A `node` argument names the node that runs the command. MCP's tool lists
     leave this argument out while only this node can run the command.
+  - A command that answers a picture marks that field `x-ahjo-image` (an
+    object of `mime_type` and base64 `data`). MCP gives it as image content
+    after the text, and leaves it out of the text and the structured result;
+    the command line puts it back for `--json`. Files' `file_read_image`
+    does this for an image in a folder under the roots.
   - Each command declares its effect: reads, writes, sets or destroys. Its MCP
     tool carries the effect as annotations. Mark every command that only reads
     as a read. A client such as ChatGPT asks the operator before it runs any
@@ -195,7 +200,7 @@ ones its listing named. `bin/ahjo/tests/areas.rs` checks the real list.
   - The command line reads `/mcp`, so it sees every command in one request.
 - **Tool sets.** A binary may name tool sets, as `ahjo` does in `TOOL_SETS`.
   Each set is an MCP server at `/mcp/<set>`. It holds chosen commands from any
-  area, shaped for one client. For example, `chatgpt` holds the handoff, issue
+  area, shaped for one client. For example, `chatgpt` holds the handoff, issue, image
   and host tools. A set may also add three tools that exist only in tool sets:
   - `swarm_search` finds any other command by words.
   - `swarm_read` runs a command that reads. It never needs confirming.
