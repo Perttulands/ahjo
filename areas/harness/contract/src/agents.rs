@@ -7,9 +7,9 @@ use ahjo_mission_model::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// List reusable agents, the current reasoning effort policy, and each
-/// harness and model's supported efforts. Consult effort_policy before
-/// choosing an effort.
+/// List reusable agents, the current reasoning effort policy, and supported efforts.
+///
+/// Consult `effort_policy` before choosing an effort for a harness and model.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ListAgents {}
