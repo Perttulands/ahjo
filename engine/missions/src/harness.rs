@@ -67,8 +67,59 @@ pub fn harness_word(id: &str) -> &str {
     }
 }
 
-/// The effort policy, one line, for messages that ask for an effort.
-const EFFORT_POLICY: &str = "low for errands (verifier, scout); medium for making things (builder, debugger, operator); xhigh for architecture and review (reviewer, judge, architect, designer, planner, orchestrator); max for consequential reviews, chosen by hand";
+struct EffortRecommendation {
+    effort: Effort,
+    usage: &'static str,
+    agent_ids: &'static [&'static str],
+}
+
+const DEFAULT_EFFORT: Effort = Effort::Medium;
+
+// The current recommendations. Harness/model support is listed separately.
+const EFFORT_POLICY: &[EffortRecommendation] = &[
+    EffortRecommendation {
+        effort: Effort::Low,
+        usage: "errands",
+        agent_ids: &["scout", "verifier"],
+    },
+    EffortRecommendation {
+        effort: DEFAULT_EFFORT,
+        usage: "making things and other substantive work",
+        agent_ids: &[],
+    },
+    EffortRecommendation {
+        effort: Effort::High,
+        usage: "architecture and review",
+        agent_ids: &[
+            "architect",
+            "designer",
+            "judge",
+            "orchestrator",
+            "planner",
+            "reviewer",
+        ],
+    },
+    EffortRecommendation {
+        effort: Effort::Xhigh,
+        usage: "particularly consequential reviews, deliberately selected",
+        agent_ids: &[],
+    },
+];
+
+pub(crate) fn starter_effort(agent_id: &str) -> Effort {
+    EFFORT_POLICY
+        .iter()
+        .find(|entry| entry.agent_ids.contains(&agent_id))
+        .map_or(DEFAULT_EFFORT, |entry| entry.effort)
+}
+
+fn effort_policy_text() -> String {
+    EFFORT_POLICY
+        .iter()
+        .map(|entry| format!("{} for {}", entry.effort, entry.usage))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
 
 /// What this host knows about harness models: the efforts each Codex model
 /// accepts, from the Codex CLI's model cache.
@@ -120,25 +171,20 @@ impl Harnesses {
             .map(|known| HarnessChoices {
                 id: known.id,
                 efforts: known.efforts.to_vec(),
-                default_effort: Effort::Medium,
+                default_effort: DEFAULT_EFFORT,
                 models: self.models(known.id.as_str()),
             })
             .collect()
     }
 
     pub fn effort_policy() -> Vec<EffortPolicy> {
-        [
-            (Effort::Low, "errands"),
-            (Effort::Medium, "making things"),
-            (Effort::Xhigh, "architecture and review"),
-            (Effort::Max, "consequential reviews"),
-        ]
-        .into_iter()
-        .map(|(effort, usage)| EffortPolicy {
-            effort,
-            usage: usage.into(),
-        })
-        .collect()
+        EFFORT_POLICY
+            .iter()
+            .map(|entry| EffortPolicy {
+                effort: entry.effort,
+                usage: entry.usage.into(),
+            })
+            .collect()
     }
 
     fn models(&self, harness: &str) -> Vec<HarnessModel> {
@@ -207,7 +253,8 @@ impl Harnesses {
             }
             if effort.is_empty() {
                 return Err(format!(
-                    "{subject} needs an effort; the policy is {EFFORT_POLICY}"
+                    "{subject} needs an effort; the policy is {}",
+                    effort_policy_text()
                 ));
             }
             // A model whose levels the host knows narrows the harness's efforts.
@@ -295,6 +342,22 @@ fn codex_home() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_effort_explains_the_same_policy_as_the_catalog() {
+        let text = Harnesses::effort_policy()
+            .iter()
+            .map(|entry| format!("{} for {}", entry.effort, entry.usage))
+            .collect::<Vec<_>>()
+            .join("; ");
+        assert_eq!(
+            Harnesses::default()
+                .check("seat", "openai-codex", "", "")
+                .unwrap_err()
+                .message,
+            format!("seat needs an effort; the policy is {text}")
+        );
+    }
 
     #[test]
     fn a_known_codex_model_narrows_the_efforts() {

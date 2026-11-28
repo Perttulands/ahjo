@@ -123,7 +123,7 @@ pub(crate) fn upgrade(dir: &Path) -> Result<(), Error> {
                 instructions: (*summary).to_owned(),
                 harness: Harness::ClaudeCode,
                 model: String::new(),
-                effort: default_effort(id),
+                effort: crate::harness::starter_effort(id),
                 notes: Vec::new(),
             },
         );
@@ -137,7 +137,7 @@ pub(crate) fn upgrade(dir: &Path) -> Result<(), Error> {
                 continue;
             }
         };
-        match parse_role(&id, &source) {
+        match parse_role(&id, &source, crate::harness::starter_effort(&id)) {
             Ok((agent, is_retired)) => {
                 roles.insert(id.clone(), agent);
                 if is_retired {
@@ -314,10 +314,16 @@ pub(crate) fn upgrade(dir: &Path) -> Result<(), Error> {
 
 /// Convert a frozen role source without touching the filesystem.
 pub(crate) fn agent_from_role(id: &str, raw: &str) -> Result<Agent, Error> {
-    parse_role(id, raw).map(|(agent, _)| agent)
+    // Retain the original conversion of frozen run snapshots.
+    let effort = match id {
+        "scout" => Effort::Low,
+        "reviewer" | "judge" | "planner" | "orchestrator" => Effort::Xhigh,
+        _ => Effort::Medium,
+    };
+    parse_role(id, raw, effort).map(|(agent, _)| agent)
 }
 
-fn parse_role(id: &str, source: &str) -> Result<(Agent, bool), Error> {
+fn parse_role(id: &str, source: &str, effort: Effort) -> Result<(Agent, bool), Error> {
     let file: OldFile = toml::from_str(source).map_err(|error| {
         Error::new("invalid_definition_source", format!("role {id:?}: {error}"))
     })?;
@@ -355,7 +361,7 @@ fn parse_role(id: &str, source: &str) -> Result<(Agent, bool), Error> {
             instructions,
             harness: Harness::ClaudeCode,
             model: String::new(),
-            effort: default_effort(id),
+            effort,
             notes: file
                 .notes
                 .into_iter()
@@ -373,12 +379,4 @@ fn parse_role(id: &str, source: &str) -> Result<(Agent, bool), Error> {
 fn write_new(path: &Path, agent: &Agent) -> Result<(), Error> {
     let text = crate::agents::encode_agent(agent)?;
     crate::write::atomic(path, text.as_bytes()).map_err(crate::error::io)
-}
-
-fn default_effort(id: &str) -> Effort {
-    match id {
-        "scout" => Effort::Low,
-        "reviewer" | "judge" | "planner" | "orchestrator" => Effort::Xhigh,
-        _ => Effort::Medium,
-    }
 }

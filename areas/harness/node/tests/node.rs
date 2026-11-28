@@ -235,7 +235,34 @@ async fn agent_commands_keep_versions_and_usage_and_archive() {
             .unwrap()
             .contains(&json!("ultra"))
     );
-    assert!(listed["effort_policy"].is_array());
+    let policy = listed["effort_policy"].as_array().unwrap();
+    assert_eq!(
+        policy
+            .iter()
+            .map(|entry| &entry["effort"])
+            .collect::<Vec<_>>(),
+        vec![
+            &json!("low"),
+            &json!("medium"),
+            &json!("high"),
+            &json!("xhigh")
+        ]
+    );
+    assert!(
+        policy[3]["usage"]
+            .as_str()
+            .unwrap()
+            .contains("deliberately selected")
+    );
+    assert_eq!(
+        listed["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|agent| agent["id"] == "reviewer")
+            .unwrap()["effort"],
+        "high"
+    );
     let changed = node
         .call(
             "agent_edit",
