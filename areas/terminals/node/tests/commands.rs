@@ -415,6 +415,51 @@ async fn sends_text_into_a_session() {
     node.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn session_read_and_send_report_the_same_tmux_blocker() {
+    let Some(node) = Node::start("send-read-blocker").await else {
+        return;
+    };
+    node.tmux.run(&["copy-mode", "-t", "alpha"]);
+    let read = node
+        .call("session_read", json!({"session":"alpha"}))
+        .await
+        .unwrap();
+    assert_eq!(read["input_blocked"], "copy-mode");
+    let error = node
+        .node
+        .call(
+            "session_send",
+            json!({"session":"alpha", "text":"echo should-not-appear"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "pane_input_blocked");
+    assert!(error.message.contains("copy-mode"), "{error}");
+    assert!(!capture(&node.tmux, "alpha").contains("should-not-appear"));
+    assert_eq!(node.tmux.display("alpha", "#{pane_mode}"), "copy-mode");
+
+    node.tmux.run(&[
+        "set-hook",
+        "-t",
+        "alpha",
+        "after-paste-buffer",
+        "copy-mode -t alpha",
+    ]);
+    node.tmux.run(&["send-keys", "-t", "alpha", "-X", "cancel"]);
+    let error = node
+        .node
+        .call(
+            "session_send",
+            json!({"session":"alpha", "text":"echo kept-as-draft"}),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, "not_submitted");
+    assert!(error.message.contains("copy-mode"), "{error}");
+    node.stop().await;
+}
+
 /// Without a pane, a send and a read go to the pane the operator is on,
 /// not to the first window's shell, where the text would run.
 #[tokio::test(flavor = "multi_thread")]

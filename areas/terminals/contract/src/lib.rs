@@ -37,6 +37,10 @@ pub type PaneId = u32;
 /// A session command that could not do what it was asked; the message
 /// says why.
 pub const COMMAND_FAILED: &str = "session_failed";
+/// A pane mode intercepted input or input was disabled before delivery.
+pub const PANE_INPUT_BLOCKED: &str = "pane_input_blocked";
+/// Text may be in the pane, but submission was withheld or unconfirmed.
+pub const NOT_SUBMITTED: &str = "not_submitted";
 
 /// A flag catalogue request named an unconfigured harness.
 pub const UNKNOWN_HARNESS: &str = "unknown_harness";

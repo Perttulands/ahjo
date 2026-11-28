@@ -38,6 +38,11 @@ pub trait Backend: Send + Sync + 'static {
         None
     }
 
+    /// Whether the backend supports tmux's pane modes and input guard formats.
+    fn has_pane_modes(&self) -> bool {
+        false
+    }
+
     /// Start an owned session at a fixed size.
     fn create_session<'a>(&'a self, spec: &'a crate::SessionSpec) -> Reply<'a, crate::SessionRef>;
 

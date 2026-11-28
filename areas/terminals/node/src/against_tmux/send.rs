@@ -10,7 +10,7 @@
 
 use std::time::{Duration, Instant};
 
-use ahjo_term::engine::{Engine, NotReady, NotSubmitted};
+use ahjo_term::engine::{Engine, NotReady, NotSubmitted, PaneInputBlocked};
 use ahjo_testkit::fresh_dir;
 use ahjo_testkit::tmux::{Server, eventually, write_script};
 
@@ -85,6 +85,102 @@ async fn enter_waits_for_the_paste_to_settle() {
         started.elapsed()
     );
     assert_eq!(read_back(&server, &engine, pane, &file).await, "hello\n");
+    engine.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pane_modes_and_disabled_input_leave_the_existing_draft_alone() {
+    let Some(server) = Server::start() else {
+        return;
+    };
+    let file = scratch_file(&server, "blocked");
+    cat_session(&server, &file);
+    let engine = Engine::start(server.socket());
+    let pane = seeded_pane(&engine).await;
+    server.run(&["send-keys", "-t", "agent", "-l", "human draft"]);
+    eventually("the draft on the pane", || {
+        server
+            .run(&["capture-pane", "-p", "-t", "agent"])
+            .contains("human draft")
+            .then_some(())
+    })
+    .await;
+    for (command, expected) in [("copy-mode", "copy-mode"), ("choose-tree", "tree-mode")] {
+        server.run(&[command, "-t", "agent"]);
+        assert_eq!(
+            engine.input_blocked(pane).await.unwrap().as_deref(),
+            Some(expected)
+        );
+        for (text, enter) in [
+            ("unwanted paste", false),
+            ("unwanted prompt", true),
+            ("", true),
+        ] {
+            let error = engine
+                .deliver(pane, text.into(), enter)
+                .await
+                .unwrap()
+                .await
+                .unwrap_err();
+            assert!(error.is::<PaneInputBlocked>(), "{error:#}");
+            assert!(format!("{error:#}").contains(expected), "{error:#}");
+        }
+        assert_eq!(server.display("agent", "#{pane_mode}"), expected);
+        server.run(&["send-keys", "-t", "agent", "q"]);
+    }
+    server.run(&["select-pane", "-t", "agent", "-d"]);
+    assert_eq!(
+        engine.input_blocked(pane).await.unwrap().as_deref(),
+        Some("input-disabled")
+    );
+    let error = engine
+        .deliver(pane, "unwanted prompt".into(), true)
+        .await
+        .unwrap()
+        .await
+        .unwrap_err();
+    assert!(error.is::<PaneInputBlocked>(), "{error:#}");
+    assert_eq!(server.display("agent", "#{pane_input_off}"), "1");
+    server.run(&["select-pane", "-t", "agent", "-e"]);
+    assert_eq!(
+        read_back(&server, &engine, pane, &file).await,
+        "human draft"
+    );
+    engine.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_mode_entered_after_the_paste_leaves_the_text_without_enter() {
+    let Some(server) = Server::start() else {
+        return;
+    };
+    let file = scratch_file(&server, "mode-after-paste");
+    cat_session(&server, &file);
+    let engine = Engine::start(server.socket());
+    let pane = seeded_pane(&engine).await;
+    // tmux runs this hook after the paste and before Ahjo's distinct submit.
+    server.run(&[
+        "set-hook",
+        "-t",
+        "agent",
+        "after-paste-buffer",
+        "copy-mode -t agent",
+    ]);
+    let error = engine
+        .deliver(pane, "keep this draft".into(), true)
+        .await
+        .unwrap()
+        .await
+        .unwrap_err();
+    assert!(error.is::<NotSubmitted>(), "{error:#}");
+    assert!(error.to_string().contains("withheld Enter"), "{error:#}");
+    assert!(error.to_string().contains("copy-mode"), "{error:#}");
+    assert_eq!(server.display("agent", "#{pane_mode}"), "copy-mode");
+    server.run(&["send-keys", "-t", "agent", "-X", "cancel"]);
+    assert_eq!(
+        read_back(&server, &engine, pane, &file).await,
+        "keep this draft"
+    );
     engine.stop().await;
 }
 

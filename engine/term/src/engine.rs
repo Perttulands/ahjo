@@ -40,7 +40,7 @@ use crate::utf8::Utf8Gate;
 
 mod delivery;
 use delivery::{Deliveries, Delivery, Readiness};
-pub use delivery::{Delivering, NotReady, NotSubmitted};
+pub use delivery::{Delivering, NotReady, NotSubmitted, PaneInputBlocked};
 
 /// How long a delivery into a just-launched pane waits for the pane to get
 /// ready for a paste (#242): an agent harness can take seconds to start.
@@ -697,6 +697,26 @@ impl Engine {
             session.requests.clone()
         };
         tell(&requests, Request::Input(pane, data)).await
+    }
+
+    /// Reads a reason tmux will intercept or ignore input, without sending any.
+    pub async fn input_blocked(&self, pane: PaneId) -> Result<Option<String>> {
+        let backend = self.backend();
+        if !backend.has_pane_modes() {
+            return Ok(None);
+        }
+        let target = format!("%{pane}");
+        let reason = backend
+            .command(&[
+                "display-message",
+                "-p",
+                "-t",
+                &target,
+                delivery::INPUT_BLOCKER,
+            ])
+            .await?;
+        let reason = reason.trim();
+        Ok((!reason.is_empty()).then(|| reason.to_owned()))
     }
 
     /// Queues text for delivery into a pane as one paste, then Enter once the
@@ -1571,7 +1591,7 @@ async fn follow_inner(
     let mut pending = VecDeque::new();
 
     let mut seat = Seat::default();
-    let mut deliveries = Deliveries::default();
+    let mut deliveries = Deliveries::new(shared.backend.has_pane_modes());
     // When Enter is due for the delivery whose paste is settling.
     let settle = tokio::time::sleep(Duration::ZERO);
     tokio::pin!(settle);

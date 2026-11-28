@@ -77,6 +77,10 @@ impl Socket {
 }
 
 impl Backend for Socket {
+    fn has_pane_modes(&self) -> bool {
+        true
+    }
+
     #[cfg(unix)]
     fn launch_gate(&self, channel: &str) -> Option<String> {
         let program = std::path::PathBuf::from(program());

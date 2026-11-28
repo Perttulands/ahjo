@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 #[serde(deny_unknown_fields)]
 pub struct SessionList {}
 
-/// Read a pane's screen, or its scrollback and screen with --lines or --all.
+/// Read a pane's screen and input blocker. Use --lines or --all for scrollback.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionRead {
@@ -25,7 +25,7 @@ pub struct SessionRead {
     pub all: Option<bool>,
 }
 
-/// Paste text into a session's pane and press Enter unless disabled.
+/// Paste text and normally press Enter. The receipt confirms transport only.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SessionSend {
@@ -237,6 +237,9 @@ pub struct SessionReadout {
     pub pane: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cut: Option<String>,
+    /// An active tmux pane mode or input-disabled, sampled when read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_blocked: Option<String>,
     pub text: String,
 }
 

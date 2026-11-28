@@ -47,6 +47,7 @@ impl Area for Screens {
                     session: read.session,
                     pane: 1,
                     cut: None,
+                    input_blocked: None,
                     text: SCREEN.into(),
                 })
             }),

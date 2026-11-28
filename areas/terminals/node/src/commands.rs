@@ -8,7 +8,9 @@ use std::time::UNIX_EPOCH;
 
 use ahjo_core::{Error, NodeId};
 use ahjo_node_kit::{Command, Effect};
-use ahjo_terminals_contract::{COMMAND_FAILED, MAX_SEND, commands::*};
+use ahjo_terminals_contract::{
+    COMMAND_FAILED, MAX_SEND, NOT_SUBMITTED, PANE_INPUT_BLOCKED, commands::*,
+};
 use anyhow::{Context, Result, bail};
 use futures_util::{StreamExt, stream};
 use schemars::JsonSchema;
@@ -53,7 +55,14 @@ where
 }
 
 fn failed(error: anyhow::Error) -> Error {
-    Error::new(COMMAND_FAILED, format!("{error:#}"))
+    let code = if error.is::<ahjo_term::engine::PaneInputBlocked>() {
+        PANE_INPUT_BLOCKED
+    } else if error.is::<ahjo_term::engine::NotSubmitted>() {
+        NOT_SUBMITTED
+    } else {
+        COMMAND_FAILED
+    };
+    Error::new(code, format!("{error:#}"))
 }
 
 pub(crate) fn commands(ctx: &Arc<Ctx>) -> Vec<Command> {
@@ -294,8 +303,9 @@ async fn read(ctx: Arc<Ctx>, args: SessionRead) -> Result<SessionReadout> {
         bail!("give lines or all, not both");
     }
     let (session, pane) = target(&ctx, &args.session, args.pane).await?;
+    let (server, own) = ctx.hub.pane(pane).context("the pane went")?;
+    let input_blocked = server.engine.input_blocked(own).await?;
     let (cut, text) = if all || args.lines.is_some() {
-        let (server, own) = ctx.hub.pane(pane).context("the pane went")?;
         let capture = search::capture(server.backend(), own).await?;
         let plain = strip_escapes(&capture);
         let lines: Vec<_> = plain.trim_end().lines().collect();
@@ -316,6 +326,7 @@ async fn read(ctx: Arc<Ctx>, args: SessionRead) -> Result<SessionReadout> {
         session: session.id,
         pane,
         cut,
+        input_blocked,
         text,
     })
 }

@@ -83,31 +83,69 @@ impl Pace {
 }
 
 /// What became of a delivery.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Debug)]
 pub(super) enum Heard {
     /// tmux took the text, and the Enter if asked.
     Delivered,
     /// Nothing went in, or only the Enter of an empty text failed.
     Refused,
     /// The text was pasted and its Enter was not pressed.
-    Pasted,
+    Pasted(Option<PaneInputBlocked>),
+    /// A tmux mode would intercept input before any text went in.
+    Blocked(PaneInputBlocked),
     /// The pane never got ready for the paste: nothing went in.
     NotReady,
 }
 
-/// The error of a delivery whose text was pasted but whose Enter was not
-/// pressed: the pane's program changed, or tmux refused the key. Whether
-/// the text reached anyone is unknown, so it is not to be sent again blind.
+/// tmux names its active pane mode, or reports that input is disabled.
 #[derive(Debug)]
-pub struct NotSubmitted;
+pub struct PaneInputBlocked(String);
+
+impl std::fmt::Display for PaneInputBlocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0.as_str() {
+            "input-disabled" => f.write_str("tmux pane input is disabled"),
+            mode => write!(f, "tmux pane is in {mode}"),
+        }
+    }
+}
+
+impl std::error::Error for PaneInputBlocked {}
+
+/// A paste may be in the pane and its submission has not been confirmed.
+#[derive(Debug)]
+pub struct NotSubmitted(Option<PaneInputBlocked>);
 
 impl std::fmt::Display for NotSubmitted {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("the text was pasted but Enter was not pressed")
+        if let Some(blocker) = &self.0 {
+            write!(
+                f,
+                "tmux accepted the paste but Ahjo withheld Enter because {blocker}"
+            )?;
+        } else {
+            f.write_str("the text may be in the pane and submission could not be confirmed")?;
+        }
+        f.write_str(". Inspect the pane before sending again")
     }
 }
 
 impl std::error::Error for NotSubmitted {}
+
+// Keep the guard and the diagnostic read on the same tmux format.
+pub(super) const INPUT_BLOCKER: &str =
+    "#{?pane_input_off,input-disabled,#{?pane_in_mode,#{?pane_mode,#{pane_mode},pane-mode},}}";
+
+fn guarded_input(pane: PaneId, pid: Option<&str>, command: &str) -> String {
+    let available = format!("#{{==:{INPUT_BLOCKER},}}");
+    let condition = match pid {
+        Some(pid) => format!("#{{&&:{available},#{{==:#{{pane_pid}},{pid}}}}}"),
+        None => available,
+    };
+    format!(
+        "if-shell -F -t %{pane} '{condition}' '{command}' 'display-message -p -t %{pane} \"#{{?{INPUT_BLOCKER},blocked:{INPUT_BLOCKER},target-changed}}\"'"
+    )
+}
 
 /// The error of a delivery that waited for its pane to get ready for a
 /// paste, which did not in time or asks the operator something. Nothing
@@ -256,7 +294,12 @@ impl Future for Delivering {
         Pin::new(&mut self.heard).poll(cx).map(|heard| match heard {
             Ok(Heard::Delivered) => Ok(()),
             Ok(Heard::Refused) => bail!("tmux refused the text"),
-            Ok(Heard::Pasted) => Err(NotSubmitted.into()),
+            Ok(Heard::Pasted(blocker)) => Err(NotSubmitted(blocker).into()),
+            Ok(Heard::Blocked(blocker)) => {
+                Err(anyhow::Error::new(blocker).context(
+                    "no input was sent. Inspect the pane and let the operator leave the mode or restore input",
+                ))
+            }
             Ok(Heard::NotReady) => Err(NotReady.into()),
             Err(_) => bail!("session is gone"),
         })
@@ -269,7 +312,7 @@ pub(super) enum Step {
     Pid,
     /// Loading and pasting the buffer.
     Paste,
-    /// The guarded command and its selected branch each reply in control mode.
+    /// The tmux guard and its selected branch each reply in control mode.
     Guard,
     GuardResult,
     Submit,
@@ -304,14 +347,17 @@ struct Current {
     /// Text was asked to be pasted and tmux took it.
     pasting: bool,
     paste_failed: bool,
+    blocked: Option<PaneInputBlocked>,
 }
 
 impl Current {
-    fn heard(&self) -> Heard {
+    fn heard(&mut self) -> Heard {
         if !self.failed {
             Heard::Delivered
         } else if self.pasting && !self.paste_failed {
-            Heard::Pasted
+            Heard::Pasted(self.blocked.take())
+        } else if let Some(blocker) = self.blocked.take() {
+            Heard::Blocked(blocker)
         } else {
             Heard::Refused
         }
@@ -320,20 +366,29 @@ impl Current {
     /// Asks tmux for the pane's pid and to paste the text, from the
     /// session's own buffer, so sessions delivering at once never paste
     /// each other's text.
-    fn paste(&mut self, session: &str, out: &mut String, pending: &mut VecDeque<Pending>) {
+    fn paste(
+        &mut self,
+        session: &str,
+        has_pane_modes: bool,
+        out: &mut String,
+        pending: &mut VecDeque<Pending>,
+    ) {
         let text = std::mem::take(&mut self.text);
         let pane = self.pane;
-        let buffer = format!("ahjo-send-{}", session.trim_start_matches('$'));
+        let buffer = buffer_name(session);
+        let paste = format!("paste-buffer -p -d -b {buffer} -t %{pane}");
+        let paste = if has_pane_modes {
+            (guarded_input(pane, None, &paste), Step::Guard)
+        } else {
+            (paste, Step::Paste)
+        };
         let steps = [
             (pid_command(pane), Step::Pid),
             (
                 format!("set-buffer -b {buffer} -- {}", control::quote(&text)),
                 Step::Paste,
             ),
-            (
-                format!("paste-buffer -p -d -b {buffer} -t %{pane}"),
-                Step::Paste,
-            ),
+            paste,
         ];
         self.phase = Phase::Pasting;
         self.pasting = true;
@@ -354,11 +409,20 @@ enum Queued {
 /// A session's deliveries: the one in flight and what waits its turn.
 #[derive(Default)]
 pub(super) struct Deliveries {
+    has_pane_modes: bool,
     queue: VecDeque<Queued>,
     current: Option<Current>,
 }
 
 impl Deliveries {
+    pub fn new(has_pane_modes: bool) -> Self {
+        Self {
+            has_pane_modes,
+            current: None,
+            queue: VecDeque::new(),
+        }
+    }
+
     /// Queues a delivery, and starts it if none is in flight.
     pub fn push(
         &mut self,
@@ -454,7 +518,7 @@ impl Deliveries {
         let heard = match readiness {
             Readiness::Gone => Heard::Refused,
             Readiness::Ready if quiet => {
-                current.paste(session, out, pending);
+                current.paste(session, self.has_pane_modes, out, pending);
                 return;
             }
             Readiness::Asking if quiet => Heard::NotReady,
@@ -499,15 +563,16 @@ impl Deliveries {
             current.outstanding = 0;
             return;
         };
-        send(
-            out,
-            pending,
+        let pane = current.pane;
+        let enter = format!("send-keys -t %{pane} Enter");
+        let command = if self.has_pane_modes {
+            guarded_input(pane, Some(pid), &enter)
+        } else {
             format!(
-                "if-shell -F -t %{} '#{{==:#{{pane_pid}},{pid}}}' 'send-keys -t %{} Enter' 'display-message -p target-changed'",
-                current.pane, current.pane
-            ),
-            Pending::Delivery(Step::Guard),
-        );
+                "if-shell -F -t %{pane} '#{{==:#{{pane_pid}},{pid}}}' '{enter}' 'display-message -p target-changed'"
+            )
+        };
+        send(out, pending, command, Pending::Delivery(Step::Guard));
     }
 
     /// Handles the reply to a delivery's command.
@@ -531,9 +596,24 @@ impl Deliveries {
                 current.outstanding += 1;
                 pending.push_front(Pending::Delivery(Step::GuardResult));
             }
-            Step::Guard => {}
-            Step::GuardResult if !lines.is_empty() => current.failed = true,
-            Step::GuardResult => {}
+            Step::Guard | Step::GuardResult => {
+                if let Some(reason) = lines.first().and_then(|line| line.strip_prefix("blocked:")) {
+                    current.blocked = Some(PaneInputBlocked(reason.to_owned()));
+                }
+                let branch_failed = !ok || !lines.is_empty();
+                current.failed |= branch_failed;
+                if branch_failed && matches!(current.phase, Phase::Pasting) {
+                    current.paste_failed = true;
+                    // A refusal leaves our named buffer behind. Remove only that buffer.
+                    let buffer = buffer_name(session);
+                    send(
+                        out,
+                        pending,
+                        format!("delete-buffer -b {buffer}"),
+                        Pending::Input,
+                    );
+                }
+            }
             Step::Paste => current.paste_failed |= !ok,
             Step::Submit => {}
         }
@@ -552,7 +632,7 @@ impl Deliveries {
                 return;
             }
         }
-        let current = self.current.take().expect("a delivery in flight");
+        let mut current = self.current.take().expect("a delivery in flight");
         let heard = current.heard();
         let _ = current.done.send(heard);
         self.start_next(session, out, pending);
@@ -599,6 +679,7 @@ impl Deliveries {
                 failed: false,
                 pasting: false,
                 paste_failed: false,
+                blocked: None,
             };
             match ready {
                 _ if current.text.is_empty() => {}
@@ -610,18 +691,20 @@ impl Deliveries {
                         check: now + pace.quiet().min(wait),
                     };
                 }
-                None => current.paste(session, out, pending),
+                None => current.paste(session, self.has_pane_modes, out, pending),
             }
             if current.text.is_empty() && !current.pasting && enter {
                 // Nothing pasted, so nothing to settle.
                 current.phase = Phase::Submitting;
                 current.outstanding = 1;
-                send(
-                    out,
-                    pending,
-                    format!("send-keys -t %{pane} Enter"),
-                    Pending::Delivery(Step::Submit),
-                );
+                let pane = current.pane;
+                let enter = format!("send-keys -t %{pane} Enter");
+                let (command, step) = if self.has_pane_modes {
+                    (guarded_input(pane, None, &enter), Step::Guard)
+                } else {
+                    (enter, Step::Submit)
+                };
+                send(out, pending, command, Pending::Delivery(step));
             } else if current.text.is_empty() && !current.pasting {
                 let _ = current.done.send(Heard::Delivered);
                 continue;
@@ -640,13 +723,17 @@ impl Drop for Deliveries {
     fn drop(&mut self) {
         if let Some(current) = self.current.take() {
             let heard = if current.pasting && !current.paste_failed {
-                Heard::Pasted
+                Heard::Pasted(None)
             } else {
                 Heard::Refused
             };
             let _ = current.done.send(heard);
         }
     }
+}
+
+fn buffer_name(session: &str) -> String {
+    format!("ahjo-send-{}", session.trim_start_matches('$'))
 }
 
 fn pid_command(pane: PaneId) -> String {
